@@ -36,7 +36,10 @@
       <!-- Navigation -->
       <div class="sidebar-section">
         <div class="sidebar-label">Navigation</div>
-        <div class="sidebar-item active" id="nav-chat" data-view="view-chat">
+        <div class="sidebar-item active" id="nav-dashboard" data-view="view-dashboard">
+          <span class="icon">🏠</span> Home
+        </div>
+        <div class="sidebar-item" id="nav-chat" data-view="view-chat">
           <span class="icon">💬</span> Chat
         </div>
         <div class="sidebar-item" id="nav-documents" data-view="view-documents">
@@ -107,8 +110,118 @@
       </div>
     </aside>
 
-    <!-- ── Chat view (default) ──────────────────────────────────────────────── -->
-    <main class="chat-container" id="view-chat">
+    <!-- ── Home Dashboard ─────────────────────────────────────────────────── -->
+    <main class="dash-container" id="view-dashboard">
+
+      <!-- Header -->
+      <div class="dash-header">
+        <div class="dash-header-left">
+          <span class="dash-icon">🏠</span>
+          <div>
+            <h2 class="dash-title">Home Dashboard</h2>
+            <p class="dash-subtitle">PharmaGPT v0.8 — System Overview</p>
+          </div>
+        </div>
+        <button class="dash-refresh-btn" onclick="loadDashboard()">↻ Refresh</button>
+      </div>
+
+      <!-- Stat cards -->
+      <div class="dash-stats-grid" id="dash-stats-grid">
+        <div class="dash-stat-card dash-stat-projects">
+          <div class="dash-stat-icon">📁</div>
+          <div class="dash-stat-value" id="dash-stat-projects">—</div>
+          <div class="dash-stat-label">Projects</div>
+        </div>
+        <div class="dash-stat-card dash-stat-val">
+          <div class="dash-stat-icon">🏗</div>
+          <div class="dash-stat-value" id="dash-stat-val">—</div>
+          <div class="dash-stat-label">Validation Projects</div>
+        </div>
+        <div class="dash-stat-card dash-stat-kb">
+          <div class="dash-stat-icon">🗂</div>
+          <div class="dash-stat-value" id="dash-stat-kb">—</div>
+          <div class="dash-stat-label">Knowledge Base Docs</div>
+        </div>
+        <div class="dash-stat-card dash-stat-proto">
+          <div class="dash-stat-icon">📋</div>
+          <div class="dash-stat-value" id="dash-stat-proto">—</div>
+          <div class="dash-stat-label">Protocols Generated</div>
+        </div>
+        <div class="dash-stat-card dash-stat-capa">
+          <div class="dash-stat-icon">🔄</div>
+          <div class="dash-stat-value" id="dash-stat-capa">—</div>
+          <div class="dash-stat-label">Pending CAPAs</div>
+        </div>
+        <div class="dash-stat-card dash-stat-dev">
+          <div class="dash-stat-icon">⚡</div>
+          <div class="dash-stat-value" id="dash-stat-dev">—</div>
+          <div class="dash-stat-label">Pending Deviations</div>
+        </div>
+      </div>
+
+      <!-- Main grid -->
+      <div class="dash-grid">
+
+        <!-- Recent Activity -->
+        <div class="dash-card" id="dash-recent-activity">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Recent Activity</span>
+            <span class="dash-card-icon">⚡</span>
+          </div>
+          <div class="dash-card-body" id="dash-activity-body">
+            <div class="dash-loading">Loading…</div>
+          </div>
+        </div>
+
+        <!-- Recent Projects -->
+        <div class="dash-card" id="dash-recent-projects-card">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Recent Projects</span>
+            <span class="dash-card-icon">📁</span>
+          </div>
+          <div class="dash-card-body" id="dash-projects-body">
+            <div class="dash-loading">Loading…</div>
+          </div>
+        </div>
+
+        <!-- Upcoming Reviews -->
+        <div class="dash-card" id="dash-upcoming-card">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Upcoming Reviews</span>
+            <span class="dash-card-icon">📅</span>
+          </div>
+          <div class="dash-card-body" id="dash-upcoming-body">
+            <div class="dash-loading">Loading…</div>
+          </div>
+        </div>
+
+        <!-- Recent AI Conversations -->
+        <div class="dash-card" id="dash-convs-card">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Recent AI Conversations</span>
+            <span class="dash-card-icon">💬</span>
+          </div>
+          <div class="dash-card-body" id="dash-convs-body">
+            <div class="dash-loading">Loading…</div>
+          </div>
+        </div>
+
+        <!-- System Health -->
+        <div class="dash-card dash-card-health" id="dash-health-card">
+          <div class="dash-card-header">
+            <span class="dash-card-title">System Health</span>
+            <span class="dash-card-icon">🩺</span>
+          </div>
+          <div class="dash-card-body" id="dash-health-body">
+            <div class="dash-loading">Loading…</div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+
+    <!-- ── Chat view ────────────────────────────────────────────────────────── -->
+    <main class="chat-container" id="view-chat" style="display:none">
 
       <!-- Active project banner -->
       <div id="active-project-banner" class="active-project-banner" style="display:none">
@@ -744,7 +857,8 @@
     </form>
   </div>
 
-  <!-- Load order: projects → documents → insights → validation_config → validation → knowledge_base → val_workspace → chat -->
+  <!-- Load order: dashboard → projects → documents → insights → validation_config → validation → knowledge_base → val_workspace → chat -->
+  <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
   <script src="{{ url_for('static', filename='js/projects.js') }}"></script>
   <script src="{{ url_for('static', filename='js/documents.js') }}"></script>
   <script src="{{ url_for('static', filename='js/insights.js') }}"></script>
@@ -854,6 +968,10 @@
 
         if (targetId === "view-val-workspace") {
           if (window.initVW) window.initVW();
+        }
+
+        if (targetId === "view-dashboard") {
+          if (window.loadDashboard) window.loadDashboard();
         }
       });
     });

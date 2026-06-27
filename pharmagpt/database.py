@@ -693,3 +693,85 @@ def get_kb_folder_counts() -> dict:
     ).fetchall()
     conn.close()
     return {r["folder"]: r["cnt"] for r in rows}
+
+
+# ── Dashboard stats ───────────────────────────────────────────────────────────
+
+def get_dashboard_stats() -> dict:
+    """Return all data needed by the Home Dashboard in one query round-trip."""
+    conn = get_connection()
+
+    counts = conn.execute("""
+        SELECT
+            (SELECT COUNT(*) FROM projects)                                   AS projects,
+            (SELECT COUNT(*) FROM val_projects)                               AS val_projects,
+            (SELECT COUNT(*) FROM kb_documents)                               AS kb_documents,
+            (SELECT COUNT(*) FROM generated_documents)                        AS protocols_generated,
+            (SELECT COUNT(*) FROM generated_documents WHERE doc_type='CAPA')  AS pending_capas,
+            (SELECT COUNT(*) FROM generated_documents WHERE doc_type='Deviation') AS pending_deviations
+    """).fetchone()
+
+    recent_projects = conn.execute(
+        """SELECT id, name, equipment_name, validation_type, created_at
+           FROM projects ORDER BY created_at DESC LIMIT 5"""
+    ).fetchall()
+
+    recent_convs = conn.execute(
+        """SELECT m.project_id, p.name AS project_name,
+                  SUBSTR(m.content, 1, 160) AS snippet, m.created_at
+           FROM messages m
+           JOIN projects p ON p.id = m.project_id
+           WHERE m.role = 'model'
+           ORDER BY m.created_at DESC LIMIT 5"""
+    ).fetchall()
+
+    recent_activity = conn.execute(
+        """SELECT 'audit'    AS type, vat.action  AS title, vp.name  AS context, vat.created_at
+           FROM val_audit_trail vat JOIN val_projects vp ON vp.id = vat.val_proj_id
+           UNION ALL
+           SELECT 'document' AS type, d.original_name AS title, p.name AS context, d.upload_date AS created_at
+           FROM documents d JOIN projects p ON p.id = d.project_id
+           UNION ALL
+           SELECT 'kb'       AS type, kb.title AS title, kb.folder AS context, kb.upload_date AS created_at
+           FROM kb_documents kb
+           UNION ALL
+           SELECT 'protocol' AS type, gd.title AS title, p.name AS context, gd.created_at
+           FROM generated_documents gd JOIN projects p ON p.id = gd.project_id
+           ORDER BY created_at DESC LIMIT 10"""
+    ).fetchall()
+
+    upcoming_reviews = conn.execute(
+        """SELECT title, folder, review_date, doc_version
+           FROM kb_documents
+           WHERE review_date IS NOT NULL AND review_date >= date('now')
+           ORDER BY review_date ASC LIMIT 5"""
+    ).fetchall()
+
+    upcoming_val = conn.execute(
+        """SELECT name, equipment_name, target_date, status, validation_type
+           FROM val_projects
+           WHERE target_date IS NOT NULL AND target_date >= date('now') AND status != 'Completed'
+           ORDER BY target_date ASC LIMIT 5"""
+    ).fetchall()
+
+    health = conn.execute("""
+        SELECT
+            (SELECT COUNT(*) FROM documents)                                        AS total_docs,
+            (SELECT COUNT(*) FROM document_text WHERE extraction_status = 'ok')     AS extracted_ok,
+            (SELECT COUNT(*) FROM document_text WHERE extraction_status = 'error')  AS extracted_error,
+            (SELECT COUNT(*) FROM messages)                                         AS total_messages,
+            (SELECT COUNT(*) FROM val_audit_trail)                                  AS audit_entries,
+            (SELECT COUNT(*) FROM kb_documents WHERE extraction_status = 'ok')      AS kb_extracted_ok
+    """).fetchone()
+
+    conn.close()
+
+    return {
+        "counts":               dict(counts),
+        "recent_projects":      [dict(r) for r in recent_projects],
+        "recent_conversations": [dict(r) for r in recent_convs],
+        "recent_activity":      [dict(r) for r in recent_activity],
+        "upcoming_reviews":     [dict(r) for r in upcoming_reviews],
+        "upcoming_validations": [dict(r) for r in upcoming_val],
+        "system_health":        dict(health),
+    }

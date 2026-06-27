@@ -802,6 +802,16 @@ def vp_add_audit(vp_id):
     return jsonify(entry), 201
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# DASHBOARD ROUTE  (v0.8)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/dashboard/stats", methods=["GET"])
+def dashboard_stats():
+    """Return aggregated stats for the Home Dashboard."""
+    return jsonify(db.get_dashboard_stats())
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
