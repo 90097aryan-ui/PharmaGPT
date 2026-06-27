@@ -1,21 +1,21 @@
 """
 services/document_search.py — Relevance search over extracted document text.
 
-Architecture — v0.5 (keyword-based):
-──────────────────────────────────────
-1. Split each document's extracted text into overlapping chunks (~400 words).
-2. Score each chunk against the user's query using keyword overlap (TF-IDF-like).
-3. Return the top-k chunks, tagged with their source document name and id.
-4. Assemble a formatted context block to inject into the Gemini prompt.
+Keyword-based RAG pipeline (v0.5+)
+-----------------------------------
+1. Load all extracted texts for the project from the database.
+2. Split each document into overlapping word-based chunks (~400 words).
+3. Score each chunk against the query using keyword overlap (Jaccard-style).
+4. Return the top-k chunks, tagged with their source document name and id.
+5. Assemble a formatted context block ready to inject into the Gemini prompt.
 
-Architecture — v0.6+ (RAG / vector-based, stubs below):
-──────────────────────────────────────────────────────────
-Replace score_chunk() with:
-  - generate_embedding(text) → vector  (Gemini Embeddings or Sentence Transformers)
-  - upsert_to_vector_store(doc_id, chunks, vectors)  (ChromaDB / FAISS / Pinecone)
-  - vector_search(query_vector, top_k) → [(chunk, doc_id, score)]
-
-The rest of the pipeline (context assembly, source tracking) stays the same.
+Planned upgrade (v0.8)
+-----------------------
+Replace score_chunk() with semantic vector search:
+  - generate_embedding(text) → vector  (Gemini Embeddings API)
+  - store vectors in a new document_embeddings table or ChromaDB
+  - cosine_similarity(query_vector, chunk_vector) replaces Jaccard scoring
+The context-assembly and source-tracking logic below stays unchanged.
 """
 
 import re
@@ -29,7 +29,7 @@ def chunk_text(text: str, chunk_size: int = 400, overlap: int = 60) -> list[str]
     """
     Split text into overlapping word-based chunks.
 
-    overlap ensures that sentences spanning a chunk boundary are not lost.
+    overlap ensures sentences that span a chunk boundary are not lost.
 
     Parameters
     ----------
@@ -39,7 +39,7 @@ def chunk_text(text: str, chunk_size: int = 400, overlap: int = 60) -> list[str]
 
     Returns
     -------
-    list of text chunks (strings)
+    list of non-empty text chunks
     """
     words = text.split()
     if not words:
@@ -49,7 +49,7 @@ def chunk_text(text: str, chunk_size: int = 400, overlap: int = 60) -> list[str]
     step = max(1, chunk_size - overlap)
 
     for i in range(0, len(words), step):
-        chunk = " ".join(words[i: i + chunk_size])
+        chunk = " ".join(words[i : i + chunk_size])
         if chunk.strip():
             chunks.append(chunk)
 
@@ -68,21 +68,20 @@ def _tokenise(text: str) -> set[str]:
 
 def score_chunk(chunk: str, query_tokens: set[str]) -> float:
     """
-    Score a chunk against query tokens.
+    Score a chunk against query tokens using Jaccard-style keyword overlap.
 
-    Uses a simple Jaccard-like overlap weighted by query coverage:
-        score = (matched_query_tokens) / (total_query_tokens + 1)
+        score = matched_query_tokens / (total_query_tokens + 1)
 
-    Also applies a small length penalty so very short chunks score lower.
+    A small length bonus rewards longer chunks — more context is generally
+    more useful when injected into a Gemini prompt.
 
-    v0.6+: Replace with cosine similarity between embedding vectors.
+    Returns 0.0 if query_tokens is empty.
     """
     if not query_tokens:
         return 0.0
     chunk_tokens = _tokenise(chunk)
-    matched = len(query_tokens & chunk_tokens)
-    coverage = matched / (len(query_tokens) + 1)
-    # Small bonus for longer chunks (more context is better)
+    matched      = len(query_tokens & chunk_tokens)
+    coverage     = matched / (len(query_tokens) + 1)
     length_bonus = math.log(max(len(chunk.split()), 1)) / 100
     return coverage + length_bonus
 
@@ -101,19 +100,18 @@ def search_project_documents(
 
     Parameters
     ----------
-    query             : the user's chat message
+    query             : the user's chat message or generation query
     project_id        : project to search within
     top_k             : maximum number of chunks to include
-    max_context_words : hard cap on total words in the returned context
+    max_context_words : hard cap on total words in the returned context block
 
     Returns
     -------
     dict with keys:
-        context_text : str  — formatted block to prepend to the Gemini prompt
-        sources      : list[dict]  — [{id, name}] of cited documents (deduplicated)
-        found        : bool — False if no relevant content was found
+        context_text : str        — formatted block to prepend to the Gemini prompt
+        sources      : list[dict] — [{id, name}] of cited documents (deduplicated)
+        found        : bool       — False if no relevant content was found
     """
-    # Load all extracted texts for the project (joined with document names)
     rows = db.get_all_document_texts(project_id)
 
     if not rows:
@@ -144,19 +142,18 @@ def search_project_documents(
     scored.sort(key=lambda x: x[0], reverse=True)
     selected = scored[:top_k]
 
-    # Enforce max_context_words budget
-    context_parts: list[str] = []
-    sources_seen: dict[int, str] = {}   # doc_id → doc_name (ordered, deduped)
+    # Enforce the word-count budget, truncating the last chunk if needed
+    context_parts: list[str]    = []
+    sources_seen:  dict[int, str] = {}   # doc_id → doc_name (ordered, deduped)
     total_words = 0
 
     for _score, chunk, doc_id, doc_name in selected:
         chunk_words = len(chunk.split())
         if total_words + chunk_words > max_context_words:
-            # Truncate the chunk to fit within budget
             remaining = max_context_words - total_words
-            if remaining < 50:
+            if remaining < 50:   # not worth including a very short tail fragment
                 break
-            chunk = " ".join(chunk.split()[:remaining])
+            chunk       = " ".join(chunk.split()[:remaining])
             chunk_words = remaining
 
         context_parts.append(f"[Source: {doc_name}]\n{chunk}")
@@ -175,29 +172,3 @@ def search_project_documents(
     sources = [{"id": doc_id, "name": name} for doc_id, name in sources_seen.items()]
 
     return {"context_text": context_text, "sources": sources, "found": True}
-
-
-# ── v0.6+ RAG stubs ───────────────────────────────────────────────────────────
-
-def generate_embedding(text: str, gemini_client) -> list[float]:
-    """
-    Stub: Generate a vector embedding for a text chunk.
-    v0.6+: Call gemini_client.models.embed_content() or Sentence Transformers.
-    """
-    raise NotImplementedError("Vector embeddings will be implemented in v0.6")
-
-
-def upsert_to_vector_store(doc_id: int, chunks: list[str], vectors: list[list[float]]):
-    """
-    Stub: Store embeddings in a vector database (ChromaDB / FAISS / Pinecone).
-    v0.6+: Implement with chromadb.Client().get_or_create_collection(...).
-    """
-    raise NotImplementedError("Vector store upsert will be implemented in v0.6")
-
-
-def vector_search(query_vector: list[float], project_id: int, top_k: int = 5):
-    """
-    Stub: Retrieve top-k semantically similar chunks from the vector store.
-    v0.6+: Replace score_chunk() keyword matching with this call.
-    """
-    raise NotImplementedError("Vector search will be implemented in v0.6")

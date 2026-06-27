@@ -3,21 +3,21 @@ database.py — SQLite interface for PharmaGPT.
 
 Tables
 ──────
-projects       : One row per validation project. Stores equipment/dept metadata.
-
-messages       : Every chat turn (user + AI) linked to a project. Rebuilds the
-                 Gemini conversation history on load.
-
-documents      : Metadata for every uploaded file. The actual file lives on disk
-                 under uploads/{project_id}/{stored_filename}. The DB row holds
-                 the name, type, size, and upload date so we can list and serve
-                 files without scanning the filesystem.
-
-document_text  : Extracted plain text for each document, stored after upload.
-                 Used by document_search.py for keyword search (v0.5) and
-                 will feed vector embeddings in v0.6+.
-                 page_count stores actual pages (PDF) or an estimate (DOCX/XLSX/TXT).
-                 word_count enables the Document Insights dashboard.
+projects            : One row per validation project with equipment/dept metadata.
+messages            : Every chat turn (user + AI) linked to a project. Used to
+                      rebuild Gemini conversation history on server restart.
+documents           : Metadata for every uploaded project file. The file itself
+                      lives on disk at uploads/{project_id}/{stored_filename}.
+document_text       : Extracted plain text for each uploaded document. Used by
+                      document_search.py for keyword RAG and will feed vector
+                      embeddings in v0.8.
+generated_documents : AI-generated validation documents saved to a project.
+                      Stored as markdown; exported to DOCX/PDF on demand.
+val_projects        : Validation Workspace projects (v0.8) with full equipment,
+                      personnel, schedule, and risk-tier metadata.
+val_audit_trail     : Immutable log of every action within a validation project.
+kb_documents        : Global Knowledge Base — permanent document library not
+                      tied to any project. Supports folder, tag, and full-text search.
 
 All tables are created automatically on first startup via init_db().
 Database file: pharmagpt/pharmagpt.db
@@ -91,7 +91,8 @@ def init_db() -> None:
         -- ── document_text ──────────────────────────────────────────────────────
         -- Plain text extracted from each uploaded document on upload.
         -- One row per document (UNIQUE on document_id enforces this).
-        -- Used for keyword search (v0.5) and future vector embeddings (v0.6+).
+        -- Used for keyword search (document_search.py) and will feed
+        -- vector embeddings in v0.8 when the RAG upgrade is implemented.
         -- extraction_status: 'ok' | 'empty' | 'error'
         CREATE TABLE IF NOT EXISTS document_text (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
