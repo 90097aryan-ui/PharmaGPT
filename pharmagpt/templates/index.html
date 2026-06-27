@@ -48,6 +48,9 @@
         <div class="sidebar-item" id="nav-kb" data-view="view-kb">
           <span class="icon">🗂</span> Knowledge Base
         </div>
+        <div class="sidebar-item" id="nav-val-workspace" data-view="view-val-workspace">
+          <span class="icon">🏗</span> Validation
+        </div>
       </div>
 
       <div class="sidebar-divider"></div>
@@ -279,6 +282,173 @@
       </div>
     </main>
 
+    <!-- ── Validation Workspace — Dashboard ──────────────────────────────────── -->
+    <main class="vw-container" id="view-val-workspace" style="display:none">
+
+      <!-- Dashboard header -->
+      <div class="vw-dash-header">
+        <div class="vw-dash-header-left">
+          <span class="vw-dash-icon">🏗</span>
+          <div>
+            <h2 class="vw-dash-title">Validation Workspace</h2>
+            <p class="vw-dash-sub">Manage equipment qualification &amp; validation projects end-to-end</p>
+          </div>
+        </div>
+        <button class="vw-btn-create" id="vw-btn-create">＋ New Validation Project</button>
+      </div>
+
+      <!-- Stats bar -->
+      <div class="vw-stats-bar" id="vw-stats-bar">
+        <div class="vw-stat-card">
+          <div class="vw-stat-value" id="vw-stat-total">—</div>
+          <div class="vw-stat-label">Total Projects</div>
+        </div>
+        <div class="vw-stat-card">
+          <div class="vw-stat-value" id="vw-stat-inprogress">—</div>
+          <div class="vw-stat-label">In Progress</div>
+        </div>
+        <div class="vw-stat-card">
+          <div class="vw-stat-value" id="vw-stat-completed">—</div>
+          <div class="vw-stat-label">Completed</div>
+        </div>
+        <div class="vw-stat-card">
+          <div class="vw-stat-value" id="vw-stat-onhold">—</div>
+          <div class="vw-stat-label">On Hold</div>
+        </div>
+      </div>
+
+      <!-- Project grid -->
+      <div class="vw-project-grid" id="vw-project-grid">
+        <!-- populated by val_workspace.js -->
+      </div>
+
+      <!-- Empty state -->
+      <div class="vw-empty" id="vw-empty" style="display:none">
+        <div class="vw-empty-icon">🏗</div>
+        <p class="vw-empty-title">No validation projects yet</p>
+        <p class="vw-empty-sub">Click <strong>New Validation Project</strong> to get started.</p>
+      </div>
+
+    </main>
+
+    <!-- ── Validation Workspace — Project Workspace ────────────────────────── -->
+    <main class="vw-workspace" id="view-val-project" style="display:none">
+
+      <!-- Workspace top bar -->
+      <div class="vw-ws-topbar">
+        <button class="vw-ws-back" id="vw-ws-back">← Dashboard</button>
+        <div class="vw-ws-title-block">
+          <h2 class="vw-ws-name" id="vw-ws-proj-name">—</h2>
+          <span class="vw-ws-meta" id="vw-ws-proj-meta">—</span>
+        </div>
+        <span class="vw-ws-status-badge" id="vw-ws-status-badge">In Progress</span>
+      </div>
+
+      <!-- Tab bar -->
+      <div class="vw-tab-bar" id="vw-tab-bar">
+        <button class="vw-tab active" data-tab="overview">Overview</button>
+        <button class="vw-tab" data-tab="equipment">Equipment</button>
+        <button class="vw-tab" data-tab="urs">URS</button>
+        <button class="vw-tab" data-tab="dq">DQ</button>
+        <button class="vw-tab" data-tab="fat">FAT</button>
+        <button class="vw-tab" data-tab="sat">SAT</button>
+        <button class="vw-tab" data-tab="iq">IQ</button>
+        <button class="vw-tab" data-tab="oq">OQ</button>
+        <button class="vw-tab" data-tab="pq">PQ</button>
+        <button class="vw-tab" data-tab="traceability">Traceability</button>
+        <button class="vw-tab" data-tab="risk">Risk Assessment</button>
+        <button class="vw-tab" data-tab="attachments">Attachments</button>
+        <button class="vw-tab" data-tab="audit">Audit Trail</button>
+      </div>
+
+      <!-- Tab panels -->
+      <div class="vw-tab-content" id="vw-tab-content">
+
+        <!-- Overview -->
+        <div class="vw-panel active" id="vw-panel-overview">
+          <div class="vw-panel-inner">
+            <div class="vw-overview-grid" id="vw-overview-grid">
+              <!-- populated by JS -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Equipment -->
+        <div class="vw-panel" id="vw-panel-equipment">
+          <div class="vw-panel-inner">
+            <div class="vw-section-header">
+              <h3>Equipment Details</h3>
+              <p class="vw-section-sub">Technical specifications for the equipment under validation</p>
+            </div>
+            <div class="vw-info-grid" id="vw-equipment-grid"><!-- populated by JS --></div>
+          </div>
+        </div>
+
+        <!-- Phase tabs: URS / DQ / FAT / SAT / IQ / OQ / PQ -->
+        <div class="vw-panel" id="vw-panel-urs"><div class="vw-panel-inner"><div class="vw-phase-placeholder" data-phase="URS" data-full="User Requirement Specification"></div></div></div>
+        <div class="vw-panel" id="vw-panel-dq"><div class="vw-panel-inner"><div class="vw-phase-placeholder" data-phase="DQ" data-full="Design Qualification"></div></div></div>
+        <div class="vw-panel" id="vw-panel-fat"><div class="vw-panel-inner"><div class="vw-phase-placeholder" data-phase="FAT" data-full="Factory Acceptance Testing"></div></div></div>
+        <div class="vw-panel" id="vw-panel-sat"><div class="vw-panel-inner"><div class="vw-phase-placeholder" data-phase="SAT" data-full="Site Acceptance Testing"></div></div></div>
+        <div class="vw-panel" id="vw-panel-iq"><div class="vw-panel-inner"><div class="vw-phase-placeholder" data-phase="IQ" data-full="Installation Qualification"></div></div></div>
+        <div class="vw-panel" id="vw-panel-oq"><div class="vw-panel-inner"><div class="vw-phase-placeholder" data-phase="OQ" data-full="Operational Qualification"></div></div></div>
+        <div class="vw-panel" id="vw-panel-pq"><div class="vw-panel-inner"><div class="vw-phase-placeholder" data-phase="PQ" data-full="Performance Qualification"></div></div></div>
+
+        <!-- Traceability -->
+        <div class="vw-panel" id="vw-panel-traceability">
+          <div class="vw-panel-inner">
+            <div class="vw-section-header">
+              <h3>Traceability Matrix</h3>
+              <p class="vw-section-sub">Map requirements through qualification phases</p>
+            </div>
+            <div class="vw-coming-soon">
+              <span class="vw-cs-icon">🔗</span>
+              <p>Traceability matrix builder — coming in v0.8 Step 2</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Risk Assessment -->
+        <div class="vw-panel" id="vw-panel-risk">
+          <div class="vw-panel-inner">
+            <div class="vw-section-header">
+              <h3>Risk Assessment</h3>
+              <p class="vw-section-sub">Risk register and FMEA for this validation project</p>
+            </div>
+            <div class="vw-coming-soon">
+              <span class="vw-cs-icon">⚠️</span>
+              <p>Risk register — coming in v0.8 Step 2</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Attachments -->
+        <div class="vw-panel" id="vw-panel-attachments">
+          <div class="vw-panel-inner">
+            <div class="vw-section-header">
+              <h3>Attachments</h3>
+              <p class="vw-section-sub">Supporting files, signed protocols, and raw data</p>
+            </div>
+            <div class="vw-coming-soon">
+              <span class="vw-cs-icon">📎</span>
+              <p>File attachments — coming in v0.8 Step 2</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Audit Trail -->
+        <div class="vw-panel" id="vw-panel-audit">
+          <div class="vw-panel-inner">
+            <div class="vw-section-header">
+              <h3>Audit Trail</h3>
+              <p class="vw-section-sub">Immutable record of all actions on this validation project</p>
+            </div>
+            <div class="vw-audit-list" id="vw-audit-list"><!-- populated by JS --></div>
+          </div>
+        </div>
+
+      </div><!-- /vw-tab-content -->
+    </main>
+
     <!-- ── Validation Document Generator view ───────────────────────────────── -->
     <main class="validation-container" id="view-validation" style="display:none">
 
@@ -382,6 +552,121 @@
     </form>
   </div>
 
+  <!-- ── Create Validation Project Modal ─────────────────────────────────── -->
+  <div class="modal-overlay" id="vw-modal-overlay"></div>
+  <div class="modal vw-create-modal" id="vw-create-modal">
+    <div class="modal-header">
+      <h2>New Validation Project</h2>
+      <button class="modal-close" id="vw-modal-close">✕</button>
+    </div>
+    <form id="vw-create-form" class="modal-body" autocomplete="off">
+
+      <div class="form-group">
+        <label for="vw-name">Project Name <span class="required">*</span></label>
+        <input id="vw-name" type="text" placeholder="e.g. HPLC IQ/OQ/PQ — QC Lab" required />
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="vw-equipment-name">Equipment Name</label>
+          <input id="vw-equipment-name" type="text" placeholder="e.g. Agilent 1260 HPLC" />
+        </div>
+        <div class="form-group">
+          <label for="vw-equipment-id">Equipment ID</label>
+          <input id="vw-equipment-id" type="text" placeholder="e.g. EQ-0042" />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="vw-department">Department</label>
+          <input id="vw-department" type="text" placeholder="e.g. Quality Control" />
+        </div>
+        <div class="form-group">
+          <label for="vw-manufacturer">Manufacturer</label>
+          <input id="vw-manufacturer" type="text" placeholder="e.g. Agilent Technologies" />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="vw-model">Model</label>
+          <input id="vw-model" type="text" placeholder="e.g. G1312B" />
+        </div>
+        <div class="form-group">
+          <label for="vw-location">Location</label>
+          <input id="vw-location" type="text" placeholder="e.g. Building A, Room 204" />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="vw-validation-type">Validation Type</label>
+          <select id="vw-validation-type">
+            <option value="">— Select —</option>
+            <option value="IQ/OQ/PQ">IQ / OQ / PQ</option>
+            <option value="IQ/OQ">IQ / OQ</option>
+            <option value="OQ/PQ">OQ / PQ</option>
+            <option value="IQ">IQ — Installation Qualification</option>
+            <option value="OQ">OQ — Operational Qualification</option>
+            <option value="PQ">PQ — Performance Qualification</option>
+            <option value="DQ">DQ — Design Qualification</option>
+            <option value="FAT">FAT — Factory Acceptance Testing</option>
+            <option value="SAT">SAT — Site Acceptance Testing</option>
+            <option value="CSV">CSV — Computer System Validation</option>
+            <option value="Process Validation">Process Validation</option>
+            <option value="Cleaning Validation">Cleaning Validation</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="vw-risk-category">Risk Category</label>
+          <select id="vw-risk-category">
+            <option value="">— Select —</option>
+            <option value="Critical">Critical</option>
+            <option value="High">High</option>
+            <option value="Medium">Medium</option>
+            <option value="Low">Low</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="vw-protocol-number">Protocol Number</label>
+          <input id="vw-protocol-number" type="text" placeholder="e.g. PROT-2024-001" />
+        </div>
+        <div class="form-group">
+          <label for="vw-report-number">Report Number</label>
+          <input id="vw-report-number" type="text" placeholder="e.g. REP-2024-001" />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="vw-owner">Owner</label>
+          <input id="vw-owner" type="text" placeholder="e.g. Dr. Priya Sharma" />
+        </div>
+        <div class="form-group">
+          <label for="vw-approver">Approver</label>
+          <input id="vw-approver" type="text" placeholder="e.g. QA Head" />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="vw-target-date">Target Date</label>
+          <input id="vw-target-date" type="date" />
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" id="vw-modal-cancel">Cancel</button>
+        <button type="submit" class="btn-primary">Create Project</button>
+      </div>
+    </form>
+  </div>
+
   <!-- ── Knowledge Base Upload Modal ──────────────────────────────────────── -->
   <div class="modal-overlay" id="kb-modal-overlay"></div>
   <div class="modal kb-upload-modal" id="kb-upload-modal">
@@ -459,13 +744,14 @@
     </form>
   </div>
 
-  <!-- Load order: projects → documents → insights → validation_config → validation → knowledge_base → chat -->
+  <!-- Load order: projects → documents → insights → validation_config → validation → knowledge_base → val_workspace → chat -->
   <script src="{{ url_for('static', filename='js/projects.js') }}"></script>
   <script src="{{ url_for('static', filename='js/documents.js') }}"></script>
   <script src="{{ url_for('static', filename='js/insights.js') }}"></script>
   <script src="{{ url_for('static', filename='js/validation_config.js') }}"></script>
   <script src="{{ url_for('static', filename='js/validation.js') }}"></script>
   <script src="{{ url_for('static', filename='js/knowledge_base.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/val_workspace.js') }}"></script>
   <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
 
   <!-- ── Validation sidebar nav items (rendered from config) ──────────────── -->
@@ -564,6 +850,10 @@
 
         if (targetId === "view-kb") {
           if (window.initKB) window.initKB();
+        }
+
+        if (targetId === "view-val-workspace") {
+          if (window.initVW) window.initVW();
         }
       });
     });

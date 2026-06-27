@@ -121,6 +121,40 @@ def init_db() -> None:
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         );
 
+        -- ── val_projects ──────────────────────────────────────────────────────
+        -- Validation Workspace projects (v0.8). Each row is a full validation
+        -- engagement with equipment details, personnel, schedule, and risk tier.
+        CREATE TABLE IF NOT EXISTS val_projects (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT    NOT NULL,
+            equipment_name  TEXT    DEFAULT '',
+            equipment_id    TEXT    DEFAULT '',
+            department      TEXT    DEFAULT '',
+            manufacturer    TEXT    DEFAULT '',
+            model           TEXT    DEFAULT '',
+            location        TEXT    DEFAULT '',
+            validation_type TEXT    DEFAULT '',
+            protocol_number TEXT    DEFAULT '',
+            report_number   TEXT    DEFAULT '',
+            owner           TEXT    DEFAULT '',
+            approver        TEXT    DEFAULT '',
+            target_date     TEXT    DEFAULT NULL,
+            risk_category   TEXT    DEFAULT '',
+            status          TEXT    DEFAULT 'In Progress',
+            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- ── val_audit_trail ────────────────────────────────────────────────────
+        -- Immutable log of every action taken within a validation project.
+        CREATE TABLE IF NOT EXISTS val_audit_trail (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            val_proj_id INTEGER NOT NULL,
+            action      TEXT    NOT NULL,
+            user_note   TEXT    DEFAULT '',
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (val_proj_id) REFERENCES val_projects(id) ON DELETE CASCADE
+        );
+
         -- ── kb_documents ─────────────────────────────────────────────────────
         -- Global Knowledge Base: permanent document library not tied to any project.
         -- Supports folder organisation, tags, versioning, effective/review dates,
@@ -423,6 +457,133 @@ def delete_generated_document(doc_id: int) -> None:
     conn.execute("DELETE FROM generated_documents WHERE id = ?", (doc_id,))
     conn.commit()
     conn.close()
+
+
+# ── Validation Workspace CRUD (v0.8) ─────────────────────────────────────────
+
+def create_val_project(data: dict) -> dict:
+    """Insert a new validation project and return the full row."""
+    conn = get_connection()
+    cur = conn.execute(
+        """INSERT INTO val_projects
+           (name, equipment_name, equipment_id, department, manufacturer,
+            model, location, validation_type, protocol_number, report_number,
+            owner, approver, target_date, risk_category)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            data.get("name", "").strip(),
+            data.get("equipment_name", "").strip(),
+            data.get("equipment_id", "").strip(),
+            data.get("department", "").strip(),
+            data.get("manufacturer", "").strip(),
+            data.get("model", "").strip(),
+            data.get("location", "").strip(),
+            data.get("validation_type", "").strip(),
+            data.get("protocol_number", "").strip(),
+            data.get("report_number", "").strip(),
+            data.get("owner", "").strip(),
+            data.get("approver", "").strip(),
+            data.get("target_date") or None,
+            data.get("risk_category", "").strip(),
+        ),
+    )
+    conn.commit()
+    row = dict(conn.execute(
+        "SELECT * FROM val_projects WHERE id = ?", (cur.lastrowid,)
+    ).fetchone())
+    conn.close()
+    return row
+
+
+def get_all_val_projects() -> list[dict]:
+    """Return all validation projects, newest first."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM val_projects ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_val_project(val_proj_id: int) -> dict | None:
+    """Return a single validation project, or None."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM val_projects WHERE id = ?", (val_proj_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def update_val_project(val_proj_id: int, data: dict) -> dict | None:
+    """Update mutable fields on a validation project."""
+    conn = get_connection()
+    conn.execute(
+        """UPDATE val_projects SET
+           name=?, equipment_name=?, equipment_id=?, department=?,
+           manufacturer=?, model=?, location=?, validation_type=?,
+           protocol_number=?, report_number=?, owner=?, approver=?,
+           target_date=?, risk_category=?, status=?
+           WHERE id=?""",
+        (
+            data.get("name", "").strip(),
+            data.get("equipment_name", "").strip(),
+            data.get("equipment_id", "").strip(),
+            data.get("department", "").strip(),
+            data.get("manufacturer", "").strip(),
+            data.get("model", "").strip(),
+            data.get("location", "").strip(),
+            data.get("validation_type", "").strip(),
+            data.get("protocol_number", "").strip(),
+            data.get("report_number", "").strip(),
+            data.get("owner", "").strip(),
+            data.get("approver", "").strip(),
+            data.get("target_date") or None,
+            data.get("risk_category", "").strip(),
+            data.get("status", "In Progress").strip(),
+            val_proj_id,
+        ),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM val_projects WHERE id = ?", (val_proj_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def delete_val_project(val_proj_id: int) -> None:
+    """Delete a validation project (audit trail cascades)."""
+    conn = get_connection()
+    conn.execute("DELETE FROM val_projects WHERE id = ?", (val_proj_id,))
+    conn.commit()
+    conn.close()
+
+
+def add_val_audit_entry(val_proj_id: int, action: str, user_note: str = "") -> dict:
+    """Append an audit trail entry and return the inserted row."""
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO val_audit_trail (val_proj_id, action, user_note) VALUES (?,?,?)",
+        (val_proj_id, action, user_note),
+    )
+    conn.commit()
+    row = dict(conn.execute(
+        "SELECT * FROM val_audit_trail WHERE id = ?", (cur.lastrowid,)
+    ).fetchone())
+    conn.close()
+    return row
+
+
+def get_val_audit_trail(val_proj_id: int) -> list[dict]:
+    """Return all audit entries for a validation project, oldest first."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM val_audit_trail WHERE val_proj_id = ? ORDER BY created_at ASC",
+        (val_proj_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 # ── Knowledge Base CRUD ───────────────────────────────────────────────────────

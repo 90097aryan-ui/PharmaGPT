@@ -721,6 +721,87 @@ def kb_folder_counts():
     return jsonify(db.get_kb_folder_counts())
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# VALIDATION WORKSPACE ROUTES  (v0.8)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/val-projects", methods=["GET"])
+def vp_list():
+    """Return all validation workspace projects, newest first."""
+    return jsonify(db.get_all_val_projects())
+
+
+@app.route("/val-projects", methods=["POST"])
+def vp_create():
+    """
+    Create a new validation project.
+    Body: { name, equipment_name, equipment_id, department, manufacturer,
+            model, location, validation_type, protocol_number, report_number,
+            owner, approver, target_date, risk_category }
+    """
+    data = request.get_json() or {}
+    if not data.get("name", "").strip():
+        return jsonify({"error": "Project name is required"}), 400
+
+    project = db.create_val_project(data)
+    db.add_val_audit_entry(project["id"], "Project created")
+    return jsonify(project), 201
+
+
+@app.route("/val-projects/<int:vp_id>", methods=["GET"])
+def vp_get(vp_id):
+    """Return a single validation project."""
+    project = db.get_val_project(vp_id)
+    if not project:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(project)
+
+
+@app.route("/val-projects/<int:vp_id>", methods=["PUT"])
+def vp_update(vp_id):
+    """Update a validation project's fields."""
+    if not db.get_val_project(vp_id):
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json() or {}
+    updated = db.update_val_project(vp_id, data)
+    db.add_val_audit_entry(vp_id, "Project details updated")
+    return jsonify(updated)
+
+
+@app.route("/val-projects/<int:vp_id>", methods=["DELETE"])
+def vp_delete(vp_id):
+    """Delete a validation project and its audit trail."""
+    if not db.get_val_project(vp_id):
+        return jsonify({"error": "Not found"}), 404
+    db.delete_val_project(vp_id)
+    return jsonify({"status": "deleted"})
+
+
+@app.route("/val-projects/<int:vp_id>/audit-trail", methods=["GET"])
+def vp_audit_trail(vp_id):
+    """Return the full audit trail for a validation project."""
+    if not db.get_val_project(vp_id):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(db.get_val_audit_trail(vp_id))
+
+
+@app.route("/val-projects/<int:vp_id>/audit-trail", methods=["POST"])
+def vp_add_audit(vp_id):
+    """
+    Append a manual audit entry.
+    Body: { action, user_note }
+    """
+    if not db.get_val_project(vp_id):
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json() or {}
+    entry = db.add_val_audit_entry(
+        vp_id,
+        data.get("action", "Manual entry"),
+        data.get("user_note", ""),
+    )
+    return jsonify(entry), 201
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
