@@ -5,6 +5,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.7.0] — 2026-06-27 — Knowledge Base
+
+### Added
+- **Knowledge Base** — permanent, project-independent document library accessible from the sidebar
+- 8 built-in folders: SOP, Validation, Qualification, Protocols, Reports, Regulations, Vendor Documents, Others
+- Document metadata fields: **Title**, **Folder**, **Tags** (comma-separated), **Document Version**, **Effective Date**, **Review Date**
+- Upload modal with full metadata form — auto-fills title from filename, pre-selects active folder
+- **Search by title** — substring match on document title
+- **Search by tag** — filter by any tag substring
+- **Search by file type** — dropdown filter (PDF / DOCX / XLSX / TXT)
+- **Keyword search inside document** — full-text search across extracted text content
+- All four search filters can be combined; search runs on Enter or Search button
+- **Folder sidebar** with live document counts per folder; click to filter
+- **Document list** — shows folder pill, version badge, file type, effective date, review date, tags per row
+- **Detail / preview panel** — opens on document click; shows complete metadata grid + text preview (first 2,500 chars)
+- Overdue review date highlighted in red in the detail panel
+- Inline View (PDF/TXT in browser tab) and force-download buttons in both list and detail panel
+- `kb_documents` SQLite table: id, title, folder, tags, doc_version, effective_date, review_date, original_name, stored_filename, file_type, file_size, text_content, word_count, page_count, extraction_status, upload_date
+- Text extraction on upload (same pipeline as project documents) — stored directly in `kb_documents.text_content`
+- KB files stored at `uploads/kb/` (global, not per-project)
+- `GET  /kb/documents` — list with optional filters (folder, tag, file_type, keyword, title)
+- `POST /kb/documents` — upload file with metadata (multipart/form-data)
+- `GET  /kb/documents/<id>` — single document including text_content for preview
+- `GET  /kb/documents/<id>/view` — inline view or browser download
+- `GET  /kb/documents/<id>/download` — force-download
+- `DELETE /kb/documents/<id>` — delete metadata + file from disk
+- `GET  /kb/folders/counts` — `{folder: count}` map for sidebar badges
+- `knowledge_base.js` — self-contained IIFE module; all KB state and logic encapsulated
+- `safe_save_kb()`, `get_kb_file_path()`, `delete_kb_from_disk()`, `kb_file_exists()` helpers in `documents.py`
+- Full KB CRUD in `database.py`: `create_kb_document`, `get_kb_documents`, `get_kb_document`, `update_kb_document_text`, `delete_kb_document`, `get_kb_folder_counts`, `KB_FOLDERS` constant
+- KB styles (~300 lines) appended to `style.css`; fully responsive collapse on mobile
+
+---
+
 ## [0.6.0] — 2026-06-27 — Validation Document Generator
 
 ### Added

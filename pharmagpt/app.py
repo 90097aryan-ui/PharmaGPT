@@ -548,6 +548,179 @@ def delete_generated_doc(doc_id):
     return jsonify({"status": "deleted"})
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# KNOWLEDGE BASE ROUTES  (v0.7)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/kb/documents", methods=["GET"])
+def kb_list_documents():
+    """
+    List Knowledge Base documents with optional filters.
+
+    Query params:
+        folder    — filter by folder name
+        tag       — filter by tag substring
+        file_type — filter by extension (pdf, docx, xlsx, txt)
+        keyword   — search in title + text_content
+        title     — search in title
+    """
+    folder    = request.args.get("folder", "").strip() or None
+    tag       = request.args.get("tag", "").strip() or None
+    file_type = request.args.get("file_type", "").strip() or None
+    keyword   = request.args.get("keyword", "").strip() or None
+    title     = request.args.get("title", "").strip() or None
+
+    return jsonify(db.get_kb_documents(
+        folder=folder, tag=tag, file_type=file_type, keyword=keyword, title=title
+    ))
+
+
+@app.route("/kb/documents", methods=["POST"])
+def kb_upload_document():
+    """
+    Upload a file to the Knowledge Base with metadata.
+
+    Form fields:
+        file           — binary (PDF, DOCX, XLSX, TXT; max 50 MB)
+        title          — display title (defaults to filename)
+        folder         — one of the 8 KB folders (defaults to 'Others')
+        tags           — comma-separated tags
+        doc_version    — version string (defaults to '1.0')
+        effective_date — ISO date YYYY-MM-DD (optional)
+        review_date    — ISO date YYYY-MM-DD (optional)
+    """
+    if "file" not in request.files:
+        return jsonify({"error": "No file part in the request"}), 400
+
+    file = request.files["file"]
+    if not file.filename:
+        return jsonify({"error": "No file selected"}), 400
+
+    if not docs.allowed_file(file.filename):
+        return jsonify({"error": "File type not allowed. Accepted: PDF, DOCX, XLSX, TXT"}), 400
+
+    folder = request.form.get("folder", "Others").strip()
+    if folder not in db.KB_FOLDERS:
+        folder = "Others"
+
+    title          = request.form.get("title", "").strip() or file.filename
+    tags           = request.form.get("tags", "").strip()
+    doc_version    = request.form.get("doc_version", "1.0").strip() or "1.0"
+    effective_date = request.form.get("effective_date", "").strip() or None
+    review_date    = request.form.get("review_date", "").strip() or None
+
+    stored_filename, file_size = docs.safe_save_kb(file)
+    extension = docs.get_extension(file.filename)
+
+    kb_doc = db.create_kb_document(
+        title=title,
+        folder=folder,
+        tags=tags,
+        doc_version=doc_version,
+        effective_date=effective_date,
+        review_date=review_date,
+        original_name=file.filename,
+        stored_filename=stored_filename,
+        file_type=extension,
+        file_size=file_size,
+    )
+
+    # Extract text for search
+    _extract_and_store_kb(kb_doc["id"], docs.get_kb_file_path(stored_filename), extension)
+
+    return jsonify(db.get_kb_document(kb_doc["id"])), 201
+
+
+def _extract_and_store_kb(kb_id: int, file_path: str, extension: str) -> None:
+    """Extract text from a KB document and store it. Mirrors _extract_and_store."""
+    try:
+        if extension == "pdf":
+            text, pages = pdf_reader.extract(file_path)
+        elif extension == "docx":
+            text, pages = docx_reader.extract(file_path)
+        elif extension == "xlsx":
+            text, pages = excel_reader.extract(file_path)
+        elif extension == "txt":
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+            pages = max(1, len(text.split()) // 300)
+        else:
+            return
+
+        word_count = len(text.split())
+        status = "ok" if text.strip() else "empty"
+        db.update_kb_document_text(kb_id, text, word_count, pages, status)
+
+    except Exception:
+        db.update_kb_document_text(kb_id, "", 0, 0, "error")
+
+
+@app.route("/kb/documents/<int:kb_id>", methods=["GET"])
+def kb_get_document(kb_id):
+    """Return a single KB document including text_content for preview."""
+    doc = db.get_kb_document(kb_id)
+    if not doc:
+        return jsonify({"error": "Document not found"}), 404
+    return jsonify(doc)
+
+
+@app.route("/kb/documents/<int:kb_id>/view")
+def kb_view_document(kb_id):
+    """Serve the KB file inline (PDF/TXT) or as download (DOCX/XLSX)."""
+    doc = db.get_kb_document(kb_id)
+    if not doc:
+        return jsonify({"error": "Document not found"}), 404
+
+    file_path = docs.get_kb_file_path(doc["stored_filename"])
+    if not docs.kb_file_exists(doc["stored_filename"]):
+        return jsonify({"error": "File not found on disk"}), 404
+
+    as_attachment = doc["file_type"] not in docs.VIEWABLE_IN_BROWSER
+    return send_file(
+        file_path,
+        mimetype=docs.get_mime_type(doc["file_type"]),
+        as_attachment=as_attachment,
+        download_name=doc["original_name"],
+    )
+
+
+@app.route("/kb/documents/<int:kb_id>/download")
+def kb_download_document(kb_id):
+    """Force-download a KB file."""
+    doc = db.get_kb_document(kb_id)
+    if not doc:
+        return jsonify({"error": "Document not found"}), 404
+
+    file_path = docs.get_kb_file_path(doc["stored_filename"])
+    if not docs.kb_file_exists(doc["stored_filename"]):
+        return jsonify({"error": "File not found on disk"}), 404
+
+    return send_file(
+        file_path,
+        mimetype=docs.get_mime_type(doc["file_type"]),
+        as_attachment=True,
+        download_name=doc["original_name"],
+    )
+
+
+@app.route("/kb/documents/<int:kb_id>", methods=["DELETE"])
+def kb_delete_document(kb_id):
+    """Delete a KB document from DB and disk."""
+    doc = db.get_kb_document(kb_id)
+    if not doc:
+        return jsonify({"error": "Document not found"}), 404
+
+    docs.delete_kb_from_disk(doc["stored_filename"])
+    db.delete_kb_document(kb_id)
+    return jsonify({"status": "deleted"})
+
+
+@app.route("/kb/folders/counts", methods=["GET"])
+def kb_folder_counts():
+    """Return document count per folder for the KB sidebar."""
+    return jsonify(db.get_kb_folder_counts())
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

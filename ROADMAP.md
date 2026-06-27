@@ -1,6 +1,6 @@
 # PharmaGPT — Roadmap
 
-**Current version:** v0.6  
+**Current version:** v0.7  
 **Stack:** Python · Flask · SQLite · Google Gemini 2.5 Flash · Vanilla JS
 
 ---
@@ -15,10 +15,11 @@
 | v0.4 | Document upload + management | ✅ Done |
 | v0.5 | AI document intelligence + RAG (keyword) | ✅ Done |
 | v0.6 | Validation document generator (11 types) | ✅ Done |
+| v0.7 | Knowledge Base (permanent document library) | ✅ Done |
 
 ---
 
-## v0.7 — Saved Document Library + Vector RAG
+## v0.8 — Saved Document Library + Vector RAG
 
 ### Saved Document Library
 - View all previously generated documents per project in a dedicated panel

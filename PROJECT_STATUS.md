@@ -1,7 +1,8 @@
-# PharmaGPT — Development Status (v0.6)
+# PharmaGPT — Development Status (v0.7)
 
 **Last updated:** 2026-06-27  
-**Stack:** Python 3.14 · Flask · SQLite · Google Gemini 2.5 Flash · Vanilla JS  
+**Stack:** Python 3.14 · Flask · SQLite · Google Gemini 2.5 Flash · Vanilla JS
+**Version:** v0.7 Knowledge Base
 **Server:** `http://127.0.0.1:5000` (Flask dev server, port configurable via `.env`)
 
 ---
@@ -36,14 +37,15 @@ D:\PharmaAgent\
     │
     ├── static\
     │   ├── css\
-    │   │   └── style.css         # All styles (~1,450 lines)
+    │   │   └── style.css         # All styles (~1,750 lines)
     │   └── js\
     │       ├── projects.js       # Project CRUD, sidebar, project switching
     │       ├── documents.js      # Upload, list, delete, drag-and-drop
     │       ├── insights.js       # Document Insights panel
     │       ├── chat.js           # SSE chat, streaming, sources strip
     │       ├── validation_config.js  # Config for all 11 doc types (fields, labels, colors)
-    │       └── validation.js     # 4-step wizard engine, viewer, export/save
+    │       ├── validation.js     # 4-step wizard engine, viewer, export/save
+    │       └── knowledge_base.js # KB panel: upload, search, folder filter, preview
     │
     └── uploads\
         └── {project_id}\         # Uploaded files, one folder per project
@@ -99,6 +101,26 @@ All foreign keys use `ON DELETE CASCADE`.
 | extraction_status | TEXT | `'ok'` / `'empty'` / `'error'` |
 | extracted_at | TIMESTAMP | |
 
+### `kb_documents`
+| Column | Type | Notes |
+|---|---|---|
+| id | INTEGER PK | Auto-increment |
+| title | TEXT NOT NULL | Display title |
+| folder | TEXT | SOP / Validation / Qualification / Protocols / Reports / Regulations / Vendor Documents / Others |
+| tags | TEXT | Comma-separated tags |
+| doc_version | TEXT | Version string (e.g. "1.0", "2.3") |
+| effective_date | TEXT | ISO date YYYY-MM-DD |
+| review_date | TEXT | ISO date YYYY-MM-DD |
+| original_name | TEXT | Browser filename |
+| stored_filename | TEXT | On-disk sanitised name |
+| file_type | TEXT | pdf / docx / xlsx / txt |
+| file_size | INTEGER | Bytes |
+| text_content | TEXT | Extracted plain text (used for keyword search) |
+| word_count | INTEGER | Total words |
+| page_count | INTEGER | Pages or estimate |
+| extraction_status | TEXT | ok / empty / error |
+| upload_date | TIMESTAMP | |
+
 ### `generated_documents`
 | Column | Type | Notes |
 |---|---|---|
@@ -146,6 +168,17 @@ All foreign keys use `ON DELETE CASCADE`.
 | GET | `/generated-docs/<id>` | Get a single generated doc |
 | DELETE | `/generated-docs/<id>` | Delete a generated doc |
 
+### Knowledge Base (v0.7)
+| Method | Route | Description |
+|---|---|---|
+| GET | `/kb/documents` | List KB docs (filters: folder, tag, file_type, keyword, title) |
+| POST | `/kb/documents` | Upload file + metadata (multipart/form-data) |
+| GET | `/kb/documents/<id>` | Get single KB doc including text_content |
+| GET | `/kb/documents/<id>/view` | Inline view (PDF/TXT) or download (DOCX/XLSX) |
+| GET | `/kb/documents/<id>/download` | Force-download |
+| DELETE | `/kb/documents/<id>` | Delete metadata + file from disk |
+| GET | `/kb/folders/counts` | `{folder: count}` map for sidebar badges |
+
 ---
 
 ## Features Completed
@@ -182,7 +215,24 @@ All foreign keys use `ON DELETE CASCADE`.
 - Document Insights panel: doc count, total pages/words, file type badges, extraction progress bar
 - RAG stubs (`generate_embedding`, `upsert_to_vector_store`, `vector_search`) ready for v0.7+
 
-### v0.6 — Validation Document Generator ✅ CURRENT
+### v0.7 — Knowledge Base ✅ CURRENT
+- Permanent, project-independent document library (🗂 Knowledge Base) in sidebar navigation
+- 8 folders: SOP, Validation, Qualification, Protocols, Reports, Regulations, Vendor Documents, Others
+- Document metadata: Title, Folder, Tags (comma-separated), Version, Effective Date, Review Date
+- Upload modal with metadata form; auto-fills title from filename; pre-selects active folder
+- Search by title, by tag, by file type (dropdown), and keyword inside document content
+- All four search filters are combinable; Enter key or Search button triggers search
+- Folder sidebar with live per-folder document counts
+- Document rows show: folder pill, version badge, file type, effective/review dates, tags
+- Detail panel (opens on row click): full metadata grid + 2,500-char text preview; overdue review date highlighted
+- View inline (PDF/TXT) or force-download from list and detail panel
+- `kb_documents` table: full metadata + extracted `text_content` for keyword search
+- Files stored at `uploads/kb/` (global, not per-project)
+- 7 new API routes under `/kb/documents` and `/kb/folders/counts`
+- `knowledge_base.js` — self-contained IIFE; manages all KB state client-side
+- KB CRUD helpers in `database.py`; KB file helpers in `documents.py`
+
+### v0.6 — Validation Document Generator
 - Collapsible "Validation" sidebar section with all 11 document types
 - 4-step wizard (Equipment → Details → Reference Docs → Generate) — generic, config-driven
 - 11 supported document types: URS, DQ, FAT, SAT, IQ, OQ, PQ, FMEA, CAPA, Deviation, Change Control
@@ -199,12 +249,12 @@ All foreign keys use `ON DELETE CASCADE`.
 
 ## Pending Features
 
-### v0.7 — Saved Document Library
+### v0.8 — Saved Document Library
 - View all previously generated documents per project
 - Re-open, regenerate, or export from saved documents
 - Diff view between two versions of the same doc type
 
-### v0.7 — Vector RAG Upgrade
+### v0.8 — Vector RAG Upgrade
 - Replace keyword search with real embeddings (`generate_embedding` stub is in `document_search.py`)
 - Use Gemini text-embedding-004 or equivalent
 - Vector store options: Chroma (local) or Pinecone (cloud)
@@ -276,7 +326,8 @@ Browser (SPA)
 ├── insights.js     — document stats panel
 ├── chat.js         — SSE stream, message rendering, sources strip, use-docs checkbox
 ├── validation_config.js  — 11 doc type definitions
-└── validation.js   — 4-step wizard, SSE viewer, export/save
+├── validation.js   — 4-step wizard, SSE viewer, export/save
+└── knowledge_base.js — KB panel: upload, folder filter, search, detail/preview
 
         ↕ HTTP / SSE (fetch + EventSource-style ReadableStream)
 
@@ -287,7 +338,10 @@ Flask app.py
 ├── /validation/export/docx → markdown_to_docx() → bytes download
 ├── /projects/*           → SQLite CRUD
 ├── /documents/*          → file system + SQLite CRUD
-└── /projects/*/insights  → aggregated DB query
+├── /projects/*/insights  → aggregated DB query
+├── /kb/documents         → KB list + upload (uploads/kb/)
+├── /kb/documents/<id>    → KB CRUD + serve
+└── /kb/folders/counts    → folder badge counts
 
         ↕
 
@@ -303,7 +357,8 @@ SQLite (pharmagpt.db)
 ├── messages
 ├── documents
 ├── document_text
-└── generated_documents
+├── generated_documents
+└── kb_documents
 
         ↕
 

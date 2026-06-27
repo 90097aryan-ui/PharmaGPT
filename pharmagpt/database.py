@@ -120,6 +120,30 @@ def init_db() -> None:
             created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         );
+
+        -- ── kb_documents ─────────────────────────────────────────────────────
+        -- Global Knowledge Base: permanent document library not tied to any project.
+        -- Supports folder organisation, tags, versioning, effective/review dates,
+        -- and full-text keyword search through extracted text_content.
+        -- Files stored at: uploads/kb/{stored_filename}
+        CREATE TABLE IF NOT EXISTS kb_documents (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            title            TEXT    NOT NULL,
+            folder           TEXT    NOT NULL DEFAULT 'Others',
+            tags             TEXT    NOT NULL DEFAULT '',        -- comma-separated
+            doc_version      TEXT    NOT NULL DEFAULT '1.0',
+            effective_date   TEXT    DEFAULT NULL,              -- ISO date YYYY-MM-DD
+            review_date      TEXT    DEFAULT NULL,              -- ISO date YYYY-MM-DD
+            original_name    TEXT    NOT NULL,
+            stored_filename  TEXT    NOT NULL,
+            file_type        TEXT    NOT NULL,
+            file_size        INTEGER NOT NULL DEFAULT 0,
+            text_content     TEXT    NOT NULL DEFAULT '',
+            word_count       INTEGER NOT NULL DEFAULT 0,
+            page_count       INTEGER NOT NULL DEFAULT 0,
+            extraction_status TEXT   NOT NULL DEFAULT 'ok',
+            upload_date      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
     """)
     conn.commit()
     conn.close()
@@ -399,3 +423,112 @@ def delete_generated_document(doc_id: int) -> None:
     conn.execute("DELETE FROM generated_documents WHERE id = ?", (doc_id,))
     conn.commit()
     conn.close()
+
+
+# ── Knowledge Base CRUD ───────────────────────────────────────────────────────
+
+KB_FOLDERS = [
+    "SOP", "Validation", "Qualification", "Protocols",
+    "Reports", "Regulations", "Vendor Documents", "Others",
+]
+
+
+def create_kb_document(title: str, folder: str, tags: str, doc_version: str,
+                       effective_date: str | None, review_date: str | None,
+                       original_name: str, stored_filename: str,
+                       file_type: str, file_size: int) -> dict:
+    """Insert a new KB document row and return the full row dict."""
+    conn = get_connection()
+    cur = conn.execute(
+        """INSERT INTO kb_documents
+           (title, folder, tags, doc_version, effective_date, review_date,
+            original_name, stored_filename, file_type, file_size)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (title, folder, tags, doc_version, effective_date or None,
+         review_date or None, original_name, stored_filename, file_type, file_size),
+    )
+    conn.commit()
+    row = dict(conn.execute(
+        "SELECT * FROM kb_documents WHERE id = ?", (cur.lastrowid,)
+    ).fetchone())
+    conn.close()
+    return row
+
+
+def get_kb_documents(folder: str | None = None, tag: str | None = None,
+                     file_type: str | None = None,
+                     keyword: str | None = None,
+                     title: str | None = None) -> list[dict]:
+    """Return KB documents with optional filters. Excludes text_content for performance."""
+    conditions: list[str] = []
+    params: list = []
+
+    if folder:
+        conditions.append("folder = ?")
+        params.append(folder)
+    if tag:
+        conditions.append("tags LIKE ?")
+        params.append(f"%{tag}%")
+    if file_type:
+        conditions.append("file_type = ?")
+        params.append(file_type)
+    if title:
+        conditions.append("title LIKE ?")
+        params.append(f"%{title}%")
+    if keyword:
+        conditions.append("(title LIKE ? OR text_content LIKE ?)")
+        params.extend([f"%{keyword}%", f"%{keyword}%"])
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    conn = get_connection()
+    rows = conn.execute(
+        f"""SELECT id, title, folder, tags, doc_version, effective_date, review_date,
+                   original_name, file_type, file_size, word_count, page_count,
+                   extraction_status, upload_date
+            FROM kb_documents {where} ORDER BY upload_date DESC""",
+        params,
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_kb_document(kb_id: int) -> dict | None:
+    """Return a single KB document row including text_content."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM kb_documents WHERE id = ?", (kb_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def update_kb_document_text(kb_id: int, text_content: str, word_count: int,
+                             page_count: int, extraction_status: str) -> None:
+    """Store extracted text for a KB document after upload."""
+    conn = get_connection()
+    conn.execute(
+        """UPDATE kb_documents
+           SET text_content = ?, word_count = ?, page_count = ?, extraction_status = ?
+           WHERE id = ?""",
+        (text_content, word_count, page_count, extraction_status, kb_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_kb_document(kb_id: int) -> None:
+    """Delete a KB document row by id."""
+    conn = get_connection()
+    conn.execute("DELETE FROM kb_documents WHERE id = ?", (kb_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_kb_folder_counts() -> dict:
+    """Return {folder: count} for all KB folders."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT folder, COUNT(*) AS cnt FROM kb_documents GROUP BY folder"
+    ).fetchall()
+    conn.close()
+    return {r["folder"]: r["cnt"] for r in rows}

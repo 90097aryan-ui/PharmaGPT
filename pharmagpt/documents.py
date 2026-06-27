@@ -107,6 +107,51 @@ def file_exists(project_id: int, stored_filename: str) -> bool:
     return os.path.exists(get_file_path(project_id, stored_filename))
 
 
+# ── Knowledge Base file storage ───────────────────────────────────────────────
+# KB files are stored globally (not per-project) at uploads/kb/
+
+def get_kb_upload_dir() -> str:
+    """Return the KB upload directory, creating it if needed."""
+    path = os.path.join(UPLOAD_FOLDER, "kb")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def safe_save_kb(file) -> tuple[str, int]:
+    """Save a KB file upload to uploads/kb/, avoiding name collisions."""
+    safe_name = secure_filename(file.filename)
+    upload_dir = get_kb_upload_dir()
+    file_path = os.path.join(upload_dir, safe_name)
+
+    if os.path.exists(file_path):
+        base, ext = os.path.splitext(safe_name)
+        counter = 1
+        while os.path.exists(file_path):
+            safe_name = f"{base}_{counter}{ext}"
+            file_path = os.path.join(upload_dir, safe_name)
+            counter += 1
+
+    file.save(file_path)
+    return safe_name, os.path.getsize(file_path)
+
+
+def get_kb_file_path(stored_filename: str) -> str:
+    """Return the absolute path for a KB stored file."""
+    return os.path.join(get_kb_upload_dir(), stored_filename)
+
+
+def delete_kb_from_disk(stored_filename: str) -> None:
+    """Remove a KB file from disk. Silently does nothing if missing."""
+    path = get_kb_file_path(stored_filename)
+    if os.path.exists(path):
+        os.remove(path)
+
+
+def kb_file_exists(stored_filename: str) -> bool:
+    """Return True if the KB file is present on disk."""
+    return os.path.exists(get_kb_file_path(stored_filename))
+
+
 # ── AI document analysis stubs (v0.5) ────────────────────────────────────────
 # These functions are intentionally unimplemented.  In v0.5 they will extract
 # text from documents and pass it to Gemini for GMP-aware analysis.
