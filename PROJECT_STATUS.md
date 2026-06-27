@@ -1,0 +1,338 @@
+# PharmaGPT — Development Status (v0.6)
+
+**Last updated:** 2026-06-27  
+**Stack:** Python 3.14 · Flask · SQLite · Google Gemini 2.5 Flash · Vanilla JS  
+**Server:** `http://127.0.0.1:5000` (Flask dev server, port configurable via `.env`)
+
+---
+
+## Folder Structure
+
+```
+D:\PharmaAgent\
+├── .env                          # GEMINI_API_KEY, FLASK_SECRET_KEY, etc.
+├── venv\                         # Python virtual environment
+├── hello.py                      # ⚠ DO NOT MODIFY — original proof-of-concept
+│
+└── pharmagpt\                    # Main application package
+    ├── app.py                    # Flask routes, SSE streaming, Gemini client
+    ├── config.py                 # Env-var loading, model name, upload limits
+    ├── database.py               # SQLite schema + all CRUD functions
+    ├── documents.py              # File-system helpers (save, delete, mime types)
+    ├── prompts.py                # PHARMA_SYSTEM_PROMPT (Senior Pharma Engineer persona)
+    ├── pharmagpt.db              # SQLite database (auto-created on first run)
+    │
+    ├── services\                 # AI and document processing services
+    │   ├── __init__.py
+    │   ├── pdf_reader.py         # pdfplumber — extract text + page count from PDF
+    │   ├── docx_reader.py        # python-docx — extract text + estimated pages
+    │   ├── excel_reader.py       # openpyxl — extract text from all sheets
+    │   ├── document_search.py    # Keyword search (TF-IDF-like), chunking, RAG stubs
+    │   ├── doc_generator.py      # Gemini prompt builder for all 11 doc types
+    │   └── doc_exporter.py       # Markdown → styled DOCX (python-docx)
+    │
+    ├── templates\
+    │   └── index.html            # Single-page app shell
+    │
+    ├── static\
+    │   ├── css\
+    │   │   └── style.css         # All styles (~1,450 lines)
+    │   └── js\
+    │       ├── projects.js       # Project CRUD, sidebar, project switching
+    │       ├── documents.js      # Upload, list, delete, drag-and-drop
+    │       ├── insights.js       # Document Insights panel
+    │       ├── chat.js           # SSE chat, streaming, sources strip
+    │       ├── validation_config.js  # Config for all 11 doc types (fields, labels, colors)
+    │       └── validation.js     # 4-step wizard engine, viewer, export/save
+    │
+    └── uploads\
+        └── {project_id}\         # Uploaded files, one folder per project
+```
+
+---
+
+## Database Schema
+
+**File:** `pharmagpt/pharmagpt.db` (SQLite 3)  
+All foreign keys use `ON DELETE CASCADE`.
+
+### `projects`
+| Column | Type | Notes |
+|---|---|---|
+| id | INTEGER PK | Auto-increment |
+| name | TEXT NOT NULL | User-chosen project title |
+| equipment_name | TEXT | e.g. "Agilent HPLC 1260" |
+| manufacturer | TEXT | e.g. "Agilent Technologies" |
+| department | TEXT | e.g. "Quality Control" |
+| validation_type | TEXT | e.g. "IQ/OQ/PQ", "CSV", "FAT" |
+| created_at | TIMESTAMP | Default: current timestamp |
+
+### `messages`
+| Column | Type | Notes |
+|---|---|---|
+| id | INTEGER PK | |
+| project_id | INTEGER FK → projects | Cascade delete |
+| role | TEXT | `'user'` or `'model'` |
+| content | TEXT | Full message text |
+| created_at | TIMESTAMP | |
+
+### `documents`
+| Column | Type | Notes |
+|---|---|---|
+| id | INTEGER PK | |
+| project_id | INTEGER FK → projects | Cascade delete |
+| original_name | TEXT | Browser filename (may have spaces) |
+| stored_filename | TEXT | Sanitised on-disk name (secure_filename) |
+| file_type | TEXT | Extension: `pdf`, `docx`, `xlsx`, `txt` |
+| file_size | INTEGER | Bytes |
+| upload_date | TIMESTAMP | |
+
+### `document_text`
+| Column | Type | Notes |
+|---|---|---|
+| id | INTEGER PK | |
+| document_id | INTEGER FK → documents UNIQUE | One row per doc |
+| project_id | INTEGER FK → projects | |
+| text_content | TEXT | Extracted plain text |
+| page_count | INTEGER | Real pages (PDF) or word-count estimate |
+| word_count | INTEGER | Total words extracted |
+| extraction_status | TEXT | `'ok'` / `'empty'` / `'error'` |
+| extracted_at | TIMESTAMP | |
+
+### `generated_documents`
+| Column | Type | Notes |
+|---|---|---|
+| id | INTEGER PK | |
+| project_id | INTEGER FK → projects | Cascade delete |
+| doc_type | TEXT | `'OQ'`, `'IQ'`, `'URS'`, etc. |
+| title | TEXT | Auto-generated: `"{Equipment} — {Type} {Protocol}"` |
+| form_data | TEXT | JSON blob of wizard form values |
+| content | TEXT | Raw markdown from Gemini |
+| created_at | TIMESTAMP | |
+
+---
+
+## API Routes
+
+### Core
+| Method | Route | Description |
+|---|---|---|
+| GET | `/` | Serve SPA shell |
+| GET | `/projects` | List all projects |
+| POST | `/projects` | Create project |
+| GET | `/projects/<id>` | Get single project |
+| DELETE | `/projects/<id>` | Delete project + cascade |
+| GET | `/projects/<id>/messages` | Load chat history |
+| POST | `/stream` | SSE chat stream (with optional doc context) |
+| POST | `/clear` | Clear project chat history |
+
+### Documents
+| Method | Route | Description |
+|---|---|---|
+| GET | `/projects/<id>/documents` | List uploaded documents |
+| POST | `/projects/<id>/documents` | Upload + auto-extract text |
+| GET | `/documents/<id>/view` | Inline view (PDF/TXT) or download (DOCX/XLSX) |
+| GET | `/documents/<id>/download` | Force-download |
+| DELETE | `/documents/<id>` | Delete metadata + file from disk |
+| GET | `/projects/<id>/insights` | Aggregated doc stats |
+
+### Validation (v0.6)
+| Method | Route | Description |
+|---|---|---|
+| POST | `/validation/generate` | SSE: generate a document with Gemini |
+| POST | `/validation/export/docx` | Convert markdown → DOCX download |
+| POST | `/validation/save` | Save generated doc to DB |
+| GET | `/projects/<id>/generated-docs` | List saved generated docs |
+| GET | `/generated-docs/<id>` | Get a single generated doc |
+| DELETE | `/generated-docs/<id>` | Delete a generated doc |
+
+---
+
+## Features Completed
+
+### v0.1 — Foundation
+- Single-file interactive Gemini CLI chat (`hello.py`) with retry logic
+- `gemini-2.5-flash` model, streaming output, conversation memory
+
+### v0.2 — PharmaGPT Web App
+- Flask SPA with dark sidebar + chat view
+- SSE streaming (`generate_content_stream`) with per-token rendering
+- `PHARMA_SYSTEM_PROMPT` — Senior Pharmaceutical Validation Engineer persona
+- Regulatory compliance: USFDA 21 CFR Part 11, EU GMP Annex 11, MHRA, WHO-GMP, CDSCO, TGA
+
+### v0.3 — Project Management
+- Create / list / delete projects with equipment metadata
+- Per-project conversation history (SQLite `messages` table)
+- In-memory history cache (`dict[int, list]`) rebuilt from DB on restart
+- "Clear History" per project
+
+### v0.4 — Document Management
+- Upload PDF, DOCX, XLSX, TXT (max 50 MB)
+- Drag-and-drop upload zone
+- Inline view (PDF/TXT in browser) and force-download
+- Delete with physical file removal
+
+### v0.5 — AI Document Intelligence
+- Auto text extraction on upload: pdfplumber (PDF), python-docx (DOCX), openpyxl (XLSX)
+- Extracted text stored in `document_text` table; upload never fails due to extraction errors
+- Keyword search: overlapping chunks (400 words, 60-word overlap), TF-IDF-like Jaccard scoring
+- "☑ Use Project Documents" checkbox above chat input
+- Document context injected into Gemini prompt; source filenames returned in SSE done event
+- "Sources: • URS.pdf • Equipment Manual.docx" strip rendered below AI responses
+- Document Insights panel: doc count, total pages/words, file type badges, extraction progress bar
+- RAG stubs (`generate_embedding`, `upsert_to_vector_store`, `vector_search`) ready for v0.7+
+
+### v0.6 — Validation Document Generator ✅ CURRENT
+- Collapsible "Validation" sidebar section with all 11 document types
+- 4-step wizard (Equipment → Details → Reference Docs → Generate) — generic, config-driven
+- 11 supported document types: URS, DQ, FAT, SAT, IQ, OQ, PQ, FMEA, CAPA, Deviation, Change Control
+- Each type has tailored AI prompt with pharmaceutical section structure and regulatory citations
+- Document generation streams in real-time via SSE into a Word-like A4 viewer
+- Export DOCX: `markdown_to_docx()` state-machine parser → python-docx with pharma styling
+- Export PDF: browser `window.print()` with print-optimised CSS (no server-side GTK/WeasyPrint needed)
+- Save to Project: stored in `generated_documents` table, re-openable
+- Viewer toolbar: Regenerate · Export DOCX · Print/PDF · Save to Project
+- `temperature=0.3` for consistent document structure (vs `default` for chat)
+- `validation_config.js` — single config file drives wizard fields for all 11 doc types
+
+---
+
+## Pending Features
+
+### v0.7 — Saved Document Library
+- View all previously generated documents per project
+- Re-open, regenerate, or export from saved documents
+- Diff view between two versions of the same doc type
+
+### v0.7 — Vector RAG Upgrade
+- Replace keyword search with real embeddings (`generate_embedding` stub is in `document_search.py`)
+- Use Gemini text-embedding-004 or equivalent
+- Vector store options: Chroma (local) or Pinecone (cloud)
+- Upgrade chat and validation generation to use vector similarity search
+
+### Future
+- Audit trail / approval workflow (Author → Reviewer → Approver signatures)
+- Multi-user support with role-based access (QA, Validation, Operator)
+- Templates library for site-specific SOPs
+- Audit Prep assistant (gap analysis against regulatory standards)
+- Export to PDF server-side (WeasyPrint on Linux, or headless Chrome)
+
+---
+
+## Important Implementation Details
+
+### SSE Streaming
+- Chat: `POST /stream` → `generate_content_stream()` → `text/event-stream`
+- Validation: `POST /validation/generate` → same pipeline, `temperature=0.3`
+- Flask request context must be captured **before** entering the generator function
+- History is appended to in-memory cache before the generator runs (not inside it)
+
+### Document Text Extraction
+- Runs synchronously during upload (`_extract_and_store()`)
+- All exceptions are caught — upload HTTP 201 is always returned even if extraction fails
+- `extraction_status` is `'ok'`, `'empty'`, or `'error'`
+- TXT files: UTF-8 with `errors='replace'` — handles encoding issues gracefully
+
+### DOCX Export
+- `doc_exporter.py` is a line-by-line state machine (not a full markdown parser)
+- Table rows are accumulated until a non-`|` line is seen, then flushed as a Word table
+- Inline `**bold**` and `*italic*` are handled with regex split + multiple runs per paragraph
+- Page header (right-aligned, thin bottom border) and footer (centred, auto page number) on every page
+- A4 page, 1.25" left margin, 1.0" right margin — standard pharmaceutical document layout
+
+### PDF Export
+- Client-side: `printDocument()` opens a new window with stripped-down HTML + print CSS
+- Professional output without server dependencies (no WeasyPrint, no GTK, no wkhtmltopdf)
+- Print CSS targets standard pharma typography: Calibri/Segoe UI, navy headings, grid tables
+
+### History Cache
+- `history_cache: dict[int, list]` — maps project_id → list of `types.Content` objects
+- Rebuilt from `messages` table on first access per project per server lifetime
+- Cleared on project delete and on Gemini `ServerError`
+- The clean user message (without injected doc context) is saved to `messages` table
+
+### Keyword Search (v0.5 RAG)
+- `chunk_text(text, chunk_size=400, overlap=60)` — word-level overlapping chunks
+- `_tokenise(text)` — lowercase, strip punctuation, tokens > 2 chars
+- `score_chunk(chunk, query_tokens)` — Jaccard overlap + mild length bonus
+- Top-k chunks assembled into `=== DOCUMENT CONTEXT ===\n[Source: doc.pdf]\n...` block
+- Max 2,500 context words sent to Gemini to stay within token budget
+
+### Config-Driven Wizard
+- `validation_config.js` is the single source of truth for all 11 doc types
+- Each type defines: `label`, `short`, `icon`, `color`, `step2[]` (id, label, type, placeholder, required)
+- `validation.js` is fully generic — it reads the config at runtime, never hardcodes fields
+- Adding a new document type requires only: one entry in `validation_config.js` + one prompt function in `doc_generator.py`
+
+---
+
+## Current Architecture
+
+```
+Browser (SPA)
+│
+├── projects.js     — project list, create/delete, active project state
+├── documents.js    — upload, list, delete, drag-and-drop
+├── insights.js     — document stats panel
+├── chat.js         — SSE stream, message rendering, sources strip, use-docs checkbox
+├── validation_config.js  — 11 doc type definitions
+└── validation.js   — 4-step wizard, SSE viewer, export/save
+
+        ↕ HTTP / SSE (fetch + EventSource-style ReadableStream)
+
+Flask app.py
+│
+├── /stream               → Gemini SSE (chat)
+├── /validation/generate  → Gemini SSE (temperature=0.3, structured prompt)
+├── /validation/export/docx → markdown_to_docx() → bytes download
+├── /projects/*           → SQLite CRUD
+├── /documents/*          → file system + SQLite CRUD
+└── /projects/*/insights  → aggregated DB query
+
+        ↕
+
+services/
+├── document_search.py   → keyword chunk search
+├── doc_generator.py     → prompt builder (11 types)
+└── doc_exporter.py      → markdown → DOCX
+
+        ↕
+
+SQLite (pharmagpt.db)
+├── projects
+├── messages
+├── documents
+├── document_text
+└── generated_documents
+
+        ↕
+
+Google Gemini API
+└── gemini-2.5-flash
+    ├── Chat: system_instruction=PHARMA_SYSTEM_PROMPT, default temperature
+    └── Validation: system_instruction=PHARMA_SYSTEM_PROMPT, temperature=0.3
+```
+
+---
+
+## Environment Setup
+
+```
+# .env (at D:\PharmaAgent\.env)
+GEMINI_API_KEY=your_key_here
+FLASK_SECRET_KEY=change-in-production
+FLASK_DEBUG=true
+FLASK_PORT=5000
+
+# Start server
+cd D:\PharmaAgent
+.\venv\Scripts\python pharmagpt\app.py
+```
+
+**Key dependencies** (installed in venv):
+- `flask` — web framework
+- `google-genai` — Gemini SDK (`genai.Client`)
+- `pdfplumber` — PDF text extraction
+- `python-docx` — DOCX read + write
+- `openpyxl` — XLSX extraction
+- `python-dotenv` — `.env` loading

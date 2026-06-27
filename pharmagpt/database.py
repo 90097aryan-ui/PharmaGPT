@@ -1,0 +1,401 @@
+"""
+database.py — SQLite interface for PharmaGPT.
+
+Tables
+──────
+projects       : One row per validation project. Stores equipment/dept metadata.
+
+messages       : Every chat turn (user + AI) linked to a project. Rebuilds the
+                 Gemini conversation history on load.
+
+documents      : Metadata for every uploaded file. The actual file lives on disk
+                 under uploads/{project_id}/{stored_filename}. The DB row holds
+                 the name, type, size, and upload date so we can list and serve
+                 files without scanning the filesystem.
+
+document_text  : Extracted plain text for each document, stored after upload.
+                 Used by document_search.py for keyword search (v0.5) and
+                 will feed vector embeddings in v0.6+.
+                 page_count stores actual pages (PDF) or an estimate (DOCX/XLSX/TXT).
+                 word_count enables the Document Insights dashboard.
+
+All tables are created automatically on first startup via init_db().
+Database file: pharmagpt/pharmagpt.db
+"""
+
+import sqlite3
+import os
+
+# Absolute path to the SQLite file — sits inside the pharmagpt/ package folder.
+DB_PATH = os.path.join(os.path.dirname(__file__), "pharmagpt.db")
+
+
+def get_connection() -> sqlite3.Connection:
+    """Open (or create) the database and return a connection.
+    row_factory=sqlite3.Row makes every row behave like a dict."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    # Enforce foreign-key constraints (SQLite disables them by default)
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def init_db() -> None:
+    """Create tables if they do not already exist. Safe to call on every startup."""
+    conn = get_connection()
+    conn.executescript("""
+        -- ── projects ──────────────────────────────────────────────────────────
+        -- Each project represents one validation activity (e.g., IQ for HPLC).
+        CREATE TABLE IF NOT EXISTS projects (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT    NOT NULL,           -- user-chosen project title
+            equipment_name  TEXT    DEFAULT '',         -- e.g. "Agilent HPLC 1260"
+            manufacturer    TEXT    DEFAULT '',         -- e.g. "Agilent Technologies"
+            department      TEXT    DEFAULT '',         -- e.g. "Quality Control"
+            validation_type TEXT    DEFAULT '',         -- e.g. "IQ/OQ/PQ", "CSV", "FAT"
+            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- ── messages ──────────────────────────────────────────────────────────
+        -- Every chat turn (user question + AI reply) is stored here.
+        -- Linked to a project so history can be reconstructed per-project.
+        -- ON DELETE CASCADE means deleting a project also deletes its messages.
+        CREATE TABLE IF NOT EXISTS messages (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id  INTEGER NOT NULL,
+            role        TEXT    NOT NULL CHECK(role IN ('user', 'model')),
+            content     TEXT    NOT NULL,
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        -- ── documents ─────────────────────────────────────────────────────────
+        -- Metadata for every file uploaded to a project.
+        -- The file itself lives at  uploads/{project_id}/{stored_filename}.
+        -- original_name  = what the user's browser sent (may have spaces, caps)
+        -- stored_filename = sanitised name actually written to disk (secure_filename)
+        -- file_size is in bytes; the UI converts it to KB/MB for display.
+        -- ON DELETE CASCADE removes document rows when the project is deleted,
+        -- but the caller must also delete the physical file (see documents.py).
+        CREATE TABLE IF NOT EXISTS documents (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id      INTEGER NOT NULL,
+            original_name   TEXT    NOT NULL,
+            stored_filename TEXT    NOT NULL,
+            file_type       TEXT    NOT NULL,   -- extension: pdf, docx, xlsx, txt
+            file_size       INTEGER NOT NULL,   -- bytes
+            upload_date     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        -- ── document_text ──────────────────────────────────────────────────────
+        -- Plain text extracted from each uploaded document on upload.
+        -- One row per document (UNIQUE on document_id enforces this).
+        -- Used for keyword search (v0.5) and future vector embeddings (v0.6+).
+        -- extraction_status: 'ok' | 'empty' | 'error'
+        CREATE TABLE IF NOT EXISTS document_text (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id      INTEGER NOT NULL UNIQUE,
+            project_id       INTEGER NOT NULL,
+            text_content     TEXT    NOT NULL DEFAULT '',
+            page_count       INTEGER NOT NULL DEFAULT 0,
+            word_count       INTEGER NOT NULL DEFAULT 0,
+            extraction_status TEXT   NOT NULL DEFAULT 'ok',
+            extracted_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+            FOREIGN KEY (project_id)  REFERENCES projects(id)  ON DELETE CASCADE
+        );
+
+        -- ── generated_documents ────────────────────────────────────────────────
+        -- AI-generated validation documents (OQ, IQ, PQ, URS, etc.).
+        -- form_data is stored as JSON so the wizard can be pre-filled on re-open.
+        -- content is the raw markdown returned by Gemini; exported to DOCX/PDF on demand.
+        CREATE TABLE IF NOT EXISTS generated_documents (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id  INTEGER NOT NULL,
+            doc_type    TEXT    NOT NULL,   -- 'OQ' | 'IQ' | 'PQ' | 'URS' | ...
+            title       TEXT    NOT NULL,
+            form_data   TEXT    NOT NULL DEFAULT '{}',   -- JSON
+            content     TEXT    NOT NULL DEFAULT '',     -- markdown
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+    """)
+    conn.commit()
+    conn.close()
+
+
+# ── Project CRUD ──────────────────────────────────────────────────────────────
+
+def create_project(name: str, equipment_name: str, manufacturer: str,
+                   department: str, validation_type: str) -> dict:
+    """Insert a new project row and return the full project dict."""
+    conn = get_connection()
+    cur = conn.execute(
+        """INSERT INTO projects (name, equipment_name, manufacturer, department, validation_type)
+           VALUES (?, ?, ?, ?, ?)""",
+        (name, equipment_name, manufacturer, department, validation_type),
+    )
+    conn.commit()
+    project = dict(conn.execute(
+        "SELECT * FROM projects WHERE id = ?", (cur.lastrowid,)
+    ).fetchone())
+    conn.close()
+    return project
+
+
+def get_all_projects() -> list[dict]:
+    """Return all projects ordered newest-first."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM projects ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_project(project_id: int) -> dict | None:
+    """Return a single project dict, or None if not found."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM projects WHERE id = ?", (project_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def delete_project(project_id: int) -> None:
+    """Delete a project and all its messages (cascade handles messages)."""
+    conn = get_connection()
+    conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    conn.commit()
+    conn.close()
+
+
+# ── Message CRUD ──────────────────────────────────────────────────────────────
+
+def save_message(project_id: int, role: str, content: str) -> None:
+    """Persist one chat turn to the messages table."""
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO messages (project_id, role, content) VALUES (?, ?, ?)",
+        (project_id, role, content),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_project_messages(project_id: int) -> list[dict]:
+    """Return all messages for a project in chronological order.
+    Each dict has keys: role ('user'|'model'), content (str)."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT role, content FROM messages WHERE project_id = ? ORDER BY created_at ASC",
+        (project_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def clear_project_messages(project_id: int) -> None:
+    """Delete all messages for a project without deleting the project itself."""
+    conn = get_connection()
+    conn.execute("DELETE FROM messages WHERE project_id = ?", (project_id,))
+    conn.commit()
+    conn.close()
+
+
+# ── Document CRUD ─────────────────────────────────────────────────────────────
+
+def save_document(project_id: int, original_name: str, stored_filename: str,
+                  file_type: str, file_size: int) -> dict:
+    """Insert a document metadata row and return the full document dict."""
+    conn = get_connection()
+    cur = conn.execute(
+        """INSERT INTO documents (project_id, original_name, stored_filename, file_type, file_size)
+           VALUES (?, ?, ?, ?, ?)""",
+        (project_id, original_name, stored_filename, file_type, file_size),
+    )
+    conn.commit()
+    doc = dict(conn.execute(
+        "SELECT * FROM documents WHERE id = ?", (cur.lastrowid,)
+    ).fetchone())
+    conn.close()
+    return doc
+
+
+def get_project_documents(project_id: int) -> list[dict]:
+    """Return all documents for a project, newest first."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM documents WHERE project_id = ? ORDER BY upload_date DESC",
+        (project_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_document(doc_id: int) -> dict | None:
+    """Return a single document metadata row, or None if not found."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM documents WHERE id = ?", (doc_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def delete_document(doc_id: int) -> None:
+    """Remove a document metadata row from the database.
+    The caller is responsible for deleting the file from disk."""
+    conn = get_connection()
+    conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+    conn.commit()
+    conn.close()
+
+
+# ── Document text CRUD ────────────────────────────────────────────────────────
+
+def save_document_text(document_id: int, project_id: int, text_content: str,
+                       page_count: int, word_count: int,
+                       extraction_status: str = "ok") -> None:
+    """Insert (or replace) extracted text for a document."""
+    conn = get_connection()
+    conn.execute(
+        """INSERT OR REPLACE INTO document_text
+           (document_id, project_id, text_content, page_count, word_count, extraction_status)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (document_id, project_id, text_content, page_count, word_count, extraction_status),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_document_text(document_id: int) -> dict | None:
+    """Return the document_text row for a document, or None if not extracted."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM document_text WHERE document_id = ?", (document_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_all_document_texts(project_id: int) -> list[dict]:
+    """
+    Return all extracted texts for a project, joined with original_name
+    from the documents table so the caller can cite source file names.
+
+    Each dict has: document_id, original_name, text_content, page_count, word_count
+    """
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT dt.document_id, d.original_name, dt.text_content,
+                  dt.page_count, dt.word_count, dt.extraction_status
+           FROM document_text dt
+           JOIN documents d ON d.id = dt.document_id
+           WHERE dt.project_id = ?
+             AND dt.extraction_status = 'ok'
+             AND dt.text_content != ''
+           ORDER BY d.upload_date ASC""",
+        (project_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_project_insights(project_id: int) -> dict:
+    """
+    Return aggregated document statistics for the Document Insights page.
+
+    Returns dict with keys:
+        document_count  : int
+        total_pages     : int
+        total_words     : int
+        file_types      : dict {ext: count}
+        last_upload     : str | None  (ISO timestamp)
+        extracted_count : int  (documents with text extraction successful)
+    """
+    conn = get_connection()
+
+    agg = conn.execute(
+        """SELECT
+               COUNT(d.id)                   AS document_count,
+               MAX(d.upload_date)            AS last_upload,
+               COALESCE(SUM(dt.page_count), 0) AS total_pages,
+               COALESCE(SUM(dt.word_count), 0) AS total_words,
+               COUNT(dt.id)                  AS extracted_count
+           FROM documents d
+           LEFT JOIN document_text dt
+               ON dt.document_id = d.id AND dt.extraction_status = 'ok'
+           WHERE d.project_id = ?""",
+        (project_id,),
+    ).fetchone()
+
+    type_rows = conn.execute(
+        "SELECT file_type, COUNT(*) AS cnt FROM documents WHERE project_id = ? GROUP BY file_type",
+        (project_id,),
+    ).fetchall()
+
+    conn.close()
+
+    file_types = {r["file_type"]: r["cnt"] for r in type_rows}
+
+    return {
+        "document_count":  agg["document_count"] or 0,
+        "last_upload":     agg["last_upload"],
+        "total_pages":     agg["total_pages"] or 0,
+        "total_words":     agg["total_words"] or 0,
+        "extracted_count": agg["extracted_count"] or 0,
+        "file_types":      file_types,
+    }
+
+
+# ── Generated Documents CRUD ──────────────────────────────────────────────────
+
+def save_generated_document(project_id: int, doc_type: str, title: str,
+                            form_data_json: str, content: str) -> dict:
+    """Persist an AI-generated validation document and return the full row."""
+    conn = get_connection()
+    cur = conn.execute(
+        """INSERT INTO generated_documents
+           (project_id, doc_type, title, form_data, content)
+           VALUES (?, ?, ?, ?, ?)""",
+        (project_id, doc_type, title, form_data_json, content),
+    )
+    conn.commit()
+    row = dict(conn.execute(
+        "SELECT * FROM generated_documents WHERE id = ?", (cur.lastrowid,)
+    ).fetchone())
+    conn.close()
+    return row
+
+
+def get_project_generated_documents(project_id: int) -> list[dict]:
+    """Return all generated documents for a project, newest first."""
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT id, project_id, doc_type, title, created_at
+           FROM generated_documents WHERE project_id = ? ORDER BY created_at DESC""",
+        (project_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_generated_document(doc_id: int) -> dict | None:
+    """Return a single generated document row (including full content)."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM generated_documents WHERE id = ?", (doc_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def delete_generated_document(doc_id: int) -> None:
+    """Delete a generated document by id."""
+    conn = get_connection()
+    conn.execute("DELETE FROM generated_documents WHERE id = ?", (doc_id,))
+    conn.commit()
+    conn.close()

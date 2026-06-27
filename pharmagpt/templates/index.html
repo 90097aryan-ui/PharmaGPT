@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PharmaGPT — Pharmaceutical AI Consultant</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+
+  <!-- ── Header ──────────────────────────────────────────────────────────────── -->
+  <header>
+    <div class="header-left">
+      <div class="logo-icon">Rx</div>
+      <div class="header-titles">
+        <h1>PharmaGPT</h1>
+        <p>Senior Pharmaceutical Operations &amp; Validation Consultant</p>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="status-badge">
+        <div class="status-dot"></div>
+        Gemini 2.5 Flash
+      </div>
+      <button class="btn-clear" id="btn-clear">🗑 Clear Chat</button>
+    </div>
+  </header>
+
+  <!-- ── App body ─────────────────────────────────────────────────────────────── -->
+  <div class="app-body">
+
+    <!-- ── Sidebar ───────────────────────────────────────────────────────────── -->
+    <aside class="sidebar">
+
+      <!-- Navigation -->
+      <div class="sidebar-section">
+        <div class="sidebar-label">Navigation</div>
+        <div class="sidebar-item active" id="nav-chat" data-view="view-chat">
+          <span class="icon">💬</span> Chat
+        </div>
+        <div class="sidebar-item" id="nav-documents" data-view="view-documents">
+          <span class="icon">📄</span> Documents
+        </div>
+        <div class="sidebar-item" id="nav-insights" data-view="view-insights">
+          <span class="icon">📊</span> Insights
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Validation Documents section -->
+      <div class="sidebar-section">
+        <div class="sidebar-label-row">
+          <span class="sidebar-label">Validation</span>
+          <button class="val-collapse-btn" id="val-collapse-btn" onclick="toggleValSection()" title="Collapse">▲</button>
+        </div>
+        <div id="val-nav-items">
+          <!-- Rendered by validation_config.js + inline script below -->
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Projects section -->
+      <div class="sidebar-section">
+        <div class="sidebar-label-row">
+          <span class="sidebar-label">Projects</span>
+          <button class="btn-new-project" id="btn-new-project">＋ New</button>
+        </div>
+        <div id="project-list"></div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Regulatory tags -->
+      <div class="sidebar-section">
+        <div class="sidebar-label">Regulatory Coverage</div>
+        <div class="expertise-tags">
+          <span class="tag">USFDA</span><span class="tag">MHRA</span>
+          <span class="tag">CDSCO</span><span class="tag">WHO-GMP</span>
+          <span class="tag">EU GMP</span><span class="tag">TGA</span>
+          <span class="tag">FSSAI</span><span class="tag">ICH Q9</span>
+          <span class="tag">21 CFR</span><span class="tag">Schedule M</span>
+          <span class="tag">GAMP 5</span><span class="tag">Annex 15</span>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Specializations</div>
+        <div class="expertise-tags">
+          <span class="tag">IQ / OQ / PQ</span><span class="tag">CSV</span>
+          <span class="tag">CAPA</span><span class="tag">FMEA</span>
+          <span class="tag">Cleaning Val.</span><span class="tag">Process Val.</span>
+          <span class="tag">Six Sigma</span><span class="tag">OEE</span>
+          <span class="tag">SPC</span><span class="tag">Lean</span>
+          <span class="tag">Blister Pack</span><span class="tag">Sterile Mfg</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── Chat view (default) ──────────────────────────────────────────────── -->
+    <main class="chat-container" id="view-chat">
+
+      <!-- Active project banner -->
+      <div id="active-project-banner" class="active-project-banner" style="display:none">
+        <div class="apb-left">
+          <span class="apb-icon">📁</span>
+          <div>
+            <div class="apb-name" id="active-project-name">—</div>
+            <div class="apb-meta" id="active-project-meta">—</div>
+          </div>
+        </div>
+        <div class="apb-right">
+          <span class="apb-label">Active Project</span>
+        </div>
+      </div>
+
+      <!-- Welcome banner -->
+      <div class="welcome-banner">
+        <span class="icon">🔬</span>
+        <p>
+          <strong>PharmaGPT</strong> is your AI-powered pharmaceutical consultant with 30+ years of simulated
+          expertise. Select or create a <strong>Project</strong> in the sidebar, then ask about GMP compliance,
+          validation protocols, CAPA, regulatory submissions, or any pharmaceutical engineering topic.
+        </p>
+      </div>
+
+      <!-- Messages -->
+      <div id="messages"></div>
+
+      <!-- Input bar -->
+      <div class="input-bar">
+        <!-- Use Documents toggle — shown only when a project is active -->
+        <div class="use-docs-row" id="use-docs-row" style="display:none">
+          <label class="use-docs-label">
+            <input type="checkbox" id="use-docs-checkbox" />
+            <span class="use-docs-checkmark"></span>
+            Use Project Documents
+          </label>
+          <span class="use-docs-hint" id="use-docs-hint">0 documents indexed</span>
+        </div>
+        <div class="input-wrapper">
+          <textarea
+            id="user-input"
+            placeholder="Select or create a project to start chatting…"
+            rows="1"
+          ></textarea>
+          <button id="send-btn" title="Send (Enter)" disabled>&#9654;</button>
+        </div>
+        <p class="input-hint">Press <strong>Enter</strong> to send &nbsp;·&nbsp; <strong>Shift + Enter</strong> for a new line</p>
+      </div>
+    </main>
+
+    <!-- ── Documents view ───────────────────────────────────────────────────── -->
+    <main class="documents-container" id="view-documents" style="display:none">
+
+      <!-- Documents header bar -->
+      <div class="doc-header">
+        <div>
+          <h2 class="doc-title">Documents</h2>
+          <p class="doc-subtitle" id="doc-project-subtitle">Select a project to manage its documents.</p>
+        </div>
+      </div>
+
+      <!-- Upload zone -->
+      <div class="doc-upload-section">
+        <div class="doc-drop-zone" id="doc-drop-zone">
+          <div class="drop-icon">📂</div>
+          <p class="drop-label">Drag &amp; drop a file here</p>
+          <p class="drop-sub">PDF, DOCX, XLSX, TXT &nbsp;·&nbsp; Max 50 MB</p>
+          <button class="btn-upload" id="doc-upload-btn">Choose File</button>
+          <input type="file" id="doc-file-input" accept=".pdf,.docx,.xlsx,.txt" style="display:none" />
+        </div>
+        <div class="doc-status" id="doc-upload-status" style="display:none"></div>
+      </div>
+
+      <!-- Document list -->
+      <div class="doc-list-section">
+        <div class="doc-list-header">
+          <span>Uploaded Files</span>
+          <span id="doc-count" class="doc-count"></span>
+        </div>
+
+        <div class="doc-empty" id="doc-empty">
+          <div style="font-size:40px;margin-bottom:12px">📂</div>
+          <p>No documents uploaded yet.</p>
+          <p style="font-size:12px;margin-top:4px">Upload your first file using the area above.</p>
+        </div>
+
+        <div id="doc-list"></div>
+      </div>
+
+    </main>
+
+    <!-- ── Insights view ─────────────────────────────────────────────────────── -->
+    <main class="insights-container" id="view-insights" style="display:none">
+      <div id="insights-panel">
+        <div class="insights-empty">
+          <div class="insights-empty-icon">📊</div>
+          <p>Select a project to view its Document Insights.</p>
+        </div>
+      </div>
+    </main>
+
+    <!-- ── Validation Document Generator view ───────────────────────────────── -->
+    <main class="validation-container" id="view-validation" style="display:none">
+
+      <!-- Validation header -->
+      <div class="val-header">
+        <div class="val-header-left">
+          <span class="val-doc-badge" id="val-doc-type-badge">OQ</span>
+          <div>
+            <h2 id="val-doc-type-title">Operational Qualification</h2>
+            <p id="val-doc-type-sub">OQ — Protocol Generator</p>
+          </div>
+        </div>
+        <div class="val-header-right">
+          <span class="val-project-tag" id="val-project-tag">No project selected</span>
+        </div>
+      </div>
+
+      <!-- Progress stepper -->
+      <div class="val-progress-bar">
+        <div class="val-step-dot active" id="vstep-dot-1"></div>
+        <span class="val-step-label active" id="vstep-lbl-1">Equipment</span>
+        <div class="val-step-line" id="vstep-line-1"></div>
+        <div class="val-step-dot" id="vstep-dot-2"></div>
+        <span class="val-step-label" id="vstep-lbl-2">Details</span>
+        <div class="val-step-line" id="vstep-line-2"></div>
+        <div class="val-step-dot" id="vstep-dot-3"></div>
+        <span class="val-step-label" id="vstep-lbl-3">Documents</span>
+        <div class="val-step-line" id="vstep-line-3"></div>
+        <div class="val-step-dot" id="vstep-dot-4"></div>
+        <span class="val-step-label" id="vstep-lbl-4">Generate</span>
+      </div>
+
+      <!-- Wizard panels (Steps 1–4) -->
+      <div id="val-wizard" style="display:flex; flex:1; overflow:hidden;">
+        <div id="val-panel-1" class="val-panel" style="display:flex"></div>
+        <div id="val-panel-2" class="val-panel" style="display:none"></div>
+        <div id="val-panel-3" class="val-panel" style="display:none"></div>
+        <div id="val-panel-4" class="val-panel" style="display:none"></div>
+      </div>
+
+      <!-- Document Viewer (shown after generation) -->
+      <div id="val-viewer" style="display:none; flex:1; flex-direction:column; overflow:hidden;"></div>
+
+    </main>
+
+  </div>
+
+  <!-- ── New Project Modal ─────────────────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-overlay"></div>
+  <div class="modal" id="project-modal">
+    <div class="modal-header">
+      <h2>New Project</h2>
+      <button class="modal-close" id="modal-close">✕</button>
+    </div>
+    <form id="project-form" class="modal-body" autocomplete="off">
+      <div class="form-group">
+        <label for="proj-name">Project Name <span class="required">*</span></label>
+        <input id="proj-name" type="text" placeholder="e.g. HPLC Qualification – QC Lab" required />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="proj-equipment">Equipment Name</label>
+          <input id="proj-equipment" type="text" placeholder="e.g. Agilent 1260 HPLC" />
+        </div>
+        <div class="form-group">
+          <label for="proj-manufacturer">Manufacturer</label>
+          <input id="proj-manufacturer" type="text" placeholder="e.g. Agilent Technologies" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="proj-department">Department</label>
+          <input id="proj-department" type="text" placeholder="e.g. Quality Control" />
+        </div>
+        <div class="form-group">
+          <label for="proj-validation-type">Validation Type</label>
+          <select id="proj-validation-type">
+            <option value="">— Select —</option>
+            <option value="DQ">DQ — Design Qualification</option>
+            <option value="IQ">IQ — Installation Qualification</option>
+            <option value="OQ">OQ — Operational Qualification</option>
+            <option value="PQ">PQ — Performance Qualification</option>
+            <option value="IQ/OQ">IQ / OQ</option>
+            <option value="IQ/OQ/PQ">IQ / OQ / PQ</option>
+            <option value="FAT">FAT — Factory Acceptance Testing</option>
+            <option value="SAT">SAT — Site Acceptance Testing</option>
+            <option value="CSV">CSV — Computer System Validation</option>
+            <option value="Process Validation">Process Validation</option>
+            <option value="Cleaning Validation">Cleaning Validation</option>
+            <option value="FMEA">FMEA — Risk Assessment</option>
+            <option value="CAPA">CAPA</option>
+            <option value="Audit Prep">Audit Preparation</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" id="modal-cancel">Cancel</button>
+        <button type="submit" class="btn-primary" id="modal-save">Create Project</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Load order: projects → documents → insights → validation_config → validation → chat -->
+  <script src="{{ url_for('static', filename='js/projects.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/documents.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/insights.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/validation_config.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/validation.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+
+  <!-- ── Validation sidebar nav items (rendered from config) ──────────────── -->
+  <script>
+    (function buildValNav() {
+      const container = document.getElementById("val-nav-items");
+      if (!container || !window.VALIDATION_DOC_ORDER) return;
+
+      const icons = {
+        URS: "📋", DQ: "📐", FAT: "🏭", SAT: "🔩",
+        IQ: "🔧", OQ: "🔬", PQ: "📊",
+        FMEA: "⚠️", CAPA: "🔄", Deviation: "⚡", "Change Control": "🔀",
+      };
+
+      window.VALIDATION_DOC_ORDER.forEach(type => {
+        const cfg  = window.VALIDATION_DOCS[type] || {};
+        const item = document.createElement("div");
+        item.className = "sidebar-item val-nav-item";
+        item.dataset.doctype = type;
+        item.innerHTML = `
+          <span class="icon" style="font-size:13px">${icons[type] || "📄"}</span>
+          <span class="val-nav-label">${type}</span>
+          <span class="val-nav-sub">${cfg.label ? cfg.label.replace(type + " — ", "").replace(type, "").trim() : ""}</span>
+        `;
+        item.addEventListener("click", () => {
+          switchToValidation(type);
+        });
+        container.appendChild(item);
+      });
+    })();
+
+    // Toggle Validation section collapse
+    let valSectionOpen = true;
+    function toggleValSection() {
+      const items = document.getElementById("val-nav-items");
+      const btn   = document.getElementById("val-collapse-btn");
+      valSectionOpen = !valSectionOpen;
+      items.style.display = valSectionOpen ? "block" : "none";
+      btn.textContent = valSectionOpen ? "▲" : "▼";
+    }
+    window.toggleValSection = toggleValSection;
+
+    // Switch to validation view and open the wizard for a doc type
+    function switchToValidation(docType) {
+      // Update sidebar active state
+      document.querySelectorAll(".sidebar-item[data-view]").forEach(n => n.classList.remove("active"));
+      document.querySelectorAll(".val-nav-item").forEach(n => n.classList.remove("active"));
+      const target = document.querySelector(`.val-nav-item[data-doctype="${docType}"]`);
+      if (target) target.classList.add("active");
+
+      // Show validation view
+      document.querySelectorAll("main[id^='view-']").forEach(v => v.style.display = "none");
+      const valView = document.getElementById("view-validation");
+      if (valView) valView.style.display = "flex";
+
+      // Update the project tag in the validation header
+      const tag = document.getElementById("val-project-tag");
+      if (tag) tag.textContent = window.activeProject ? window.activeProject.name : "No project selected";
+
+      // Open the wizard for this doc type
+      if (window.openValidationWizard) window.openValidationWizard(docType);
+    }
+    window.switchToValidation = switchToValidation;
+  </script>
+
+  <!-- ── View navigation (Chat / Documents / Insights) ─────────────────────── -->
+  <script>
+    const navItems = document.querySelectorAll(".sidebar-item[data-view]");
+    const views    = document.querySelectorAll("main[id^='view-']");
+
+    navItems.forEach(nav => {
+      nav.addEventListener("click", () => {
+        const targetId = nav.dataset.view;
+
+        navItems.forEach(n => n.classList.remove("active"));
+        document.querySelectorAll(".val-nav-item").forEach(n => n.classList.remove("active"));
+        nav.classList.add("active");
+
+        views.forEach(v => {
+          v.style.display = v.id === targetId ? "flex" : "none";
+        });
+
+        if (targetId === "view-documents") {
+          const subtitle = document.getElementById("doc-project-subtitle");
+          if (window.activeProject) {
+            subtitle.textContent = `Project: ${window.activeProject.name}`;
+            if (window.loadDocuments) window.loadDocuments();
+          } else {
+            subtitle.textContent = "Select a project to manage its documents.";
+          }
+        }
+
+        if (targetId === "view-insights") {
+          if (window.loadInsights) window.loadInsights();
+        }
+      });
+    });
+  </script>
+
+</body>
+</html>
