@@ -1,0 +1,472 @@
+"""Packaging equipment: Blister Packing, Bottle Filling, Cartoner, Labeler."""
+
+from equipment import EquipmentProfile, _register
+
+# ─── Blister Packing Machine ──────────────────────────────────────────────────
+
+_register(EquipmentProfile(
+    name="BLISTER PACKING MACHINE",
+    aliases=["blister packager", "blister packaging machine", "blister pack machine",
+             "alu-alu blister", "pvc blister", "blister sealer", "blister line",
+             "thermoform blister", "cold form blister"],
+    description=(
+        "A Blister Packing Machine seals individual doses (tablets, capsules, ampoules) into "
+        "pre-formed cavities in a PVC/PVDC/Aluminium base film, sealed with aluminium lidding foil. "
+        "Thermoforming (PVC) and cold-forming (Alu-Alu) lines operate at 100–600 blister strokes/min. "
+        "Critical for product integrity, child-resistance, and moisture/oxygen barrier protection. "
+        "Online vision systems and leak detection are standard GMP requirements."
+    ),
+    applicable_regulations=[
+        "21 CFR Part 211.130 — Packaging and labelling operations",
+        "21 CFR Part 211.134 — Drug product inspection",
+        "EU GMP Chapter 5 — Production",
+        "EU GMP Annex 1 (for sterile blister packaging)",
+        "EU GMP Annex 15 — Qualification and Validation",
+        "ISO 15378 — Primary packaging materials for medicinal products",
+        "ISO 11607 — Packaging for terminally sterilized medical devices (sterile blisters)",
+        "Schedule M — GMP for Pharmaceuticals (India)",
+    ],
+    required_utilities=[
+        "Electrical: 380–415 V, 3-phase, 50 Hz; HMI/controls 220–240 V",
+        "Compressed air: clean, dry, oil-free, 6–8 bar (forming, sealing, punching)",
+        "Cooling water: forming station water-cooled plates 15–20°C, 2–3 bar",
+        "Heating: electric heating elements for forming and sealing stations",
+        "Cleanroom: Grade D or secondary packaging area; humidity control critical (PVC hygroscopic)",
+        "Nitrogen purging: for oxygen-sensitive products (N₂ flushing of blister before sealing)",
+    ],
+    critical_components=[
+        "Film unwind station with tension control (base film: PVC, PVDC, PVC/PVDC, Alu-Alu)",
+        "Pre-heating and forming station (thermoforming: positive pressure or vacuum forming)",
+        "Cold-forming station (Alu-Alu: 200–600 bar forming pressure)",
+        "Product feeding station (vision system for correct tablet/capsule placement)",
+        "Lidding foil unwind with tension control",
+        "Sealing station (temperature and pressure controlled)",
+        "Punching / cutting station (die-cut tooling for blister card dimensions)",
+        "Online vision inspection (empty blister, cracked tablet, foreign body detection)",
+        "Leak test system (blue dye or online camera)",
+        "Embossing unit (lot number, expiry on lidding foil)",
+        "HMI / PLC with recipe management and audit trail",
+    ],
+    iq_checklist=[
+        "Verify blister machine model, forming type (thermo/cold), and output capacity against URS/PO",
+        "Confirm forming station temperature range and controller (typically 100–180°C for PVC)",
+        "Verify sealing station: temperature range, pressure, and dwell time range",
+        "Check cooling plate water supply connections and temperature controller",
+        "Verify vision system installation: camera positions cover all blister cavities",
+        "Confirm online leak test system type and installation (blue dye or online alternative)",
+        "Check embossing unit: wheel type, foil compatibility",
+        "Verify film reel holders: base film and lidding film tension controller",
+        "Confirm HMI software version, recipe management, and audit trail activation",
+        "Check product-contact parts: no copper or reactive materials in product zone",
+        "Verify all safety guards, interlock switches, and emergency stop functionality",
+        "Confirm equipment registration in asset management system",
+        "Check N₂ flushing system installation (if applicable)",
+    ],
+    oq_tests=[
+        "Forming temperature accuracy: ±3°C of set value (all forming stations)",
+        "Sealing temperature accuracy: ±3°C of set value",
+        "Sealing pressure accuracy: ±0.5 bar of set value",
+        "Line speed accuracy: strokes/min ±5% at low, medium, and high speed",
+        "Vision system: 100% detection of empty cavities (spiked test with intentional empties)",
+        "Vision system: detection of cracked tablets (spiked test)",
+        "Leak test system: 100% detection of perforated blisters (spiked defective blisters)",
+        "Embossing legibility: lot number and expiry date readable on 10 consecutive blister cards",
+        "Punching accuracy: card dimension ±0.5 mm of specification",
+        "Nitrogen flushing (if used): O₂ residual ≤ 2% in sealed cavity (oxygen analyser test)",
+        "Rejection system: vision-failed and leak-failed blister cards 100% rejected",
+        "Audit trail: all parameter changes logged with user, timestamp, old/new values",
+    ],
+    pq_tests=[
+        "Seal integrity over full batch: 0% leakers in 100-card AQL sample (blue dye immersion test)",
+        "Product fill accuracy: 100% fill — verified by vision system count over 3 shifts",
+        "Blister appearance: ≤ 0.2% visual defects (AQL inspection per ISO 2859)",
+        "Embossing legibility: 100% legible lot/expiry on finished batch AQL",
+        "Peel strength: ≥ 10 N per 15 mm width (lidding-to-base bond strength)",
+        "Moisture barrier performance: tablets meet moisture gain spec after accelerated stability",
+        "Throughput: rated output sustained over 8-hour production run without quality impact",
+        "3 consecutive batches meeting all CQAs",
+    ],
+    calibration_points=[
+        "Forming station temperature (±3°C): NIST-traceable K-type thermocouple surface probe",
+        "Sealing station temperature (±3°C): NIST-traceable thermocouple",
+        "Sealing pressure (±0.5 bar): calibrated reference pressure gauge",
+        "Line speed (strokes/min): calibrated tachometer or manual count",
+        "Embossing force / depth (if servo-controlled): calibrated force gauge",
+    ],
+    safety_checks=[
+        "All guards interlocked: machine halts within 0.5 s of guard opening",
+        "Emergency stop accessible from both operator sides and at film unwind",
+        "Heating element thermal cutoff: max temperature limiter tested",
+        "Pinch-point guards at film unwind reels",
+        "Hot surface labelling on forming and sealing stations",
+        "Lockout/tagout procedure for format change and tooling changeover",
+    ],
+    documentation_checklist=[
+        "Vendor FAT report and site installation certificate",
+        "Tooling (forming, sealing, punching die) dimensional certificates",
+        "Vision system validation report and detection threshold records",
+        "Leak test system qualification report",
+        "HMI/PLC software validation report and audit trail configuration",
+        "Primary packaging specification (base film, lidding foil CoA per ISO 15378)",
+        "Cleaning and changeover SOP",
+        "Instrument logbook (calibration, PM, format changes, deviations)",
+        "Approved batch packaging records",
+        "Training records for all line operators",
+        "Preventive Maintenance SOP",
+    ],
+    standard_acceptance_criteria=[
+        "Forming and sealing temperature: ±3°C of set values",
+        "Sealing pressure: ±0.5 bar",
+        "Vision system detection: 100% empty cavity / cracked tablet detection",
+        "Leak test: 0% leakers in AQL sample",
+        "Peel strength: ≥ 10 N/15 mm",
+        "Embossing legibility: 100% readable",
+        "Product fill rate: 100% (zero empty cavities in finished batch)",
+        "Throughput: within ±5% of rated capacity",
+    ],
+    common_deviations=[
+        "Sealing defect (open blister) due to forming temperature drop — enforce temperature alarm limits",
+        "Vision system false rejects exceeding 1% — camera calibration and lighting check required",
+        "Film wrinkle causing poor seal — investigate film tension control and forming temperature",
+        "Embossing smear / illegibility — check embossing wheel pressure and foil type compatibility",
+        "Blister colour variation — investigate PVC film humidity exposure before forming",
+        "Leak test blue dye staining product — use non-contact leak test method for sensitive tablets",
+    ],
+))
+
+
+# ─── Bottle Filling Line ──────────────────────────────────────────────────────
+
+_register(EquipmentProfile(
+    name="BOTTLE FILLING LINE",
+    aliases=["bottle filler", "bottle filling machine", "liquid bottle filling",
+             "tablet bottle filling", "oral liquid filling", "syrup filling machine",
+             "bottle filling and capping", "bottle line"],
+    description=(
+        "A Bottle Filling Line fills pharmaceutical bottles with tablets, capsules, powders, "
+        "or liquids and applies closures (caps), desiccants, induction seals, and labels. "
+        "Liquid lines include volumetric fill heads (piston, peristaltic, or rotary valve); "
+        "solid lines use count systems or weight-based fill. Integrated with capping, "
+        "induction sealing, labelling, and checkweigher modules."
+    ),
+    applicable_regulations=[
+        "21 CFR Part 211.130 — Packaging and labelling operations",
+        "21 CFR Part 211.134 — Drug product inspection",
+        "21 CFR Part 211.160 — General requirements (fill control)",
+        "EU GMP Chapter 5 — Production",
+        "EU GMP Annex 15 — Qualification and Validation",
+        "USP <1> — Injections (if parenteral filling — separate validation)",
+        "ISO 15378 — Primary packaging for medicinal products",
+        "Schedule M — GMP for Pharmaceuticals (India)",
+    ],
+    required_utilities=[
+        "Electrical: 380–415 V, 3-phase, 50 Hz; HMI 220–240 V",
+        "Compressed air: clean, dry, oil-free, 6–8 bar",
+        "Purified water (liquid filling): WFI or purified water as appropriate",
+        "Nitrogen purging (liquid): for oxygen-sensitive liquids",
+        "Controlled environment: Grade D for non-sterile; Grade C/A for sterile liquids",
+        "Temperature control: 18–25°C for product stability during filling",
+    ],
+    critical_components=[
+        "Bottle unscrambler / feeding system",
+        "Fill head assembly: piston, peristaltic, or rotary valve (volumetric or weight-based)",
+        "Fill volume / weight control and in-process checkweigher",
+        "Desiccant insertion system (if applicable)",
+        "Capping station (ROPP, child-resistant, tamper-evident caps)",
+        "Induction sealing unit (for aluminium induction liners)",
+        "Labelling station (pressure-sensitive, wrap-around)",
+        "Online vision system (fill level, cap presence, label placement)",
+        "Conveyors and bottle orientation guides",
+        "HMI/PLC with recipe management and audit trail",
+    ],
+    iq_checklist=[
+        "Verify filling machine model, fill head number, and fill volume range against URS/PO",
+        "Confirm product-contact materials: 316L SS, silicone tubing (FDA-grade), PTFE seals",
+        "Verify fill head calibration equipment (calibrated balance) availability",
+        "Check capping head torque adjustment range covers required closure torque",
+        "Confirm induction sealing power output range and conveyor speed compatibility",
+        "Verify online vision system camera positions and detection capabilities",
+        "Check compressed air filtration: 0.2 µm sterile filter on product-contact air (sterile lines)",
+        "Confirm HMI software version, recipe management, and audit trail activation",
+        "Verify all safety guards, interlock switches, and emergency stops",
+        "Confirm equipment registration in asset management system",
+    ],
+    oq_tests=[
+        "Fill volume/weight accuracy: target ±2% at 3 fill levels (liquid) or ±2 tablets/capsules (solid)",
+        "Fill weight RSD: ≤ 1.5% across 10 consecutive fills at each speed",
+        "Capping torque accuracy: set vs. measured (calibrated torque gauge) ±10%",
+        "Induction seal integrity: seal bubble or dye immersion test — 100% integrity",
+        "Fill speed: set vs. actual bottles/hour ±5%",
+        "Vision system: 100% detection of underfill, missing cap, and missing label (spiked test)",
+        "Checkweigher rejection: 100% rejection of under/overfill bottles (spiked test)",
+        "Nitrogen purging (if used): O₂ headspace ≤ 2% in sealed bottles (O₂ analyser test)",
+        "Audit trail: all parameter changes logged with user, timestamp, old/new values",
+    ],
+    pq_tests=[
+        "Fill accuracy over full batch run: AQL check — 0% out-of-specification fills",
+        "Capping torque consistency: removal torque 20–40% higher than application torque",
+        "Label placement accuracy: ≤ 1 mm deviation from specification over AQL sample",
+        "Vision system false reject rate: ≤ 0.1% over full batch",
+        "Batch-to-batch fill consistency: 3 consecutive batches within specification",
+        "Process capability: Cpk ≥ 1.33 for fill weight/volume",
+    ],
+    calibration_points=[
+        "Fill head volume / weight at 50%, 100%, 150% of target",
+        "Checkweigher load cell at 3 points across fill weight range",
+        "Capping torque head: application torque gauge",
+        "Induction sealing power meter (W) and conveyor speed (m/min)",
+        "Vision system: sensitivity and false positive rate (with spiked defective samples)",
+    ],
+    safety_checks=[
+        "All guards interlocked: line stops when any guard is opened",
+        "Emergency stop accessible at each station",
+        "Induction sealing RF hazard: operator shielding in place, no metallic implants warning",
+        "Lockout/tagout procedure for format change and cleaning",
+        "Spill containment tray under liquid fill heads",
+    ],
+    documentation_checklist=[
+        "Vendor FAT and site installation certificates",
+        "Fill head calibration certificates",
+        "Vision system validation report",
+        "Induction sealer power calibration certificate",
+        "Capping torque gauge calibration certificate",
+        "Primary packaging material CoAs (bottles, caps, liners)",
+        "HMI/PLC software validation report",
+        "Cleaning validation SOP",
+        "Instrument logbook (calibration, PM, format changes, deviations)",
+        "Training records for all line operators",
+    ],
+    standard_acceptance_criteria=[
+        "Fill volume/weight accuracy: ±2% of target",
+        "Fill weight RSD: ≤ 1.5% (10 consecutive fills)",
+        "Capping torque: within ±10% of specification",
+        "Induction seal integrity: 0 failures in AQL sample",
+        "Vision system detection: 100% for all programmed defect categories",
+        "Process capability: Cpk ≥ 1.33 for fill weight",
+    ],
+    common_deviations=[
+        "Fill weight drift due to peristaltic tube wear — implement tube replacement schedule",
+        "Capping torque inconsistency — inspect capping chuck and spring wear",
+        "Induction seal failure due to incorrect liner type or conveyor speed",
+        "Label skew > 1 mm — adjust label applicator belt tension and sensor position",
+        "Vision system false rejects > 0.1% — retrain vision system with product-specific images",
+    ],
+))
+
+
+# ─── Cartoner ─────────────────────────────────────────────────────────────────
+
+_register(EquipmentProfile(
+    name="CARTONER",
+    aliases=["cartoning machine", "end-load cartoner", "top-load cartoner",
+             "horizontal cartoner", "carton erector", "carton closer", "cartoning line"],
+    description=(
+        "A Cartoner (Cartoning Machine) erects flat paperboard cartons, inserts product "
+        "(blister cards, bottles, tubes, vials) and leaflet, then tucks or glues the carton "
+        "closed. End-load (horizontal) cartoners handle 50–500 cartons/min. "
+        "Integrated with leaflet insertion, barcode verification, and vision inspection. "
+        "Critical for secondary packaging integrity, leaflet compliance, and traceability."
+    ),
+    applicable_regulations=[
+        "21 CFR Part 211.130 — Packaging and labelling operations",
+        "21 CFR Part 211.122 — Materials examination and usage criteria",
+        "EU GMP Chapter 5 — Production",
+        "EU GMP Annex 15 — Qualification and Validation",
+        "EU Falsified Medicines Directive (FMD) — Serialisation and tamper evidence",
+        "ISO 15378 — Primary packaging materials",
+        "Schedule M — GMP for Pharmaceuticals (India)",
+    ],
+    required_utilities=[
+        "Electrical: 380–415 V, 3-phase, 50 Hz; HMI 220–240 V",
+        "Compressed air: clean, dry, 6 bar (carton erection, tucker operation, glue application)",
+        "Hot melt glue: temperature 160–180°C, pressure 2–5 bar (if glue-close model)",
+        "Cleanroom or controlled secondary packaging area: 18–25°C",
+    ],
+    critical_components=[
+        "Carton magazine / hopper with erector assembly",
+        "Product in-feed conveyor (blister, bottle, tube)",
+        "Leaflet feeding and folding system",
+        "Carton transport chain / lugs",
+        "Tucker and folder assembly (for tuck-in close) or glue head (for glue-close)",
+        "Barcode scanner / 2D data matrix reader for carton barcode verification",
+        "Vision system for leaflet presence, product presence, and carton closure",
+        "Serialisation unit (Datamatrix printing and verification — FMD compliant)",
+        "HMI / PLC with recipe management and audit trail",
+    ],
+    iq_checklist=[
+        "Verify cartoner model, closing mechanism (tuck/glue), and carton size range against URS",
+        "Confirm product in-feed compatibility with existing upstream equipment",
+        "Verify leaflet insertion system: feeding, folding, and insertion mechanisms",
+        "Check barcode/Datamatrix scanner: wavelength, resolution, and grade verification capability",
+        "Confirm serialisation system (printing + verification) integration and compliance with FMD",
+        "Verify hot melt glue system: temperature range, safety interlock on high temperature",
+        "Check HMI software version, recipe management, and audit trail activation",
+        "Confirm all safety guards, interlock switches, and emergency stops",
+        "Verify equipment registration in asset management system",
+    ],
+    oq_tests=[
+        "Line speed accuracy: cartons/min ±5% at low, medium, and high speed",
+        "Carton erection integrity: 0% malformed cartons in 100-carton test",
+        "Leaflet insertion: 100% presence detection (spiked missing leaflet test)",
+        "Barcode read rate: ≥ 99.9% successful reads; failed reads trigger rejection",
+        "Serialisation: Datamatrix print quality grade ≥ C per ISO/IEC 15415",
+        "Serialisation verification: all printed codes read and matched to expected value",
+        "Tuck/glue closure integrity: carton opens without damage (destructive pull test) — force ≥ 10 N",
+        "Vision system: 100% detection of missing product, open carton, and missing leaflet",
+        "Rejection system: 100% removal of failed cartons",
+        "Audit trail: all parameter changes logged",
+    ],
+    pq_tests=[
+        "Leaflet presence: 100% over AQL sample of finished batch",
+        "Carton closure integrity: 0% open cartons in AQL inspection",
+        "Barcode/Datamatrix legibility: 100% machine-readable in AQL sample",
+        "Serialisation uniqueness: no duplicate serial numbers in batch",
+        "FMD aggregation: case-level aggregation data accurately reflects carton contents",
+        "Throughput: rated output sustained over 8-hour run",
+        "3 consecutive batches meeting all CQAs",
+    ],
+    calibration_points=[
+        "Barcode scanner: grade verification with ISO/IEC-compliant reference symbols",
+        "Vision system sensitivity: spiked test inserts",
+        "Hot melt glue temperature controller: 150°C, 170°C, 190°C",
+        "Line speed sensor: tachometer verification",
+    ],
+    safety_checks=[
+        "Hot melt glue: high-temperature burn warning, insulated tubing, no operator contact zones",
+        "All guards interlocked: machine stops on guard opening",
+        "Emergency stop accessible at each station",
+        "Leaflet/carton dust: dust mask PPE for operators handling high-volume magazine loads",
+    ],
+    documentation_checklist=[
+        "Vendor FAT and site installation certificates",
+        "Barcode scanner / vision system validation report",
+        "Serialisation system qualification and FMD compliance report",
+        "HMI/PLC software validation report and audit trail configuration",
+        "Carton and leaflet specification and CoA",
+        "Hot melt glue specification and safety data sheet",
+        "Cleaning and changeover SOP",
+        "Instrument logbook (calibration, PM, format changes)",
+        "Training records for all operators",
+    ],
+    standard_acceptance_criteria=[
+        "Carton erection: 0% malformed cartons",
+        "Leaflet presence: 100%",
+        "Barcode/Datamatrix read rate: ≥ 99.9%",
+        "Datamatrix print quality: ≥ Grade C (ISO/IEC 15415)",
+        "Carton closure: 0% open cartons in AQL",
+        "Rejection: 100% removal of failed cartons",
+    ],
+    common_deviations=[
+        "Carton jam at erector due to humidity affecting carton board — control ambient humidity",
+        "Leaflet jam during folding — adjust leaflet guides and folding cam timing",
+        "Barcode read failure > 0.1% — clean scanner window and check print quality",
+        "Serialisation unit prints duplicate codes — investigate track-and-trace software",
+        "Hot melt glue stringing causing product contamination — adjust glue temperature",
+    ],
+))
+
+
+# ─── Labeler ──────────────────────────────────────────────────────────────────
+
+_register(EquipmentProfile(
+    name="LABELER",
+    aliases=["labelling machine", "labeling machine", "label applicator",
+             "pressure sensitive labeler", "wrap-around labeler", "front and back labeler",
+             "self-adhesive labeler", "print and apply labeler", "vial labeler"],
+    description=(
+        "A Labeler (Labelling Machine) applies pressure-sensitive self-adhesive labels to "
+        "bottles, cartons, vials, ampoules, or tubes. Types include wrap-around, front-and-back, "
+        "top, and print-and-apply systems. Integrated barcode/Datamatrix verification ensures "
+        "label traceability per 21 CFR Part 211.122 and FMD requirements."
+    ),
+    applicable_regulations=[
+        "21 CFR Part 211.122 — Materials examination and usage criteria",
+        "21 CFR Part 211.130 — Packaging and labelling operations",
+        "21 CFR Part 211.132 — Tamper-evident packaging requirements",
+        "EU GMP Chapter 5 — Production",
+        "EU GMP Annex 15 — Qualification and Validation",
+        "EU Falsified Medicines Directive (FMD) — Serialisation and tamper evidence",
+        "Schedule M — GMP for Pharmaceuticals (India)",
+    ],
+    required_utilities=[
+        "Electrical: 220–240 V AC, 50 Hz (smaller lines); 380 V 3-phase (high-speed)",
+        "Compressed air: 6 bar for blower, applicator, and tamp-blow systems",
+        "Controlled secondary packaging area: 18–25°C, 40–65% RH",
+    ],
+    critical_components=[
+        "Label web unwind reel with tension control",
+        "Label dispense and peel plate mechanism",
+        "Label applicator (wipe, tamp-blow, or roller)",
+        "Bottle/container conveyor with orientation sensor",
+        "Print head (thermal transfer or inkjet) for variable data printing",
+        "Barcode / Datamatrix verification scanner",
+        "Vision system for label placement accuracy and legibility",
+        "Label waste rewind reel",
+        "HMI / PLC with recipe management and audit trail",
+    ],
+    iq_checklist=[
+        "Verify labeler model, label web width range, and container size compatibility against URS",
+        "Confirm print head type (thermal transfer / inkjet) and resolution (300 or 600 DPI minimum)",
+        "Verify verification scanner type, grade capability (ISO/IEC 15415 minimum Grade C)",
+        "Check label web tension control range and brake system",
+        "Confirm HMI software version, recipe management, and audit trail activation",
+        "Verify all safety guards and emergency stop functionality",
+        "Confirm equipment registration in asset management system",
+    ],
+    oq_tests=[
+        "Label placement accuracy: ±1 mm from specification in all axes (3 containers per speed)",
+        "Label registration: ±0.5 mm at all set line speeds",
+        "Variable data print quality: ISO/IEC 15415 grade ≥ C at all line speeds",
+        "Barcode verification: ≥ 99.9% successful reads at production speed",
+        "Vision system: 100% detection of missing label, skewed label ≥ 2 mm, and print failure",
+        "Rejection system: 100% removal of label-failed containers",
+        "Line speed accuracy: ±5% of set value at low, medium, and high speed",
+        "Audit trail: all parameter changes logged",
+    ],
+    pq_tests=[
+        "Label placement over full batch: AQL inspection — ≤ 0.5% outside ±1 mm tolerance",
+        "Barcode / Datamatrix 100% verification during production run",
+        "Label adhesion: peel test per PSTC-101 ≥ 5 N/25 mm after 24 hours",
+        "Print legibility: 100% legible variable data in AQL sample",
+        "Serialisation uniqueness: no duplicate serial numbers across batch",
+        "3 consecutive batches meeting all CQAs",
+    ],
+    calibration_points=[
+        "Print head burn energy / darkness: test print at 3 density settings",
+        "Barcode scanner grade verification: ISO/IEC reference symbol of known grade",
+        "Line speed: tachometer at 3 speed settings",
+        "Vision system: sensitivity test with pre-defined defective label samples",
+    ],
+    safety_checks=[
+        "Label cutter / blade guard: no exposed blade during operation",
+        "All guards interlocked: machine stops on guard opening",
+        "Emergency stop accessible at applicator and unwind/rewind stations",
+        "Static electricity: anti-static bar on label web (self-adhesive generates static)",
+    ],
+    documentation_checklist=[
+        "Vendor FAT and site installation certificates",
+        "Print head and scanner calibration certificates",
+        "Vision system validation report",
+        "Serialisation system qualification and FMD compliance report",
+        "Label specification and material CoA (adhesive, facestock, liner)",
+        "HMI/PLC software validation report and audit trail configuration",
+        "Cleaning and changeover SOP",
+        "Instrument logbook (calibration, PM, format changes, deviations)",
+        "Training records for all operators",
+    ],
+    standard_acceptance_criteria=[
+        "Label placement: ±1 mm in all axes",
+        "Label registration: ±0.5 mm",
+        "Print quality: ISO/IEC 15415 ≥ Grade C",
+        "Barcode verification: ≥ 99.9% successful reads",
+        "Vision system: 100% detection of programmed defects",
+        "Rejection: 100% removal of non-conforming containers",
+    ],
+    common_deviations=[
+        "Label skew due to container wobble on conveyor — adjust container guide rail position",
+        "Variable data smear (thermal transfer) — check print head pressure and ribbon type",
+        "Barcode verification failure rate > 0.1% — inspect print head for partial dot failure",
+        "Label not adhering — check label adhesive compatibility with container surface and temperature",
+        "Static discharge causing multiple label feeding — install anti-static ionising bar",
+    ],
+))

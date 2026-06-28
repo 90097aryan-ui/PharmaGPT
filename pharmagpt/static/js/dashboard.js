@@ -193,6 +193,25 @@
 
   // ── Load ─────────────────────────────────────────────────────────────────────
 
+  function renderAvgScore(avg, count) {
+    const el = document.getElementById("dash-stat-score");
+    if (!el) return;
+    if (count === 0) {
+      el.textContent = "—";
+      el.title = "No documents reviewed yet this session";
+      return;
+    }
+    el.textContent = avg.toFixed(1);
+    el.title = `Average over ${count} document(s) reviewed this session`;
+    // Colour the card by score band
+    const card = el.closest(".dash-stat-card");
+    if (card) {
+      card.style.borderTop = avg >= 85
+        ? "3px solid #2E7D32"
+        : avg >= 70 ? "3px solid #F57F17" : "3px solid #B71C1C";
+    }
+  }
+
   window.loadDashboard = function () {
     // Show loading state in all cards
     ["dash-activity-body", "dash-projects-body", "dash-upcoming-body",
@@ -218,6 +237,12 @@
           if (el) el.innerHTML = '<div class="dash-empty">Failed to load.</div>';
         });
       });
+
+    // Fetch avg validation score independently (session cache; may be 0 initially)
+    fetch("/dashboard/validation-score")
+      .then(r => r.json())
+      .then(d => renderAvgScore(d.avg_score || 0, d.doc_count || 0))
+      .catch(() => {});
   };
 
   // Auto-load when the page opens (dashboard is the default view)

@@ -54,6 +54,9 @@
         <div class="sidebar-item" id="nav-val-workspace" data-view="view-val-workspace">
           <span class="icon">🏗</span> Validation
         </div>
+        <div class="sidebar-item" id="nav-gen-doc" data-view="view-gen-doc">
+          <span class="icon">✨</span> Generate Document
+        </div>
       </div>
 
       <div class="sidebar-divider"></div>
@@ -156,6 +159,11 @@
           <div class="dash-stat-icon">⚡</div>
           <div class="dash-stat-value" id="dash-stat-dev">—</div>
           <div class="dash-stat-label">Pending Deviations</div>
+        </div>
+        <div class="dash-stat-card dash-stat-score">
+          <div class="dash-stat-icon">🔬</div>
+          <div class="dash-stat-value" id="dash-stat-score">—</div>
+          <div class="dash-stat-label">Avg Validation Score</div>
         </div>
       </div>
 
@@ -605,9 +613,60 @@
       <!-- Document Viewer (shown after generation) -->
       <div id="val-viewer" style="display:none; flex:1; flex-direction:column; overflow:hidden;"></div>
 
+      <!-- Review Score Badge (injected by validation.js after generation) -->
+      <div id="val-review-banner" style="display:none;"></div>
+
     </main>
 
   </div>
+
+    <!-- ── Generate Document view (v0.9) ───────────────────────────────────── -->
+    <main class="gd-container" id="view-gen-doc" style="display:none">
+
+      <!-- Header -->
+      <div class="gd-header">
+        <div class="gd-header-left">
+          <span class="gd-header-icon">✨</span>
+          <div>
+            <h2 class="gd-header-title">Generate Document</h2>
+            <p class="gd-header-sub">AI-powered GMP document generator &mdash; v0.9</p>
+          </div>
+        </div>
+        <span class="gd-project-tag" id="gd-project-tag">No project selected</span>
+      </div>
+
+      <!-- 6-step progress bar -->
+      <div class="gd-progress-bar">
+        <div class="gd-step-dot active" id="gd-dot-1"></div>
+        <span class="gd-step-label active" id="gd-lbl-1">Project</span>
+        <div class="gd-step-line" id="gd-line-1"></div>
+        <div class="gd-step-dot" id="gd-dot-2"></div>
+        <span class="gd-step-label" id="gd-lbl-2">Doc Type</span>
+        <div class="gd-step-line" id="gd-line-2"></div>
+        <div class="gd-step-dot" id="gd-dot-3"></div>
+        <span class="gd-step-label" id="gd-lbl-3">Equipment</span>
+        <div class="gd-step-line" id="gd-line-3"></div>
+        <div class="gd-step-dot" id="gd-dot-4"></div>
+        <span class="gd-step-label" id="gd-lbl-4">Questions</span>
+        <div class="gd-step-line" id="gd-line-4"></div>
+        <div class="gd-step-dot" id="gd-dot-5"></div>
+        <span class="gd-step-label" id="gd-lbl-5">Review</span>
+        <div class="gd-step-line" id="gd-line-5"></div>
+        <div class="gd-step-dot" id="gd-dot-6"></div>
+        <span class="gd-step-label" id="gd-lbl-6">Generate</span>
+      </div>
+
+      <!-- Wizard panels -->
+      <div id="gd-wizard" style="display:flex; flex:1; overflow:hidden;">
+        <div id="gd-panel-1" class="gd-panel" style="display:flex"></div>
+        <div id="gd-panel-2" class="gd-panel" style="display:none"></div>
+        <div id="gd-panel-3" class="gd-panel" style="display:none"></div>
+        <div id="gd-panel-4" class="gd-panel" style="display:none"></div>
+        <div id="gd-panel-5" class="gd-panel" style="display:none"></div>
+        <div id="gd-panel-6" class="gd-panel" style="display:none"></div>
+      </div>
+
+    </main>
 
   <!-- ── New Project Modal ─────────────────────────────────────────────────── -->
   <div class="modal-overlay" id="modal-overlay"></div>
@@ -864,6 +923,7 @@
   <script src="{{ url_for('static', filename='js/insights.js') }}"></script>
   <script src="{{ url_for('static', filename='js/validation_config.js') }}"></script>
   <script src="{{ url_for('static', filename='js/validation.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/gen_document.js') }}"></script>
   <script src="{{ url_for('static', filename='js/knowledge_base.js') }}"></script>
   <script src="{{ url_for('static', filename='js/val_workspace.js') }}"></script>
   <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
@@ -972,6 +1032,10 @@
 
         if (targetId === "view-dashboard") {
           if (window.loadDashboard) window.loadDashboard();
+        }
+
+        if (targetId === "view-gen-doc") {
+          if (window.openGenDocument) window.openGenDocument();
         }
       });
     });

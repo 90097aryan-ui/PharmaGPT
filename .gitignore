@@ -68,3 +68,11 @@ $RECYCLE.BIN/
 ._*
 .Spotlight-V100
 .Trashes
+# Generated Documents
+generated_documents/
+
+# Python cache
+*.pyc
+
+# Temporary files
+*.tmp

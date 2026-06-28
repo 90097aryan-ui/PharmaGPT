@@ -442,6 +442,71 @@ function _finaliseViewer() {
     const btn = document.getElementById(id);
     if (btn) btn.disabled = false;
   });
+
+  // Run review and show score badge
+  _runReviewAndShowBadge();
+}
+
+async function _runReviewAndShowBadge() {
+  const banner = document.getElementById("val-review-banner");
+  if (!banner) return;
+
+  banner.style.display = "block";
+  banner.innerHTML = `<div class="val-review-loading">Running QA Review…</div>`;
+
+  try {
+    const res = await fetch("/validation/review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content:   valGeneratedText,
+        doc_type:  valDocType,
+        form_data: valFormData || {},
+      }),
+    });
+
+    if (!res.ok) throw new Error("Review request failed");
+    const data = await res.json();
+
+    const score     = data.overall_score ?? 0;
+    const readiness = data.readiness    ?? "Unknown";
+    const summary   = data.issue_summary ?? {};
+    const badgeCls  = score >= 85 ? "val-review-badge-green"
+                    : score >= 70 ? "val-review-badge-yellow"
+                    :               "val-review-badge-red";
+
+    banner.innerHTML = `
+      <div class="val-review-banner-inner">
+        <div class="val-review-score-wrap ${badgeCls}">
+          <span class="val-review-score-num">${score.toFixed(1)}</span>
+          <span class="val-review-score-label">/ 100</span>
+        </div>
+        <div class="val-review-meta">
+          <div class="val-review-readiness">${readiness}</div>
+          <div class="val-review-counts">
+            <span class="vrc-critical">C: ${summary.critical ?? 0}</span>
+            <span class="vrc-major">M: ${summary.major ?? 0}</span>
+            <span class="vrc-minor">m: ${summary.minor ?? 0}</span>
+            <span class="vrc-obs">O: ${summary.observation ?? 0}</span>
+          </div>
+        </div>
+        <div class="val-review-hint">Review Report included in DOCX export</div>
+      </div>`;
+
+    // Refresh dashboard score card if visible
+    if (window.loadDashboard && document.getElementById("view-dashboard") &&
+        document.getElementById("view-dashboard").style.display !== "none") {
+      fetch("/dashboard/validation-score")
+        .then(r => r.json())
+        .then(d => {
+          if (typeof renderAvgScore === "function")
+            renderAvgScore(d.avg_score || 0, d.doc_count || 0);
+        })
+        .catch(() => {});
+    }
+  } catch (err) {
+    banner.innerHTML = `<div class="val-review-loading" style="color:#999">QA review unavailable</div>`;
+  }
 }
 
 function _showViewerError(msg) {

@@ -19,9 +19,10 @@ import database as db
 from flask import Blueprint, jsonify, request, Response, send_file, stream_with_context
 from google.genai import errors, types
 from prompts import PHARMA_SYSTEM_PROMPT
+from review import run_review, get_avg_score
 from services.doc_generator import build_generation_prompt
 from services.doc_exporter import markdown_to_docx
-from services.document_search import search_project_documents
+from services.retrieval_engine import retrieve_context
 from state import gemini_client
 from config import GEMINI_MODEL
 
@@ -59,17 +60,23 @@ def validation_generate():
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
-    # Pull relevant context from any reference documents selected in Step 3
-    doc_context = ""
-    if doc_ids:
-        result = search_project_documents(
-            query=f"{doc_type} validation {form_data.get('equipment_name', '')}",
-            project_id=project_id,
-            top_k=8,
-            max_context_words=3000,
-        )
-        if result["found"]:
-            doc_context = result["context_text"]
+    # Retrieve relevant context from all knowledge sources (project docs, KB,
+    # SOPs, equipment manuals, regulations, previous validations).
+    # retrieve_context() is called once per generation and self-caches within
+    # the request — no repeated document scans.
+    equipment_name = " ".join(filter(None, [
+        form_data.get("equipment_name", ""),
+        form_data.get("model", ""),
+        form_data.get("manufacturer", ""),
+    ]))
+    retrieval = retrieve_context(
+        document_type=doc_type,
+        project_id=project_id,
+        equipment_name=equipment_name,
+        questionnaire=form_data.get("details", {}),
+        max_chunks=10,
+    )
+    doc_context = retrieval.context_text if retrieval.found else ""
 
     form_data["project_name"] = project["name"]
     prompt = build_generation_prompt(doc_type, form_data, doc_context, project["name"])
@@ -105,23 +112,40 @@ def validation_generate():
 @bp.route("/validation/export/docx", methods=["POST"])
 def validation_export_docx():
     """
-    Convert markdown content to a styled DOCX and return it as a download.
+    Convert markdown content to a professional DOCX and return it as a download.
 
-    Body: { "doc_type": "OQ", "title": "HPLC OQ Protocol",
-            "form_data": {...}, "content": "# OPERATIONAL QUALIFICATION..." }
+    Body: {
+        "doc_type":   "OQ",
+        "title":      "HPLC OQ Protocol",
+        "form_data":  { ...wizard fields... },
+        "content":    "# OPERATIONAL QUALIFICATION...",
+        "project_id": 3   (optional — used for DB record)
+    }
+
+    form_data may include any of:
+        company_name, site_name, department, equipment_name, equipment_id,
+        manufacturer, model, protocol_number, revision_number, effective_date,
+        document_status ("Draft"|"Final"), prepared_by, reviewed_by, approved_by,
+        logo_path, revision_history (list), signatories (list)
     """
-    data      = request.get_json()
-    doc_type  = data.get("doc_type", "DOC")
-    title     = data.get("title", f"{doc_type} Protocol")
-    form_data = data.get("form_data", {})
-    content   = data.get("content", "")
+    data       = request.get_json()
+    doc_type   = data.get("doc_type", "DOC")
+    title      = data.get("title", f"{doc_type} Protocol")
+    form_data  = data.get("form_data", {})
+    content    = data.get("content", "")
+    project_id = data.get("project_id", 0)
 
     if not content:
         return jsonify({"error": "No content to export"}), 400
 
+    # Inject title and project_id so build_document_data can use them
+    form_data.setdefault("title",      title)
+    form_data.setdefault("project_id", project_id)
+
     try:
         docx_bytes = markdown_to_docx(content, doc_type, form_data)
     except Exception as exc:
+        logger.exception("DOCX export failed")
         return jsonify({"error": f"Export failed: {exc}"}), 500
 
     safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in title)
@@ -131,6 +155,35 @@ def validation_export_docx():
         as_attachment=True,
         download_name=f"{safe_title}.docx",
     )
+
+
+@bp.route("/validation/review", methods=["POST"])
+def validation_review():
+    """
+    Run the deterministic Validation Review Engine on provided markdown content.
+
+    Body: {
+        "content":   "# OPERATIONAL QUALIFICATION...",
+        "doc_type":  "OQ",
+        "form_data": { ...wizard fields... }
+    }
+
+    Returns the full ReviewResult as JSON — no AI calls are made, runs synchronously.
+    """
+    data      = request.get_json() or {}
+    content   = data.get("content", "")
+    doc_type  = data.get("doc_type", "DOC")
+    form_data = data.get("form_data", {})
+
+    if not content:
+        return jsonify({"error": "content is required"}), 400
+
+    try:
+        result = run_review(content, doc_type, form_data)
+        return jsonify(result.to_dict())
+    except Exception as exc:
+        logger.exception("Review engine error")
+        return jsonify({"error": f"Review failed: {exc}"}), 500
 
 
 @bp.route("/validation/save", methods=["POST"])
