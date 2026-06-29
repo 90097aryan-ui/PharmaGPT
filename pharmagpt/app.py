@@ -15,7 +15,7 @@ Shared runtime state (Gemini client, history cache) lives in state.py.
 import uuid
 from flask import Flask, render_template, session
 
-from config import FLASK_SECRET_KEY, FLASK_DEBUG, FLASK_PORT, MAX_FILE_SIZE
+from pharmagpt.config import FLASK_SECRET_KEY, FLASK_DEBUG, FLASK_PORT, MAX_FILE_SIZE
 import database as db
 
 from routes.projects       import bp as projects_bp
