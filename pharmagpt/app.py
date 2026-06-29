@@ -18,13 +18,13 @@ from flask import Flask, render_template, session
 from pharmagpt.config import FLASK_SECRET_KEY, FLASK_DEBUG, FLASK_PORT, MAX_FILE_SIZE
 from pharmagpt import database as db
 
-from routes.projects       import bp as projects_bp
-from routes.chat           import bp as chat_bp
-from routes.docs           import bp as docs_bp
-from routes.validation     import bp as validation_bp
-from routes.knowledge_base import bp as kb_bp
-from routes.workspace      import bp as workspace_bp
-from routes.dashboard      import bp as dashboard_bp
+from pharmagpt.routes.projects       import bp as projects_bp
+from pharmagpt.routes.chat           import bp as chat_bp
+from pharmagpt.routes.docs           import bp as docs_bp
+from pharmagpt.routes.validation     import bp as validation_bp
+from pharmagpt.routes.knowledge_base import bp as kb_bp
+from pharmagpt.routes.workspace      import bp as workspace_bp
+from pharmagpt.routes.dashboard      import bp as dashboard_bp
 
 
 # ── Application setup ─────────────────────────────────────────────────────────
