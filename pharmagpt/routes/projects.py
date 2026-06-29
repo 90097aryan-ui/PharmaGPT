@@ -11,9 +11,9 @@ GET  /projects/<id>/messages         load chat history for replay
 POST /clear                          clear chat history for a project
 """
 
-import database as db
+from pharmagpt import database as db
 from flask import Blueprint, jsonify, request
-from state import history_cache
+from pharmagpt.state import history_cache
 
 bp = Blueprint("projects", __name__)
 

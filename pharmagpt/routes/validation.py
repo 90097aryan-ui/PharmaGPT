@@ -15,16 +15,16 @@ import json
 import logging
 from io import BytesIO
 
-import database as db
+from pharmagpt import database as db
 from flask import Blueprint, jsonify, request, Response, send_file, stream_with_context
 from google.genai import errors, types
-from prompts import PHARMA_SYSTEM_PROMPT
-from review import run_review, get_avg_score
-from services.doc_generator import build_generation_prompt
-from services.doc_exporter import markdown_to_docx
-from services.retrieval_engine import retrieve_context
-from state import gemini_client
-from config import GEMINI_MODEL
+from pharmagpt.prompts import PHARMA_SYSTEM_PROMPT
+from pharmagpt.review import run_review, get_avg_score
+from pharmagpt.services.doc_generator import build_generation_prompt
+from pharmagpt.services.doc_exporter import markdown_to_docx
+from pharmagpt.services.retrieval_engine import retrieve_context
+from pharmagpt.state import gemini_client
+from pharmagpt.config import GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 

@@ -12,7 +12,7 @@ GET    /val-projects/<id>/audit-trail         get full audit trail
 POST   /val-projects/<id>/audit-trail         append a manual audit entry
 """
 
-import database as db
+from pharmagpt import database as db
 from flask import Blueprint, jsonify, request
 
 bp = Blueprint("workspace", __name__)

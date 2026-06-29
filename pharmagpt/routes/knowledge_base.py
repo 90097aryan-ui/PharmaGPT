@@ -14,9 +14,9 @@ GET    /kb/folders/counts            per-folder document counts for sidebar badg
 
 import logging
 
-import database as db
-import documents as doc_utils
-from services.extractor import extract_text
+from pharmagpt import database as db
+from pharmagpt import documents as doc_utils
+from pharmagpt.services.extractor import extract_text
 from flask import Blueprint, jsonify, request, send_file
 
 logger = logging.getLogger(__name__)

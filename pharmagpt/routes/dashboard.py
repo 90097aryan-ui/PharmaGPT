@@ -7,9 +7,9 @@ GET /dashboard/stats              aggregated system-wide counts and recent activ
 GET /dashboard/validation-score   average validation score across reviewed documents (session)
 """
 
-import database as db
+from pharmagpt import database as db
 from flask import Blueprint, jsonify
-from review import get_avg_score, get_score_cache
+from pharmagpt.review import get_avg_score, get_score_cache
 
 bp = Blueprint("dashboard", __name__)
 

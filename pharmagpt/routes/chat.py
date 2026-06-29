@@ -8,13 +8,13 @@ POST /stream   stream a Gemini response, optionally injecting document context
 
 import json
 
-import database as db
+from pharmagpt import database as db
 from flask import Blueprint, jsonify, request, Response, stream_with_context
 from google.genai import errors, types
-from prompts import PHARMA_SYSTEM_PROMPT
-from services.document_search import search_project_documents
-from state import gemini_client, get_history, history_cache
-from config import GEMINI_MODEL
+from pharmagpt.prompts import PHARMA_SYSTEM_PROMPT
+from pharmagpt.services.document_search import search_project_documents
+from pharmagpt.state import gemini_client, get_history, history_cache
+from pharmagpt.config import GEMINI_MODEL
 
 bp = Blueprint("chat", __name__)
 
