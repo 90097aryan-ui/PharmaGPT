@@ -24,7 +24,7 @@ import hashlib
 import logging
 from datetime import date
 
-from review.review_models import (
+from pharmagpt.review.review_models import (
     CategoryScores,
     ComplianceCheck,
     ReadinessLevel,
@@ -32,7 +32,7 @@ from review.review_models import (
     ReviewResult,
     Severity,
 )
-from review.review_rules import (
+from pharmagpt.review.review_rules import (
     RULE_REGISTRY,
     SEVERITY_DEDUCTIONS,
     evaluate_compliance,

@@ -20,8 +20,8 @@ PDF integration point
 
 import logging
 
-from review.review_engine import run_review
-from services.docx_generator import build_document_data, generate_docx
+from pharmagpt.review.review_engine import run_review
+from pharmagpt.services.docx_generator import build_document_data, generate_docx
 
 logger = logging.getLogger(__name__)
 

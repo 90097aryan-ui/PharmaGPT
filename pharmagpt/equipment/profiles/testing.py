@@ -1,6 +1,6 @@
 """Quality control testing equipment: Dissolution Tester, Friability Tester, Hardness Tester."""
 
-from equipment import EquipmentProfile, _register
+from pharmagpt.equipment import EquipmentProfile, _register
 
 # ─── Dissolution Tester ───────────────────────────────────────────────────────
 

@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from typing import List
 
-from review.review_models import ReviewIssue, Severity
+from pharmagpt.review.review_models import ReviewIssue, Severity
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Mandatory-section definitions per document type

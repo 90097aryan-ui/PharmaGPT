@@ -1,6 +1,6 @@
 """Packaging equipment: Blister Packing, Bottle Filling, Cartoner, Labeler."""
 
-from equipment import EquipmentProfile, _register
+from pharmagpt.equipment import EquipmentProfile, _register
 
 # ─── Blister Packing Machine ──────────────────────────────────────────────────
 

@@ -42,7 +42,7 @@ import math
 import re
 from dataclasses import dataclass, field
 
-import database as db
+from pharmagpt import database as db
 
 logger = logging.getLogger(__name__)
 

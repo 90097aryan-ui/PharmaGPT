@@ -147,4 +147,4 @@ and GMP-compliant protocol sections. Do not rely on generic templates.
 
 # ─── Auto-import profiles to populate registry ───────────────────────────────
 
-import equipment.profiles  # noqa: E402, F401  — triggers all profile registrations
+from pharmagpt.equipment import profiles  # noqa: E402, F401  — triggers all profile registrations

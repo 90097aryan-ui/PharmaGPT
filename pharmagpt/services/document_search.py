@@ -20,7 +20,7 @@ The context-assembly and source-tracking logic below stays unchanged.
 
 import re
 import math
-import database as db
+from pharmagpt import database as db
 
 
 # ── Text chunking ─────────────────────────────────────────────────────────────

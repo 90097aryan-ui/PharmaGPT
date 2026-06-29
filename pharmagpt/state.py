@@ -11,10 +11,10 @@ Why a separate module?
   not create circular dependencies with the Flask app object.
 """
 
-import database as db
+from pharmagpt import database as db
 from google import genai
 from google.genai import types
-from config import GEMINI_API_KEY, GEMINI_MODEL
+from pharmagpt.config import GEMINI_API_KEY, GEMINI_MODEL
 
 
 # ── Gemini client ─────────────────────────────────────────────────────────────

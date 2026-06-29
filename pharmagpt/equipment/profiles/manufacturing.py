@@ -1,6 +1,6 @@
 """Manufacturing equipment: Tablet Compression Machine, Capsule Filling Machine."""
 
-from equipment import EquipmentProfile, _register
+from pharmagpt.equipment import EquipmentProfile, _register
 
 # ─── Tablet Compression Machine ──────────────────────────────────────────────
 

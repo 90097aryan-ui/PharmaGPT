@@ -1,6 +1,6 @@
 """Quality control / end-of-line equipment: Checkweigher, Metal Detector."""
 
-from equipment import EquipmentProfile, _register
+from pharmagpt.equipment import EquipmentProfile, _register
 
 # ─── Checkweigher ─────────────────────────────────────────────────────────────
 

@@ -19,7 +19,7 @@ Text extraction from file content lives in services/extractor.py.
 
 import os
 from werkzeug.utils import secure_filename
-from config import UPLOAD_FOLDER, ALLOWED_EXTENSIONS
+from pharmagpt.config import UPLOAD_FOLDER, ALLOWED_EXTENSIONS
 
 
 # ── File type helpers ─────────────────────────────────────────────────────────

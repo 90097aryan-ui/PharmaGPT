@@ -1,6 +1,6 @@
 """Sterilization equipment: Autoclave, VHP Generator."""
 
-from equipment import EquipmentProfile, _register
+from pharmagpt.equipment import EquipmentProfile, _register
 
 # ─── Autoclave ────────────────────────────────────────────────────────────────
 

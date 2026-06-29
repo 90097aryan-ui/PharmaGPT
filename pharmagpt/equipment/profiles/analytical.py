@@ -1,6 +1,6 @@
 """Analytical instruments: HPLC, GC, UV Spectrophotometer."""
 
-from equipment import EquipmentProfile, _register
+from pharmagpt.equipment import EquipmentProfile, _register
 
 # ─── HPLC ────────────────────────────────────────────────────────────────────
 

@@ -9,6 +9,6 @@ Public API
     avg    = get_avg_score()
 """
 
-from review.review_engine import run_review, get_avg_score, get_score_cache
+from pharmagpt.review.review_engine import run_review, get_avg_score, get_score_cache
 
 __all__ = ["run_review", "get_avg_score", "get_score_cache"]

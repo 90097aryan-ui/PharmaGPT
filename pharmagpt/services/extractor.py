@@ -10,7 +10,7 @@ _extract_and_store_kb pattern that previously existed in app.py.
 """
 
 import logging
-from services import pdf_reader, docx_reader, excel_reader
+from pharmagpt.services import pdf_reader, docx_reader, excel_reader
 
 logger = logging.getLogger(__name__)
 

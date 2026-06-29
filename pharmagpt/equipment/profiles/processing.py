@@ -1,6 +1,6 @@
 """Processing equipment: Tablet Coater, Fluid Bed Dryer, Rapid Mixer Granulator, Bin Blender."""
 
-from equipment import EquipmentProfile, _register
+from pharmagpt.equipment import EquipmentProfile, _register
 
 # ─── Tablet Coater ────────────────────────────────────────────────────────────
 

@@ -26,8 +26,8 @@ and register it in pharmagpt/equipment/profiles/__init__.py — no other changes
 
 from datetime import date as _date
 
-from prompts import PROMPT_REGISTRY
-from equipment import get_equipment_profile, format_profile_for_prompt
+from pharmagpt.prompts import PROMPT_REGISTRY
+from pharmagpt.equipment import get_equipment_profile, format_profile_for_prompt
 
 
 def build_generation_prompt(

@@ -8,7 +8,7 @@ summary is also available for logging / API responses.
 
 from __future__ import annotations
 
-from review.review_models import ComplianceStatus, ReadinessLevel, ReviewResult, Severity
+from pharmagpt.review.review_models import ComplianceStatus, ReadinessLevel, ReviewResult, Severity
 
 # ── Readiness colour map (used in DOCX) ──────────────────────────────────────
 READINESS_COLOUR: dict[ReadinessLevel, str] = {

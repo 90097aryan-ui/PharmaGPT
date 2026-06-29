@@ -40,20 +40,14 @@ PROMPT_REGISTRY = {
 
 __all__ = ["PROMPT_REGISTRY", "PHARMA_SYSTEM_PROMPT"]
 
-# Re-export from the top-level prompts.py so that
-# `from prompts import PHARMA_SYSTEM_PROMPT` works whether Python resolves
-# this package or the sibling prompts.py module.
-try:
-    import importlib, sys as _sys
-    _top = importlib.util.spec_from_file_location(
-        "__pharma_prompts_top__",
-        __file__.replace("__init__.py", "").rstrip("/\\").rstrip("prompts") + "prompts.py",
-    )
-    if _top and _top.loader:
-        _m = importlib.util.module_from_spec(_top)
-        _top.loader.exec_module(_m)
-        PHARMA_SYSTEM_PROMPT = _m.PHARMA_SYSTEM_PROMPT
-    else:
-        raise ImportError("spec not found")
-except Exception:
-    PHARMA_SYSTEM_PROMPT = ""  # fallback; will cause obvious failures rather than silent ones
+import importlib.util as _ilu
+from pathlib import Path as _Path
+
+_prompts_py = _Path(__file__).parent.parent / "prompts.py"
+_spec = _ilu.spec_from_file_location("__pharma_prompts_top__", _prompts_py)
+if _spec and _spec.loader:
+    _m = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_m)
+    PHARMA_SYSTEM_PROMPT = _m.PHARMA_SYSTEM_PROMPT
+else:
+    PHARMA_SYSTEM_PROMPT = ""
