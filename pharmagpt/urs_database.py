@@ -1,0 +1,448 @@
+"""
+urs_database.py — SQLite CRUD for the URS Management Suite.
+
+Tables
+──────
+urs_projects      : Master URS record (one per URS document)
+urs_requirements  : Individual requirement rows per URS
+urs_approvals     : Immutable approval / review audit trail
+urs_versions      : Snapshot of requirements at each version point
+"""
+
+import json
+import sqlite3
+from pharmagpt.database import get_connection
+
+
+# ── Schema (imported by database.init_db) ────────────────────────────────────
+
+URS_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS urs_projects (
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        urs_number          TEXT    NOT NULL DEFAULT '',
+        doc_number          TEXT    DEFAULT '',
+        title               TEXT    NOT NULL,
+        revision            TEXT    DEFAULT 'A',
+        status              TEXT    DEFAULT 'draft',
+        department          TEXT    DEFAULT '',
+        site                TEXT    DEFAULT '',
+        location            TEXT    DEFAULT '',
+        equipment_name      TEXT    DEFAULT '',
+        equipment_id        TEXT    DEFAULT '',
+        manufacturer        TEXT    DEFAULT '',
+        model               TEXT    DEFAULT '',
+        capacity            TEXT    DEFAULT '',
+        category            TEXT    DEFAULT '',
+        equipment_type      TEXT    DEFAULT '',
+        validation_type     TEXT    DEFAULT '',
+        purpose             TEXT    DEFAULT '',
+        intended_use        TEXT    DEFAULT '',
+        process_description TEXT    DEFAULT '',
+        prepared_by         TEXT    DEFAULT '',
+        reviewed_by         TEXT    DEFAULT '',
+        approved_by         TEXT    DEFAULT '',
+        effective_date      TEXT    DEFAULT '',
+        linked_project_id   INTEGER DEFAULT NULL,
+        ai_review_data      TEXT    DEFAULT '{}',
+        compliance_score    INTEGER DEFAULT 0,
+        completeness_score  INTEGER DEFAULT 0,
+        created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS urs_requirements (
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        urs_id              INTEGER NOT NULL,
+        req_id              TEXT    NOT NULL DEFAULT '',
+        section             TEXT    NOT NULL DEFAULT 'General',
+        requirement         TEXT    NOT NULL DEFAULT '',
+        rationale           TEXT    DEFAULT '',
+        priority            TEXT    DEFAULT 'Medium',
+        gmp_criticality     TEXT    DEFAULT 'GMP',
+        regulatory_ref      TEXT    DEFAULT '',
+        verification_method TEXT    DEFAULT '',
+        acceptance_criteria TEXT    DEFAULT '',
+        risk_link           TEXT    DEFAULT '',
+        traceability_link   TEXT    DEFAULT '',
+        comments            TEXT    DEFAULT '',
+        status              TEXT    DEFAULT 'draft',
+        source              TEXT    DEFAULT 'ai',
+        sort_order          INTEGER DEFAULT 0,
+        created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (urs_id) REFERENCES urs_projects(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS urs_approvals (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        urs_id       INTEGER NOT NULL,
+        action       TEXT    NOT NULL,
+        performed_by TEXT    DEFAULT '',
+        role         TEXT    DEFAULT '',
+        comments     TEXT    DEFAULT '',
+        version      TEXT    DEFAULT '',
+        created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (urs_id) REFERENCES urs_projects(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS urs_versions (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        urs_id                INTEGER NOT NULL,
+        version               TEXT    NOT NULL,
+        revision              TEXT    DEFAULT 'A',
+        status                TEXT    DEFAULT 'draft',
+        change_summary        TEXT    DEFAULT '',
+        requirements_snapshot TEXT    DEFAULT '[]',
+        req_count             INTEGER DEFAULT 0,
+        created_by            TEXT    DEFAULT '',
+        created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (urs_id) REFERENCES urs_projects(id) ON DELETE CASCADE
+    );
+"""
+
+
+# ── URS Projects ──────────────────────────────────────────────────────────────
+
+def create_urs(data: dict) -> dict:
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            """INSERT INTO urs_projects
+               (urs_number, doc_number, title, revision, status, department, site, location,
+                equipment_name, equipment_id, manufacturer, model, capacity, category,
+                equipment_type, validation_type, purpose, intended_use, process_description,
+                prepared_by, reviewed_by, approved_by, effective_date, linked_project_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                data.get("urs_number", ""),
+                data.get("doc_number", ""),
+                data.get("title", "Untitled URS"),
+                data.get("revision", "A"),
+                data.get("status", "draft"),
+                data.get("department", ""),
+                data.get("site", ""),
+                data.get("location", ""),
+                data.get("equipment_name", ""),
+                data.get("equipment_id", ""),
+                data.get("manufacturer", ""),
+                data.get("model", ""),
+                data.get("capacity", ""),
+                data.get("category", ""),
+                data.get("equipment_type", ""),
+                data.get("validation_type", ""),
+                data.get("purpose", ""),
+                data.get("intended_use", ""),
+                data.get("process_description", ""),
+                data.get("prepared_by", ""),
+                data.get("reviewed_by", ""),
+                data.get("approved_by", ""),
+                data.get("effective_date", ""),
+                data.get("linked_project_id"),
+            ),
+        )
+        new_id = cur.lastrowid
+    conn.close()
+    add_approval_entry(new_id, "URS Created", data.get("prepared_by", "System"), "Author",
+                       "Initial draft created", data.get("revision", "A"))
+    return get_urs(new_id)
+
+
+def get_urs(urs_id: int) -> dict | None:
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM urs_projects WHERE id = ?", (urs_id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    d = dict(row)
+    d["ai_review_data"] = json.loads(d.get("ai_review_data") or "{}")
+    return d
+
+
+def get_all_urs(filters: dict | None = None) -> list[dict]:
+    conn = get_connection()
+    where_clauses, params = [], []
+    if filters:
+        for field in ("status", "category", "department", "equipment_type"):
+            if filters.get(field):
+                where_clauses.append(f"{field} = ?")
+                params.append(filters[field])
+        if filters.get("keyword"):
+            where_clauses.append("(title LIKE ? OR equipment_name LIKE ? OR urs_number LIKE ?)")
+            kw = f"%{filters['keyword']}%"
+            params += [kw, kw, kw]
+    where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+    rows = conn.execute(
+        f"SELECT * FROM urs_projects {where} ORDER BY created_at DESC", params
+    ).fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["ai_review_data"] = json.loads(d.get("ai_review_data") or "{}")
+        result.append(d)
+    return result
+
+
+def update_urs(urs_id: int, data: dict) -> dict | None:
+    allowed = [
+        "urs_number", "doc_number", "title", "revision", "status", "department", "site",
+        "location", "equipment_name", "equipment_id", "manufacturer", "model", "capacity",
+        "category", "equipment_type", "validation_type", "purpose", "intended_use",
+        "process_description", "prepared_by", "reviewed_by", "approved_by", "effective_date",
+        "compliance_score", "completeness_score", "ai_review_data",
+    ]
+    updates = {k: data[k] for k in allowed if k in data}
+    if not updates:
+        return get_urs(urs_id)
+    if "ai_review_data" in updates and isinstance(updates["ai_review_data"], dict):
+        updates["ai_review_data"] = json.dumps(updates["ai_review_data"])
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    values = list(updates.values()) + [urs_id]
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            f"UPDATE urs_projects SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            values,
+        )
+    conn.close()
+    return get_urs(urs_id)
+
+
+def delete_urs(urs_id: int) -> bool:
+    conn = get_connection()
+    with conn:
+        conn.execute("DELETE FROM urs_projects WHERE id = ?", (urs_id,))
+    conn.close()
+    return True
+
+
+def get_dashboard_stats() -> dict:
+    conn = get_connection()
+    total       = conn.execute("SELECT COUNT(*) FROM urs_projects").fetchone()[0]
+    draft       = conn.execute("SELECT COUNT(*) FROM urs_projects WHERE status='draft'").fetchone()[0]
+    under_review= conn.execute("SELECT COUNT(*) FROM urs_projects WHERE status='under_review'").fetchone()[0]
+    approved    = conn.execute("SELECT COUNT(*) FROM urs_projects WHERE status='approved'").fetchone()[0]
+    obsolete    = conn.execute("SELECT COUNT(*) FROM urs_projects WHERE status='obsolete'").fetchone()[0]
+    total_reqs  = conn.execute("SELECT COUNT(*) FROM urs_requirements").fetchone()[0]
+    by_category = {}
+    for row in conn.execute(
+        "SELECT category, COUNT(*) FROM urs_projects GROUP BY category"
+    ).fetchall():
+        by_category[row[0] or "Other"] = row[1]
+    recent = conn.execute(
+        "SELECT id, title, status, equipment_name, category, created_at FROM urs_projects ORDER BY created_at DESC LIMIT 8"
+    ).fetchall()
+    pending_approval = conn.execute(
+        "SELECT COUNT(*) FROM urs_projects WHERE status IN ('under_review','pending_approval')"
+    ).fetchone()[0]
+    conn.close()
+    return {
+        "total": total, "draft": draft, "under_review": under_review,
+        "approved": approved, "obsolete": obsolete,
+        "pending_approval": pending_approval,
+        "total_requirements": total_reqs,
+        "by_category": by_category,
+        "recent": [dict(r) for r in recent],
+    }
+
+
+# ── Requirements ──────────────────────────────────────────────────────────────
+
+def get_requirements(urs_id: int) -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM urs_requirements WHERE urs_id = ? ORDER BY sort_order, section, req_id",
+        (urs_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def save_requirements(urs_id: int, requirements: list[dict]) -> list[dict]:
+    conn = get_connection()
+    with conn:
+        conn.execute("DELETE FROM urs_requirements WHERE urs_id = ?", (urs_id,))
+        for i, req in enumerate(requirements):
+            conn.execute(
+                """INSERT INTO urs_requirements
+                   (urs_id, req_id, section, requirement, rationale, priority,
+                    gmp_criticality, regulatory_ref, verification_method,
+                    acceptance_criteria, risk_link, traceability_link,
+                    comments, status, source, sort_order)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    urs_id,
+                    req.get("req_id", f"REQ-{i+1:03d}"),
+                    req.get("section", "General"),
+                    req.get("requirement", ""),
+                    req.get("rationale", ""),
+                    req.get("priority", "Medium"),
+                    req.get("gmp_criticality", "GMP"),
+                    req.get("regulatory_ref", ""),
+                    req.get("verification_method", "Functional Test"),
+                    req.get("acceptance_criteria", ""),
+                    req.get("risk_link", ""),
+                    req.get("traceability_link", ""),
+                    req.get("comments", ""),
+                    req.get("status", "draft"),
+                    req.get("source", "ai"),
+                    i,
+                ),
+            )
+        conn.execute(
+            "UPDATE urs_projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (urs_id,)
+        )
+    conn.close()
+    return get_requirements(urs_id)
+
+
+def add_requirement(urs_id: int, req: dict) -> dict:
+    conn = get_connection()
+    max_order = conn.execute(
+        "SELECT COALESCE(MAX(sort_order),0) FROM urs_requirements WHERE urs_id = ?", (urs_id,)
+    ).fetchone()[0]
+    with conn:
+        cur = conn.execute(
+            """INSERT INTO urs_requirements
+               (urs_id, req_id, section, requirement, rationale, priority,
+                gmp_criticality, regulatory_ref, verification_method,
+                acceptance_criteria, risk_link, traceability_link,
+                comments, status, source, sort_order)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                urs_id,
+                req.get("req_id", ""),
+                req.get("section", "General"),
+                req.get("requirement", ""),
+                req.get("rationale", ""),
+                req.get("priority", "Medium"),
+                req.get("gmp_criticality", "GMP"),
+                req.get("regulatory_ref", ""),
+                req.get("verification_method", "Functional Test"),
+                req.get("acceptance_criteria", ""),
+                req.get("risk_link", ""),
+                req.get("traceability_link", ""),
+                req.get("comments", ""),
+                req.get("status", "draft"),
+                req.get("source", "manual"),
+                max_order + 1,
+            ),
+        )
+        new_id = cur.lastrowid
+    conn.close()
+    conn2 = get_connection()
+    row = conn2.execute("SELECT * FROM urs_requirements WHERE id = ?", (new_id,)).fetchone()
+    conn2.close()
+    return dict(row) if row else {}
+
+
+def update_requirement(req_id: int, data: dict) -> dict | None:
+    allowed = [
+        "req_id", "section", "requirement", "rationale", "priority", "gmp_criticality",
+        "regulatory_ref", "verification_method", "acceptance_criteria",
+        "risk_link", "traceability_link", "comments", "status",
+    ]
+    updates = {k: data[k] for k in allowed if k in data}
+    if not updates:
+        return None
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    values = list(updates.values()) + [req_id]
+    conn = get_connection()
+    with conn:
+        conn.execute(f"UPDATE urs_requirements SET {set_clause} WHERE id = ?", values)
+    conn.close()
+    conn2 = get_connection()
+    row = conn2.execute("SELECT * FROM urs_requirements WHERE id = ?", (req_id,)).fetchone()
+    conn2.close()
+    return dict(row) if row else None
+
+
+def delete_requirement(req_id: int) -> bool:
+    conn = get_connection()
+    with conn:
+        conn.execute("DELETE FROM urs_requirements WHERE id = ?", (req_id,))
+    conn.close()
+    return True
+
+
+# ── Approval Workflow ─────────────────────────────────────────────────────────
+
+def add_approval_entry(
+    urs_id: int, action: str, performed_by: str,
+    role: str = "", comments: str = "", version: str = ""
+) -> dict:
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO urs_approvals (urs_id, action, performed_by, role, comments, version) VALUES (?,?,?,?,?,?)",
+            (urs_id, action, performed_by, role, comments, version),
+        )
+        new_id = cur.lastrowid
+    conn.close()
+    conn2 = get_connection()
+    row = conn2.execute("SELECT * FROM urs_approvals WHERE id = ?", (new_id,)).fetchone()
+    conn2.close()
+    return dict(row) if row else {}
+
+
+def get_approval_trail(urs_id: int) -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM urs_approvals WHERE urs_id = ? ORDER BY created_at ASC", (urs_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ── Version History ───────────────────────────────────────────────────────────
+
+def create_version_snapshot(urs_id: int, change_summary: str, created_by: str) -> dict:
+    urs = get_urs(urs_id)
+    if not urs:
+        return {}
+    reqs = get_requirements(urs_id)
+    conn = get_connection()
+    count = conn.execute(
+        "SELECT COUNT(*) FROM urs_versions WHERE urs_id = ?", (urs_id,)
+    ).fetchone()[0]
+    conn.close()
+    version_num = f"v{count + 1}.0"
+    conn2 = get_connection()
+    with conn2:
+        cur = conn2.execute(
+            """INSERT INTO urs_versions
+               (urs_id, version, revision, status, change_summary, requirements_snapshot, req_count, created_by)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                urs_id, version_num, urs.get("revision", "A"), urs.get("status", "draft"),
+                change_summary, json.dumps(reqs), len(reqs), created_by,
+            ),
+        )
+        new_id = cur.lastrowid
+    conn2.close()
+    conn3 = get_connection()
+    row = conn3.execute("SELECT * FROM urs_versions WHERE id = ?", (new_id,)).fetchone()
+    conn3.close()
+    return dict(row) if row else {}
+
+
+def get_versions(urs_id: int) -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT id, urs_id, version, revision, status, change_summary,
+                  req_count, created_by, created_at
+           FROM urs_versions WHERE urs_id = ? ORDER BY created_at DESC""",
+        (urs_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_version_requirements(version_id: int) -> list[dict]:
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT requirements_snapshot FROM urs_versions WHERE id = ?", (version_id,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return []
+    return json.loads(row[0] or "[]")

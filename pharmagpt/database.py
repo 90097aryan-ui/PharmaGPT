@@ -181,6 +181,27 @@ def init_db() -> None:
         );
     """)
     conn.commit()
+
+    # ── Risk Management Suite tables ──────────────────────────────────────────
+    from pharmagpt.risk_database import RISK_SCHEMA
+    conn.executescript(RISK_SCHEMA)
+    conn.commit()
+
+    # ── URS Management Suite tables ───────────────────────────────────────────
+    from pharmagpt.urs_database import URS_SCHEMA
+    conn.executescript(URS_SCHEMA)
+    conn.commit()
+
+    # ── Qualification Management Suite tables ─────────────────────────────────
+    from pharmagpt.qual_database import QUAL_SCHEMA
+    conn.executescript(QUAL_SCHEMA)
+    conn.commit()
+
+    # ── Validation Report Management Suite tables ──────────────────────────────
+    from pharmagpt.report_database import REPORT_SCHEMA
+    conn.executescript(REPORT_SCHEMA)
+    conn.commit()
+
     conn.close()
 
 

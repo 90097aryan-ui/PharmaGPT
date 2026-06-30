@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PharmaGPT — Pharmaceutical AI Consultant</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/risk.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/urs.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/qual.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/report.css') }}" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
@@ -56,6 +60,126 @@
         </div>
         <div class="sidebar-item" id="nav-gen-doc" data-view="view-gen-doc">
           <span class="icon">✨</span> Generate Document
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Risk Management section -->
+      <div class="sidebar-section">
+        <div class="sidebar-label-row">
+          <span class="sidebar-label">Risk Management</span>
+          <button class="val-collapse-btn" onclick="toggleRiskSection()" id="risk-collapse-btn" title="Collapse">▲</button>
+        </div>
+        <div id="risk-nav-items">
+          <div class="sidebar-item risk-sub-item" id="risk-nav-dashboard" onclick="window.initRisk && window.initRisk()">
+            <span class="icon">🏠</span> Dashboard
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-new" onclick="loadAssessmentList && loadAssessmentList()">
+            <span class="icon">📋</span> Assessments
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-new-btn" onclick="startNewWizard && startNewWizard()">
+            <span class="icon">➕</span> New Assessment
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-library" onclick="loadLibrary && loadLibrary()">
+            <span class="icon">📚</span> Risk Library
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-templates" onclick="loadTemplates && loadTemplates()">
+            <span class="icon">📁</span> Templates
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-reports" onclick="showRiskReports()">
+            <span class="icon">📊</span> Reports
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-approval" onclick="showRiskApproval()">
+            <span class="icon">✅</span> Review &amp; Approval
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-assistant" onclick="loadAIAssistant && loadAIAssistant()">
+            <span class="icon">🤖</span> AI Assistant
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- URS Management section -->
+      <div class="sidebar-section">
+        <div class="sidebar-label-row">
+          <span class="sidebar-label">URS Management</span>
+          <button class="val-collapse-btn" onclick="toggleURSSection()" id="urs-collapse-btn" title="Collapse">▲</button>
+        </div>
+        <div id="urs-nav-items">
+          <div class="sidebar-item risk-sub-item" onclick="window.initURS && window.initURS()">
+            <span class="icon">🏠</span> Dashboard
+          </div>
+          <div class="sidebar-item risk-sub-item" onclick="window.loadURSList && window.loadURSList()">
+            <span class="icon">📋</span> All URS
+          </div>
+          <div class="sidebar-item risk-sub-item" onclick="window.startNewURS && window.startNewURS()">
+            <span class="icon">➕</span> New URS
+          </div>
+          <div class="sidebar-item risk-sub-item" onclick="window.showURSApprovalQueue && window.showURSApprovalQueue()">
+            <span class="icon">✅</span> Review &amp; Approval
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Qualification Management Suite -->
+      <div class="sidebar-section">
+        <div class="sidebar-label-row">
+          <span class="sidebar-label">Qualification Suite</span>
+          <button class="val-collapse-btn" onclick="toggleQualSection()" id="qual-collapse-btn" title="Collapse">▲</button>
+        </div>
+        <div id="qual-nav-items">
+          <div class="sidebar-item risk-sub-item" onclick="window.initQual && window.initQual()">
+            <span class="icon">🏠</span> Dashboard
+          </div>
+          <div class="sidebar-item risk-sub-item" onclick="window.initQual && window.initQual(); window.qualShowList && window.qualShowList()">
+            <span class="icon">📋</span> All Qualifications
+          </div>
+          <div class="sidebar-item risk-sub-item" onclick="window.initQual && window.initQual(); window.qualShowNew && window.qualShowNew()">
+            <span class="icon">➕</span> New Qualification
+          </div>
+          <div class="sidebar-item risk-sub-item" onclick="window.initQual && window.initQual(); window.qualShowDashboard && window.qualShowDashboard()">
+            <span class="icon">🧪</span> IQ / OQ / PQ
+          </div>
+          <div class="sidebar-item risk-sub-item" onclick="window.initQual && window.initQual(); window.qualShowDashboard && window.qualShowDashboard()">
+            <span class="icon">🔗</span> Traceability
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Validation Report Management Suite -->
+      <div class="sidebar-section">
+        <div class="sidebar-label-row">
+          <span class="sidebar-label">Validation Report Suite</span>
+          <button class="val-collapse-btn" onclick="toggleReportSection()" id="report-collapse-btn" title="Collapse">▲</button>
+        </div>
+        <div id="report-nav-items">
+          <div class="sidebar-item risk-sub-item" onclick="window.initReport && window.initReport()">
+            <span class="icon">🏠</span> Dashboard
+          </div>
+          <div class="sidebar-item risk-sub-item" onclick="window.initReport && window.initReport(); window.reportShowList && window.reportShowList()">
+            <span class="icon">📋</span> All Reports
+          </div>
+          <div class="sidebar-item risk-sub-item" onclick="window.initReport && window.initReport(); window.reportShowNew && window.reportShowNew()">
+            <span class="icon">➕</span> New Report
+          </div>
+          <div class="sidebar-item risk-sub-item" onclick="window.initReport && window.initReport(); window.reportShowDashboard && window.reportShowDashboard()">
+            <span class="icon">🤖</span> AI Generation
+          </div>
+          <div class="sidebar-item risk-sub-item" onclick="window.initReport && window.initReport()">
+            <span class="icon">🔍</span> AI Review
+          </div>
+          <div class="sidebar-item risk-sub-item" onclick="window.initReport && window.initReport()">
+            <span class="icon">🔗</span> Traceability
+          </div>
+          <div class="sidebar-item risk-sub-item" onclick="window.initReport && window.initReport()">
+            <span class="icon">✅</span> Approval & Workflow
+          </div>
         </div>
       </div>
 
@@ -668,6 +792,459 @@
 
     </main>
 
+    <!-- ══════════════════════════════════════════════════════════════════════ -->
+    <!-- ── Risk Management Suite Views ────────────────────────────────────── -->
+    <!-- ══════════════════════════════════════════════════════════════════════ -->
+
+    <!-- ── Risk Dashboard ────────────────────────────────────────────────── -->
+    <main id="view-risk-dashboard" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
+      <div class="risk-page-header">
+        <div>
+          <h2>⚠️ Risk Management</h2>
+          <p>ICH Q9 · GAMP 5 · EU GMP Annex 15 · WHO-GMP · 21 CFR · ISO 14971</p>
+        </div>
+        <div class="risk-header-actions">
+          <button class="btn-risk-secondary" onclick="loadAssessmentList()">📋 All Assessments</button>
+          <button class="btn-risk-primary" onclick="startNewWizard()">➕ New Assessment</button>
+        </div>
+      </div>
+      <div class="risk-body" id="risk-dash-body">
+        <div class="risk-empty"><div class="risk-empty-icon">⚠️</div><h3>Loading dashboard…</h3></div>
+      </div>
+    </main>
+
+    <!-- ── New Assessment / List / Editor ────────────────────────────────── -->
+    <main id="view-risk-new" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
+      <div class="risk-page-header">
+        <div>
+          <h2 id="risk-new-header-title">📋 Risk Assessments</h2>
+          <p>Create, manage, and review pharmaceutical risk assessments</p>
+        </div>
+        <div class="risk-header-actions">
+          <button class="btn-risk-secondary" id="risk-back-to-list-btn" onclick="backToList()" style="display:none">← Back to List</button>
+          <button class="btn-risk-primary" onclick="startNewWizard()">➕ New Assessment</button>
+        </div>
+      </div>
+
+      <!-- Search bar (list mode) -->
+      <div class="risk-search-bar" id="risk-list-search-bar">
+        <input id="risk-search-input" placeholder="Search by title, equipment, process…" oninput="applyRiskFilters()">
+        <select id="risk-filter-type" onchange="applyRiskFilters()">
+          <option value="">All Types</option>
+          <option value="validation">Validation</option>
+          <option value="manufacturing">Manufacturing</option>
+          <option value="engineering">Engineering</option>
+          <option value="quality">Quality</option>
+          <option value="warehouse">Warehouse</option>
+          <option value="misc">Miscellaneous</option>
+        </select>
+        <select id="risk-filter-method" onchange="applyRiskFilters()">
+          <option value="">All Methodologies</option>
+          <option>FMEA</option><option>HACCP</option><option>HAZOP</option>
+          <option>Risk Matrix</option><option>What-If</option><option>FTA</option><option>Custom</option>
+        </select>
+        <select id="risk-filter-status" onchange="applyRiskFilters()">
+          <option value="">All Statuses</option>
+          <option>Draft</option><option>In Progress</option><option>In Review</option>
+          <option>Approved</option><option>Closed</option>
+        </select>
+      </div>
+
+      <!-- List view -->
+      <div class="risk-body" id="risk-list-view">
+        <div id="risk-list-body">
+          <div class="risk-empty"><div class="risk-empty-icon">📋</div><h3>Loading…</h3></div>
+        </div>
+      </div>
+
+      <!-- Wizard view -->
+      <div class="risk-body" id="risk-wizard-view" style="display:none">
+        <div class="risk-wizard">
+          <!-- Step indicators -->
+          <div class="risk-wizard-steps">
+            <div class="wizard-step active"><span class="wizard-step-num">1</span> Risk Type</div>
+            <div class="wizard-step"><span class="wizard-step-num">2</span> Information</div>
+            <div class="wizard-step"><span class="wizard-step-num">3</span> Methodology</div>
+            <div class="wizard-step"><span class="wizard-step-num">4</span> Review</div>
+          </div>
+
+          <!-- Step 1: Risk Type -->
+          <div class="wizard-panel active" id="wizard-panel-1">
+            <div class="risk-section-card">
+              <div class="risk-section-title">Select Risk Assessment Type</div>
+              <div class="risk-section-body">
+                <div class="risk-type-grid" id="risk-type-selector"></div>
+                <div id="risk-subtype-selector"></div>
+              </div>
+            </div>
+            <div class="wizard-nav">
+              <button class="btn-risk-secondary" onclick="backToList()">Cancel</button>
+              <button class="btn-risk-primary" onclick="wizardNext()">Next →</button>
+            </div>
+          </div>
+
+          <!-- Step 2: Assessment Information -->
+          <div class="wizard-panel" id="wizard-panel-2">
+            <div class="risk-section-card">
+              <div class="risk-section-title">Assessment Information</div>
+              <div class="risk-section-body">
+                <form id="wizard-info-form" autocomplete="off">
+                  <div class="form-grid" style="margin-bottom:16px">
+                    <div class="form-field span-2">
+                      <label>Assessment Title *</label>
+                      <input name="title" placeholder="e.g. FMEA for Tablet Compression Line — Line 3" required>
+                    </div>
+                    <div class="form-field">
+                      <label>Department</label>
+                      <input name="department" placeholder="e.g. Manufacturing, Quality, Engineering">
+                    </div>
+                    <div class="form-field">
+                      <label>Area / Zone</label>
+                      <input name="area" placeholder="e.g. Production Area B, Cleanroom 1">
+                    </div>
+                    <div class="form-field">
+                      <label>Equipment / System</label>
+                      <input name="equipment" placeholder="e.g. Autoclave AC-01, HPLC System">
+                    </div>
+                    <div class="form-field">
+                      <label>Product</label>
+                      <input name="product" placeholder="e.g. Amoxicillin 500mg Tablets">
+                    </div>
+                    <div class="form-field">
+                      <label>Process</label>
+                      <input name="process" placeholder="e.g. Granulation, Compression, Sterilization">
+                    </div>
+                    <div class="form-field">
+                      <label>Protocol Reference</label>
+                      <input name="protocol_reference" placeholder="e.g. VMP-2024-001">
+                    </div>
+                    <div class="form-field">
+                      <label>Change Control Reference</label>
+                      <input name="change_control_reference" placeholder="e.g. CC-2024-045">
+                    </div>
+                    <div class="form-field">
+                      <label>Assessment Owner</label>
+                      <input name="assessment_owner" placeholder="Full name">
+                    </div>
+                    <div class="form-field">
+                      <label>Reviewer</label>
+                      <input name="reviewer" placeholder="Full name">
+                    </div>
+                    <div class="form-field">
+                      <label>Approver</label>
+                      <input name="approver" placeholder="Full name">
+                    </div>
+                    <div class="form-field">
+                      <label>Assessment Date</label>
+                      <input type="date" name="assessment_date">
+                    </div>
+                    <div class="form-field">
+                      <label>Revision</label>
+                      <input name="revision" value="Rev 00" placeholder="Rev 00">
+                    </div>
+                    <div class="form-field">
+                      <label>Priority</label>
+                      <select name="priority">
+                        <option>Low</option><option selected>Medium</option><option>High</option><option>Critical</option>
+                      </select>
+                    </div>
+                    <div class="form-field span-2">
+                      <label>Reason for Assessment</label>
+                      <textarea name="reason" rows="3" placeholder="Describe why this risk assessment is being performed…"></textarea>
+                    </div>
+                  </div>
+                </form>
+              </div>
+            </div>
+            <div class="wizard-nav">
+              <button class="btn-risk-secondary" onclick="wizardBack()">← Back</button>
+              <button class="btn-risk-primary" onclick="wizardNext()">Next →</button>
+            </div>
+          </div>
+
+          <!-- Step 3: Methodology -->
+          <div class="wizard-panel" id="wizard-panel-3">
+            <div class="risk-section-card">
+              <div class="risk-section-title">Select Risk Methodology</div>
+              <div class="risk-section-body">
+                <div class="methodology-grid" id="risk-methodology-selector"></div>
+              </div>
+            </div>
+            <div class="wizard-nav">
+              <button class="btn-risk-secondary" onclick="wizardBack()">← Back</button>
+              <button class="btn-risk-primary" onclick="wizardNext()">Next →</button>
+            </div>
+          </div>
+
+          <!-- Step 4: Review & Create -->
+          <div class="wizard-panel" id="wizard-panel-4">
+            <div class="risk-section-card">
+              <div class="risk-section-title">✅ Review &amp; Create</div>
+              <div class="risk-section-body">
+                <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
+                  Your assessment will be created and opened in the editor where you can:
+                </p>
+                <ul style="font-size:13px;line-height:2;padding-left:20px;color:var(--text)">
+                  <li>Let <strong>AI generate risk items</strong> based on your context</li>
+                  <li>Manually add and edit risk items in the dynamic table</li>
+                  <li>Run <strong>AI Quality Review</strong> for compliance scoring</li>
+                  <li>Submit for <strong>Review &amp; Approval</strong> workflow</li>
+                  <li>Export as <strong>DOCX / PDF / Excel</strong></li>
+                </ul>
+              </div>
+            </div>
+            <div class="wizard-nav">
+              <button class="btn-risk-secondary" onclick="wizardBack()">← Back</button>
+              <button class="btn-risk-primary" onclick="createAndOpenAssessment()">Create &amp; Open →</button>
+            </div>
+          </div>
+
+        </div><!-- /risk-wizard -->
+      </div><!-- /wizard-view -->
+
+      <!-- Editor view (shown when an assessment is open) -->
+      <div class="risk-body" id="risk-editor-view" style="display:none">
+        <!-- Populated by renderEditor() -->
+      </div>
+
+    </main><!-- /view-risk-new -->
+
+    <!-- ── Risk Library ───────────────────────────────────────────────────── -->
+    <main id="view-risk-library" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
+      <div class="risk-page-header">
+        <div>
+          <h2>📚 Risk Library</h2>
+          <p>Reusable risk database — enriched from approved assessments</p>
+        </div>
+        <div class="risk-header-actions">
+          <button class="btn-risk-primary" onclick="loadLibrary()">🔄 Refresh</button>
+        </div>
+      </div>
+      <div class="risk-body" id="risk-library-body">
+        <div class="risk-empty"><div class="risk-empty-icon">📚</div><h3>Loading library…</h3></div>
+      </div>
+    </main>
+
+    <!-- ── Templates ──────────────────────────────────────────────────────── -->
+    <main id="view-risk-templates" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
+      <div class="risk-page-header">
+        <div>
+          <h2>📁 Templates</h2>
+          <p>Pre-built risk assessment templates for common pharmaceutical activities</p>
+        </div>
+      </div>
+      <div class="risk-body" id="risk-templates-body">
+        <div class="risk-empty"><div class="risk-empty-icon">📁</div><h3>Loading templates…</h3></div>
+      </div>
+    </main>
+
+    <!-- ── Reports ────────────────────────────────────────────────────────── -->
+    <main id="view-risk-reports" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
+      <div class="risk-page-header">
+        <div>
+          <h2>📊 Risk Reports</h2>
+          <p>Generate and export professional GMP-compliant risk reports</p>
+        </div>
+      </div>
+      <div class="risk-body" id="risk-reports-body">
+        <div class="risk-empty">
+          <div class="risk-empty-icon">📊</div>
+          <h3>Select an Assessment</h3>
+          <p>Open an assessment and click "Report" to generate a risk report here.</p>
+        </div>
+      </div>
+    </main>
+
+    <!-- ── Review & Approval ──────────────────────────────────────────────── -->
+    <main id="view-risk-approval" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
+      <div class="risk-page-header">
+        <div>
+          <h2>✅ Review &amp; Approval</h2>
+          <p>Assessment review workflow, approval trail, and status management</p>
+        </div>
+      </div>
+      <div class="risk-body" id="risk-approval-body">
+        <div class="risk-empty">
+          <div class="risk-empty-icon">✅</div>
+          <h3>Select an Assessment to Review</h3>
+          <p>Open an assessment from the list and click "Review" to manage approvals.</p>
+        </div>
+      </div>
+    </main>
+
+    <!-- ── AI Assistant ────────────────────────────────────────────────────── -->
+    <main id="view-risk-assistant" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
+      <div class="risk-page-header">
+        <div>
+          <h2>🤖 AI Risk Assistant</h2>
+          <p>Expert pharmaceutical risk management guidance powered by Gemini 2.5 Flash</p>
+        </div>
+      </div>
+      <div class="risk-body" id="risk-assistant-body">
+        <div class="risk-empty"><div class="risk-empty-icon">🤖</div><h3>Loading…</h3></div>
+      </div>
+    </main>
+
+    <!-- ══ End Risk Management Suite ═══════════════════════════════════════ -->
+
+    <!-- ══════════════════════════════════════════════════════════════════════ -->
+    <!-- ── URS Management Suite Views ────────────────────────────────────── -->
+    <!-- ══════════════════════════════════════════════════════════════════════ -->
+
+    <!-- ── URS Dashboard ─────────────────────────────────────────────────── -->
+    <main id="view-urs-dashboard" class="urs-container" style="display:none">
+      <div class="urs-page-header">
+        <div>
+          <h2>📋 URS Management Suite</h2>
+          <p>GAMP 5 · ASTM E2500 · EU GMP Annex 15 · 21 CFR Part 11 · WHO GMP · ICH Q9/Q10</p>
+        </div>
+        <div class="urs-header-actions">
+          <button class="btn-urs-secondary" onclick="loadURSList()">📋 All URS</button>
+          <button class="btn-urs-primary" onclick="startNewURS()">➕ New URS</button>
+        </div>
+      </div>
+      <div class="urs-body" id="urs-dash-body">
+        <div class="urs-empty"><div class="urs-gen-spinner" style="margin:60px auto;width:36px;height:36px;border-width:4px"></div></div>
+      </div>
+    </main>
+
+    <!-- ── URS List ───────────────────────────────────────────────────────── -->
+    <main id="view-urs-list" class="urs-container" style="display:none">
+      <div class="urs-page-header">
+        <div>
+          <h2>📋 URS Documents</h2>
+          <p>All User Requirement Specifications</p>
+        </div>
+        <div class="urs-header-actions">
+          <button class="btn-urs-secondary" onclick="loadURSDashboard()">🏠 Dashboard</button>
+          <button class="btn-urs-primary" onclick="startNewURS()">➕ New URS</button>
+        </div>
+      </div>
+      <div class="urs-search-bar">
+        <input id="urs-search-input" placeholder="Search by title, number, equipment…" oninput="applyURSFilters()">
+        <select id="urs-filter-status" onchange="applyURSFilters()">
+          <option value="">All Status</option>
+          <option value="draft">Draft</option>
+          <option value="under_review">Under Review</option>
+          <option value="pending_approval">Pending Approval</option>
+          <option value="approved">Approved</option>
+          <option value="obsolete">Obsolete</option>
+        </select>
+        <select id="urs-filter-category" onchange="applyURSFilters()">
+          <option value="">All Categories</option>
+          <option value="manufacturing">Manufacturing</option>
+          <option value="packaging">Packaging</option>
+          <option value="laboratory">Laboratory</option>
+          <option value="utilities">Utilities</option>
+          <option value="hvac">HVAC</option>
+          <option value="computerized">Computerized Systems</option>
+          <option value="warehouse">Warehouse</option>
+        </select>
+      </div>
+      <div class="urs-list-grid" id="urs-list-grid"></div>
+      <div class="urs-empty" id="urs-list-empty" style="display:none">
+        <div class="urs-empty-icon">📋</div>
+        <div class="urs-empty-title">No URS Documents Found</div>
+        <div class="urs-empty-sub">Create your first URS to get started.</div>
+        <button class="btn-urs-primary" style="margin-top:16px" onclick="startNewURS()">➕ Create New URS</button>
+      </div>
+    </main>
+
+    <!-- ── URS New Wizard ─────────────────────────────────────────────────── -->
+    <main id="view-urs-new" class="urs-container" style="display:none">
+      <div class="urs-page-header">
+        <div>
+          <h2>➕ New User Requirement Specification</h2>
+          <p>Create a GMP-compliant URS with AI-assisted requirement generation</p>
+        </div>
+        <div class="urs-header-actions">
+          <button class="btn-urs-secondary" onclick="loadURSDashboard()">✕ Cancel</button>
+        </div>
+      </div>
+      <!-- Step indicator -->
+      <div class="urs-wizard-steps">
+        <div class="urs-step-dot active" id="urs-step-dot-1">1</div>
+        <span class="urs-step-label active" id="urs-step-lbl-1">Category</span>
+        <div class="urs-step-line" id="urs-step-line-1"></div>
+        <div class="urs-step-dot" id="urs-step-dot-2">2</div>
+        <span class="urs-step-label" id="urs-step-lbl-2">Project Info</span>
+        <div class="urs-step-line" id="urs-step-line-2"></div>
+        <div class="urs-step-dot" id="urs-step-dot-3">3</div>
+        <span class="urs-step-label" id="urs-step-lbl-3">Generate</span>
+        <div class="urs-step-line" id="urs-step-line-3"></div>
+        <div class="urs-step-dot" id="urs-step-dot-4">4</div>
+        <span class="urs-step-label" id="urs-step-lbl-4">Requirements</span>
+        <div class="urs-step-line" id="urs-step-line-4"></div>
+        <div class="urs-step-dot" id="urs-step-dot-5">5</div>
+        <span class="urs-step-label" id="urs-step-lbl-5">Complete</span>
+      </div>
+      <div class="urs-wizard-body" id="urs-wizard-body"></div>
+    </main>
+
+    <!-- ── URS Detail View ────────────────────────────────────────────────── -->
+    <main id="view-urs-detail" class="urs-container" style="display:none">
+      <div class="urs-detail-header">
+        <button class="urs-detail-back" onclick="loadURSList()">← Back to List</button>
+        <div style="flex:1">
+          <div class="urs-detail-title" id="urs-detail-title">Loading…</div>
+        </div>
+        <span id="urs-detail-status" class="urs-tag urs-tag-status draft">Draft</span>
+        <button class="btn-urs-primary" onclick="exportURSDocx(ursState.currentURS?.id, ursState.currentURS?.urs_number)">⬇ Export DOCX</button>
+      </div>
+      <div class="urs-detail-tab-bar">
+        <button class="urs-detail-tab active" data-tab="overview"      onclick="switchDetailTab('overview')">📊 Overview</button>
+        <button class="urs-detail-tab"        data-tab="requirements"  onclick="switchDetailTab('requirements')">📋 Requirements</button>
+        <button class="urs-detail-tab"        data-tab="review"        onclick="switchDetailTab('review')">🤖 AI Review</button>
+        <button class="urs-detail-tab"        data-tab="approval"      onclick="switchDetailTab('approval')">✅ Approval</button>
+        <button class="urs-detail-tab"        data-tab="versions"      onclick="switchDetailTab('versions')">🕐 Versions</button>
+        <button class="urs-detail-tab"        data-tab="traceability"  onclick="switchDetailTab('traceability')">🔗 Traceability</button>
+      </div>
+      <div style="flex:1;overflow:hidden;position:relative">
+        <div class="urs-detail-panel active" data-tab="overview"     style="height:100%;overflow-y:auto;padding:24px 28px"></div>
+        <div class="urs-detail-panel"        data-tab="requirements" style="height:100%;overflow-y:auto;padding:24px 28px"></div>
+        <div class="urs-detail-panel"        data-tab="review"       style="height:100%;overflow-y:auto;padding:24px 28px"></div>
+        <div class="urs-detail-panel"        data-tab="approval"     style="height:100%;overflow-y:auto;padding:24px 28px"></div>
+        <div class="urs-detail-panel"        data-tab="versions"     style="height:100%;overflow-y:auto;padding:24px 28px"></div>
+        <div class="urs-detail-panel"        data-tab="traceability" style="height:100%;overflow-y:auto;padding:24px 28px"></div>
+      </div>
+    </main>
+
+    <!-- ══ End URS Management Suite ══════════════════════════════════════ -->
+
+    <!-- ══ Qualification Management Suite ═══════════════════════════════════ -->
+    <main id="view-qual" class="qual-container" style="display:none">
+      <!-- Page Header -->
+      <div class="qual-page-header">
+        <div>
+          <h2>🧪 Qualification Management Suite</h2>
+          <p>IQ / OQ / PQ Protocol Management · EU GMP Annex 15 · GAMP 5 · 21 CFR Part 211</p>
+        </div>
+        <div class="qual-header-actions">
+          <button class="btn-qual-secondary" onclick="qualShowNew()">+ New Qualification</button>
+          <button class="btn-qual-secondary" onclick="qualShowList()">📋 All Qualifications</button>
+        </div>
+      </div>
+
+      <!-- Tab bar -->
+      <div style="padding:0 28px;background:#fff;border-bottom:1px solid #eee;flex-shrink:0">
+        <div id="qual-tab-bar" style="display:flex;gap:0">
+          <button class="qual-tab active" id="qual-tab-dashboard" onclick="qualShowDashboard()" style="border-radius:0;border-bottom:3px solid transparent;background:transparent;color:var(--navy);padding:12px 16px">Dashboard</button>
+          <button class="qual-tab"        id="qual-tab-list"      onclick="qualShowList()"      style="border-radius:0;border-bottom:3px solid transparent;background:transparent;color:#666;padding:12px 16px">All Qualifications</button>
+          <button class="qual-tab"        id="qual-tab-new"       onclick="qualShowNew()"       style="border-radius:0;border-bottom:3px solid transparent;background:transparent;color:#666;padding:12px 16px">New Qualification</button>
+          <button class="qual-tab"        id="qual-tab-detail"    style="display:none;border-radius:0;border-bottom:3px solid transparent;background:transparent;color:#666;padding:12px 16px">Detail</button>
+        </div>
+      </div>
+
+      <!-- Tab panes -->
+      <div style="flex:1;overflow:hidden;position:relative">
+        <div id="qual-pane-dashboard" class="qual-tab-pane qual-body"><div class="qual-loading">Loading…</div></div>
+        <div id="qual-pane-list"      class="qual-tab-pane qual-body" style="display:none"></div>
+        <div id="qual-pane-new"       class="qual-tab-pane qual-body" style="display:none"></div>
+        <div id="qual-pane-detail"    class="qual-tab-pane qual-body" style="display:none"></div>
+      </div>
+    </main>
+    <!-- ══ End Qualification Management Suite ════════════════════════════════ -->
+
   <!-- ── New Project Modal ─────────────────────────────────────────────────── -->
   <div class="modal-overlay" id="modal-overlay"></div>
   <div class="modal" id="project-modal">
@@ -916,6 +1493,111 @@
     </form>
   </div>
 
+  <!-- ── Validation Report Management Suite ───────────────────────────────── -->
+  <main id="view-report" class="report-container" style="display:none">
+
+    <!-- Module header -->
+    <div class="report-header">
+      <div class="report-header-left">
+        <div class="report-header-icon">📋</div>
+        <div>
+          <div class="report-header-title">Validation Report Management Suite</div>
+          <div class="report-header-subtitle">EU GMP Annex 15 · GAMP 5 · 21 CFR Part 11 · WHO GMP · ICH Q9</div>
+        </div>
+      </div>
+      <div class="report-header-actions">
+        <button class="report-btn report-btn-outline report-btn-sm" onclick="reportShowDashboard()">🏠 Dashboard</button>
+        <button class="report-btn report-btn-outline report-btn-sm" onclick="reportShowList()">📋 All Reports</button>
+        <button class="report-btn report-btn-primary report-btn-sm" onclick="reportShowNew()">➕ New Report</button>
+      </div>
+    </div>
+
+    <!-- Dashboard view -->
+    <div class="report-view active" id="report-view-dashboard">
+      <div id="report-dash-body">
+        <div style="text-align:center;padding:60px;color:#475569">
+          <div class="report-spinner"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- List view -->
+    <div class="report-view" id="report-view-list">
+      <div class="report-inner">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+          <div>
+            <h2 style="color:#f1f5f9;font-size:18px;font-weight:700">All Validation Reports</h2>
+            <p style="color:#64748b;font-size:13px;margin-top:3px">GMP-compliant Validation Report lifecycle management</p>
+          </div>
+          <button class="report-btn report-btn-primary" onclick="reportShowNew()">➕ New Report</button>
+        </div>
+
+        <!-- Filters -->
+        <div class="report-list-controls">
+          <input type="text" class="report-search-input" id="report-search-input"
+                 placeholder="Search by report #, equipment, department..."
+                 oninput="ReportState.filters.keyword=this.value; loadReportList()">
+          <select class="report-filter-select" onchange="ReportState.filters.status=this.value; loadReportList()">
+            <option value="">All Statuses</option>
+            <option value="draft">Draft</option>
+            <option value="under_review">Under Review</option>
+            <option value="approved">Approved</option>
+            <option value="released">Released</option>
+            <option value="archived">Archived</option>
+          </select>
+          <select class="report-filter-select" onchange="ReportState.filters.department=this.value; loadReportList()">
+            <option value="">All Departments</option>
+            <option>Quality Control</option>
+            <option>Production</option>
+            <option>Quality Assurance</option>
+            <option>Engineering</option>
+            <option>R&D</option>
+            <option>Microbiology</option>
+            <option>Packaging</option>
+            <option>Warehouse</option>
+            <option>Utilities</option>
+          </select>
+          <button class="report-btn report-btn-outline report-btn-sm" onclick="loadReportList()">↻ Refresh</button>
+        </div>
+
+        <div class="report-panel" style="overflow:auto">
+          <table class="report-list-table">
+            <thead>
+              <tr>
+                <th>Report #</th>
+                <th>Title / Equipment</th>
+                <th>Department</th>
+                <th>Status</th>
+                <th>Type</th>
+                <th>Completeness</th>
+                <th>AI Score</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody id="report-list-body">
+              <tr><td colspan="8" style="text-align:center;padding:40px;color:#475569">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- New Report wizard view -->
+    <div class="report-view" id="report-view-new">
+      <div id="report-new-body">
+        <div style="text-align:center;padding:60px;color:#475569">
+          <div class="report-spinner"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Detail view -->
+    <div class="report-view" id="report-view-detail">
+      <div id="report-detail-body"></div>
+    </div>
+
+  </main>
+
   <!-- Load order: dashboard → projects → documents → insights → validation_config → validation → knowledge_base → val_workspace → chat -->
   <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
   <script src="{{ url_for('static', filename='js/projects.js') }}"></script>
@@ -926,6 +1608,10 @@
   <script src="{{ url_for('static', filename='js/gen_document.js') }}"></script>
   <script src="{{ url_for('static', filename='js/knowledge_base.js') }}"></script>
   <script src="{{ url_for('static', filename='js/val_workspace.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/risk.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/urs.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/qual.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/report.js') }}"></script>
   <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
 
   <!-- ── Validation sidebar nav items (rendered from config) ──────────────── -->
@@ -1039,6 +1725,125 @@
         }
       });
     });
+  </script>
+
+  <!-- ── Risk Management navigation helpers ───────────────────────────────── -->
+  <script>
+    // Collapsible Risk Management sidebar section
+    let riskSectionOpen = true;
+    function toggleRiskSection() {
+      const items = document.getElementById("risk-nav-items");
+      const btn   = document.getElementById("risk-collapse-btn");
+      riskSectionOpen = !riskSectionOpen;
+      items.style.display = riskSectionOpen ? "block" : "none";
+      btn.textContent = riskSectionOpen ? "▲" : "▼";
+    }
+    window.toggleRiskSection = toggleRiskSection;
+
+    // ── URS Management sidebar collapse ──────────────────────────────────────
+    let ursSectionOpen = true;
+    function toggleURSSection() {
+      const items = document.getElementById("urs-nav-items");
+      const btn   = document.getElementById("urs-collapse-btn");
+      ursSectionOpen = !ursSectionOpen;
+      items.style.display = ursSectionOpen ? "block" : "none";
+      btn.textContent = ursSectionOpen ? "▲" : "▼";
+    }
+    window.toggleURSSection = toggleURSSection;
+
+    // ── Qualification Suite sidebar collapse ──────────────────────────────────
+    let qualSectionOpen = true;
+    function toggleQualSection() {
+      const items = document.getElementById("qual-nav-items");
+      const btn   = document.getElementById("qual-collapse-btn");
+      qualSectionOpen = !qualSectionOpen;
+      items.style.display = qualSectionOpen ? "block" : "none";
+      btn.textContent = qualSectionOpen ? "▲" : "▼";
+    }
+    window.toggleQualSection = toggleQualSection;
+
+    // Hide all views then show a specific view (shared helper)
+    function showView(targetId) {
+      document.querySelectorAll("main[id^='view-']").forEach(v => v.style.display = "none");
+      document.querySelectorAll(".sidebar-item").forEach(n => n.classList.remove("active"));
+      const target = document.getElementById(targetId);
+      if (target) target.style.display = "flex";
+    }
+    window.showView = showView;
+
+    // Hide all views then show a specific risk view
+    function showAllRiskViews(targetId) {
+      // Hide all main views
+      document.querySelectorAll("main[id^='view-']").forEach(v => v.style.display = "none");
+      // Remove active from all sidebar items
+      document.querySelectorAll(".sidebar-item").forEach(n => n.classList.remove("active"));
+      document.querySelectorAll(".val-nav-item").forEach(n => n.classList.remove("active"));
+      // Show target
+      const target = document.getElementById(targetId);
+      if (target) target.style.display = "flex";
+    }
+    window.showAllRiskViews = showAllRiskViews;
+
+    // showRiskView is defined in risk.js — but we expose
+    // these wrappers for sidebar clicks that need global visibility:
+    function loadAssessmentList() {
+      showAllRiskViews("view-risk-new");
+      // Reset list/wizard/editor
+      const listView   = document.getElementById("risk-list-view");
+      const wizardView = document.getElementById("risk-wizard-view");
+      const editorView = document.getElementById("risk-editor-view");
+      if (wizardView) wizardView.style.display = "none";
+      if (editorView) editorView.style.display = "none";
+      if (listView)   listView.style.display   = "block";
+      // Ask risk.js to load
+      fetch("/risk/assessments")
+        .then(r => r.json())
+        .then(data => {
+          if (window.renderAssessmentList) window.renderAssessmentList(data);
+        })
+        .catch(() => {
+          const body = document.getElementById("risk-list-body");
+          if (body) body.innerHTML = '<div class="risk-empty"><p>Failed to load assessments.</p></div>';
+        });
+    }
+    window.loadAssessmentList = loadAssessmentList;
+
+    function showRiskReports() {
+      showAllRiskViews("view-risk-reports");
+      document.querySelectorAll(".risk-sub-item").forEach(el => el.classList.remove("active"));
+      const el = document.getElementById("risk-nav-reports");
+      if (el) el.classList.add("active");
+    }
+    window.showRiskReports = showRiskReports;
+
+    function showRiskApproval() {
+      showAllRiskViews("view-risk-approval");
+      document.querySelectorAll(".risk-sub-item").forEach(el => el.classList.remove("active"));
+      const el = document.getElementById("risk-nav-approval");
+      if (el) el.classList.add("active");
+    }
+    window.showRiskApproval = showRiskApproval;
+
+    // Override initRisk to also handle view switching
+    const _origInitRisk = window.initRisk;
+    window.initRisk = function() {
+      showAllRiskViews("view-risk-dashboard");
+      document.querySelectorAll(".risk-sub-item").forEach(el => el.classList.remove("active"));
+      const el = document.getElementById("risk-nav-dashboard");
+      if (el) el.classList.add("active");
+      if (_origInitRisk) _origInitRisk();
+    };
+
+    // Also wrap showRiskView to handle the "all views hidden" step
+    if (window.showRiskView) {
+      const _origShowRisk = window.showRiskView;
+      window.showRiskView = function(viewId) {
+        document.querySelectorAll("main[id^='view-']").forEach(v => v.style.display = "none");
+        _origShowRisk(viewId);
+        const target = document.getElementById(viewId);
+        if (target) target.style.display = "flex";
+      };
+    }
   </script>
 
 </body>
