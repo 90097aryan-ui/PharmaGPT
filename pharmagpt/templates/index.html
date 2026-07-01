@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PharmaGPT — Pharmaceutical AI Consultant</title>
+  <title>PharmaGPT — Pharmaceutical Validation Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/risk.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/urs.css') }}" />
@@ -19,15 +22,17 @@
       <div class="logo-icon">Rx</div>
       <div class="header-titles">
         <h1>PharmaGPT</h1>
-        <p>Senior Pharmaceutical Operations &amp; Validation Consultant</p>
+        <p>Pharmaceutical Validation Platform</p>
       </div>
+      <div class="header-divider"></div>
+      <span class="header-context" id="header-breadcrumb">Overview</span>
     </div>
     <div class="header-right">
       <div class="status-badge">
         <div class="status-dot"></div>
-        Gemini 2.5 Flash
+        Gemini 2.5 Flash &nbsp;·&nbsp; Online
       </div>
-      <button class="btn-clear" id="btn-clear">🗑 Clear Chat</button>
+      <button class="btn-clear" id="btn-clear">Clear Chat</button>
     </div>
   </header>
 
@@ -37,204 +42,81 @@
     <!-- ── Sidebar ───────────────────────────────────────────────────────────── -->
     <aside class="sidebar">
 
-      <!-- Navigation -->
+      <!-- Primary Navigation -->
       <div class="sidebar-section">
-        <div class="sidebar-label">Navigation</div>
+        <div class="sidebar-label">Main Menu</div>
         <div class="sidebar-item active" id="nav-dashboard" data-view="view-dashboard">
-          <span class="icon">🏠</span> Home
-        </div>
-        <div class="sidebar-item" id="nav-chat" data-view="view-chat">
-          <span class="icon">💬</span> Chat
-        </div>
-        <div class="sidebar-item" id="nav-documents" data-view="view-documents">
-          <span class="icon">📄</span> Documents
-        </div>
-        <div class="sidebar-item" id="nav-insights" data-view="view-insights">
-          <span class="icon">📊</span> Insights
+          <span class="icon">&#9632;</span> Dashboard
         </div>
         <div class="sidebar-item" id="nav-kb" data-view="view-kb">
-          <span class="icon">🗂</span> Knowledge Base
+          <span class="icon">&#9632;</span> Knowledge Base
         </div>
-        <div class="sidebar-item" id="nav-val-workspace" data-view="view-val-workspace">
-          <span class="icon">🏗</span> Validation
+        <div class="sidebar-item" id="nav-chat" data-view="view-chat">
+          <span class="icon">&#9632;</span> AI Assistant
         </div>
         <div class="sidebar-item" id="nav-gen-doc" data-view="view-gen-doc">
-          <span class="icon">✨</span> Generate Document
+          <span class="icon">&#9632;</span> Generate Document
         </div>
       </div>
 
       <div class="sidebar-divider"></div>
 
-      <!-- Risk Management section -->
-      <div class="sidebar-section">
-        <div class="sidebar-label-row">
-          <span class="sidebar-label">Risk Management</span>
-          <button class="val-collapse-btn" onclick="toggleRiskSection()" id="risk-collapse-btn" title="Collapse">▲</button>
-        </div>
-        <div id="risk-nav-items">
-          <div class="sidebar-item risk-sub-item" id="risk-nav-dashboard" onclick="window.initRisk && window.initRisk()">
-            <span class="icon">🏠</span> Dashboard
-          </div>
-          <div class="sidebar-item risk-sub-item" id="risk-nav-new" onclick="loadAssessmentList && loadAssessmentList()">
-            <span class="icon">📋</span> Assessments
-          </div>
-          <div class="sidebar-item risk-sub-item" id="risk-nav-new-btn" onclick="startNewWizard && startNewWizard()">
-            <span class="icon">➕</span> New Assessment
-          </div>
-          <div class="sidebar-item risk-sub-item" id="risk-nav-library" onclick="loadLibrary && loadLibrary()">
-            <span class="icon">📚</span> Risk Library
-          </div>
-          <div class="sidebar-item risk-sub-item" id="risk-nav-templates" onclick="loadTemplates && loadTemplates()">
-            <span class="icon">📁</span> Templates
-          </div>
-          <div class="sidebar-item risk-sub-item" id="risk-nav-reports" onclick="showRiskReports()">
-            <span class="icon">📊</span> Reports
-          </div>
-          <div class="sidebar-item risk-sub-item" id="risk-nav-approval" onclick="showRiskApproval()">
-            <span class="icon">✅</span> Review &amp; Approval
-          </div>
-          <div class="sidebar-item risk-sub-item" id="risk-nav-assistant" onclick="loadAIAssistant && loadAIAssistant()">
-            <span class="icon">🤖</span> AI Assistant
-          </div>
-        </div>
-      </div>
-
-      <div class="sidebar-divider"></div>
-
-      <!-- URS Management section -->
-      <div class="sidebar-section">
-        <div class="sidebar-label-row">
-          <span class="sidebar-label">URS Management</span>
-          <button class="val-collapse-btn" onclick="toggleURSSection()" id="urs-collapse-btn" title="Collapse">▲</button>
-        </div>
-        <div id="urs-nav-items">
-          <div class="sidebar-item risk-sub-item" onclick="window.initURS && window.initURS()">
-            <span class="icon">🏠</span> Dashboard
-          </div>
-          <div class="sidebar-item risk-sub-item" onclick="window.loadURSList && window.loadURSList()">
-            <span class="icon">📋</span> All URS
-          </div>
-          <div class="sidebar-item risk-sub-item" onclick="window.startNewURS && window.startNewURS()">
-            <span class="icon">➕</span> New URS
-          </div>
-          <div class="sidebar-item risk-sub-item" onclick="window.showURSApprovalQueue && window.showURSApprovalQueue()">
-            <span class="icon">✅</span> Review &amp; Approval
-          </div>
-        </div>
-      </div>
-
-      <div class="sidebar-divider"></div>
-
-      <!-- Qualification Management Suite -->
-      <div class="sidebar-section">
-        <div class="sidebar-label-row">
-          <span class="sidebar-label">Qualification Suite</span>
-          <button class="val-collapse-btn" onclick="toggleQualSection()" id="qual-collapse-btn" title="Collapse">▲</button>
-        </div>
-        <div id="qual-nav-items">
-          <div class="sidebar-item risk-sub-item" onclick="window.initQual && window.initQual()">
-            <span class="icon">🏠</span> Dashboard
-          </div>
-          <div class="sidebar-item risk-sub-item" onclick="window.initQual && window.initQual(); window.qualShowList && window.qualShowList()">
-            <span class="icon">📋</span> All Qualifications
-          </div>
-          <div class="sidebar-item risk-sub-item" onclick="window.initQual && window.initQual(); window.qualShowNew && window.qualShowNew()">
-            <span class="icon">➕</span> New Qualification
-          </div>
-          <div class="sidebar-item risk-sub-item" onclick="window.initQual && window.initQual(); window.qualShowDashboard && window.qualShowDashboard()">
-            <span class="icon">🧪</span> IQ / OQ / PQ
-          </div>
-          <div class="sidebar-item risk-sub-item" onclick="window.initQual && window.initQual(); window.qualShowDashboard && window.qualShowDashboard()">
-            <span class="icon">🔗</span> Traceability
-          </div>
-        </div>
-      </div>
-
-      <div class="sidebar-divider"></div>
-
-      <!-- Validation Report Management Suite -->
-      <div class="sidebar-section">
-        <div class="sidebar-label-row">
-          <span class="sidebar-label">Validation Report Suite</span>
-          <button class="val-collapse-btn" onclick="toggleReportSection()" id="report-collapse-btn" title="Collapse">▲</button>
-        </div>
-        <div id="report-nav-items">
-          <div class="sidebar-item risk-sub-item" onclick="window.initReport && window.initReport()">
-            <span class="icon">🏠</span> Dashboard
-          </div>
-          <div class="sidebar-item risk-sub-item" onclick="window.initReport && window.initReport(); window.reportShowList && window.reportShowList()">
-            <span class="icon">📋</span> All Reports
-          </div>
-          <div class="sidebar-item risk-sub-item" onclick="window.initReport && window.initReport(); window.reportShowNew && window.reportShowNew()">
-            <span class="icon">➕</span> New Report
-          </div>
-          <div class="sidebar-item risk-sub-item" onclick="window.initReport && window.initReport(); window.reportShowDashboard && window.reportShowDashboard()">
-            <span class="icon">🤖</span> AI Generation
-          </div>
-          <div class="sidebar-item risk-sub-item" onclick="window.initReport && window.initReport()">
-            <span class="icon">🔍</span> AI Review
-          </div>
-          <div class="sidebar-item risk-sub-item" onclick="window.initReport && window.initReport()">
-            <span class="icon">🔗</span> Traceability
-          </div>
-          <div class="sidebar-item risk-sub-item" onclick="window.initReport && window.initReport()">
-            <span class="icon">✅</span> Approval & Workflow
-          </div>
-        </div>
-      </div>
-
-      <div class="sidebar-divider"></div>
-
-      <!-- Validation Documents section -->
-      <div class="sidebar-section">
-        <div class="sidebar-label-row">
-          <span class="sidebar-label">Validation</span>
-          <button class="val-collapse-btn" id="val-collapse-btn" onclick="toggleValSection()" title="Collapse">▲</button>
-        </div>
-        <div id="val-nav-items">
-          <!-- Rendered by validation_config.js + inline script below -->
-        </div>
-      </div>
-
-      <div class="sidebar-divider"></div>
-
-      <!-- Projects section -->
+      <!-- Projects -->
       <div class="sidebar-section">
         <div class="sidebar-label-row">
           <span class="sidebar-label">Projects</span>
-          <button class="btn-new-project" id="btn-new-project">＋ New</button>
+          <button class="btn-new-project" id="btn-new-project">+ New</button>
         </div>
         <div id="project-list"></div>
       </div>
 
       <div class="sidebar-divider"></div>
 
-      <!-- Regulatory tags -->
+      <!-- Documents & Insights -->
       <div class="sidebar-section">
-        <div class="sidebar-label">Regulatory Coverage</div>
-        <div class="expertise-tags">
-          <span class="tag">USFDA</span><span class="tag">MHRA</span>
-          <span class="tag">CDSCO</span><span class="tag">WHO-GMP</span>
-          <span class="tag">EU GMP</span><span class="tag">TGA</span>
-          <span class="tag">FSSAI</span><span class="tag">ICH Q9</span>
-          <span class="tag">21 CFR</span><span class="tag">Schedule M</span>
-          <span class="tag">GAMP 5</span><span class="tag">Annex 15</span>
+        <div class="sidebar-label">Documents</div>
+        <div class="sidebar-item" id="nav-documents" data-view="view-documents">
+          <span class="icon">&#9632;</span> Project Documents
+        </div>
+        <div class="sidebar-item" id="nav-insights" data-view="view-insights">
+          <span class="icon">&#9632;</span> Document Insights
+        </div>
+        <div class="sidebar-item" id="nav-val-workspace" data-view="view-val-workspace">
+          <span class="icon">&#9632;</span> Validation Workspace
         </div>
       </div>
 
       <div class="sidebar-divider"></div>
 
+      <!-- Modules (hidden sub-sections — kept for JS compatibility) -->
+      <div id="risk-nav-items" style="display:none">
+        <div class="sidebar-item risk-sub-item" id="risk-nav-dashboard" onclick="window.initRisk && window.initRisk()"></div>
+        <div class="sidebar-item risk-sub-item" id="risk-nav-new" onclick="loadAssessmentList && loadAssessmentList()"></div>
+        <div class="sidebar-item risk-sub-item" id="risk-nav-new-btn" onclick="startNewWizard && startNewWizard()"></div>
+        <div class="sidebar-item risk-sub-item" id="risk-nav-library" onclick="loadLibrary && loadLibrary()"></div>
+        <div class="sidebar-item risk-sub-item" id="risk-nav-templates" onclick="loadTemplates && loadTemplates()"></div>
+        <div class="sidebar-item risk-sub-item" id="risk-nav-reports" onclick="showRiskReports()"></div>
+        <div class="sidebar-item risk-sub-item" id="risk-nav-approval" onclick="showRiskApproval()"></div>
+        <div class="sidebar-item risk-sub-item" id="risk-nav-assistant" onclick="loadAIAssistant && loadAIAssistant()"></div>
+      </div>
+      <div id="urs-nav-items" style="display:none"></div>
+      <div id="qual-nav-items" style="display:none"></div>
+      <div id="report-nav-items" style="display:none"></div>
+      <div id="val-nav-items" style="display:none"></div>
+
+      <!-- Regulatory Coverage -->
       <div class="sidebar-section">
-        <div class="sidebar-label">Specializations</div>
+        <div class="sidebar-label">Regulatory Scope</div>
         <div class="expertise-tags">
-          <span class="tag">IQ / OQ / PQ</span><span class="tag">CSV</span>
-          <span class="tag">CAPA</span><span class="tag">FMEA</span>
-          <span class="tag">Cleaning Val.</span><span class="tag">Process Val.</span>
-          <span class="tag">Six Sigma</span><span class="tag">OEE</span>
-          <span class="tag">SPC</span><span class="tag">Lean</span>
-          <span class="tag">Blister Pack</span><span class="tag">Sterile Mfg</span>
+          <span class="tag">USFDA</span><span class="tag">MHRA</span>
+          <span class="tag">EU GMP</span><span class="tag">WHO-GMP</span>
+          <span class="tag">ICH Q9</span><span class="tag">21 CFR</span>
+          <span class="tag">GAMP 5</span><span class="tag">Annex 15</span>
+          <span class="tag">CDSCO</span><span class="tag">TGA</span>
+          <span class="tag">Schedule M</span><span class="tag">FSSAI</span>
         </div>
       </div>
+
     </aside>
 
     <!-- ── Home Dashboard ─────────────────────────────────────────────────── -->

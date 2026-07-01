@@ -24,8 +24,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 18px 28px;
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #1a2a4a 100%);
-  border-bottom: 2px solid #1e40af;
+  background: #1E293B;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
   flex-shrink: 0;
   gap: 16px;
 }
@@ -35,10 +35,10 @@
   gap: 14px;
 }
 .report-header-icon {
-  width: 44px;
-  height: 44px;
-  background: linear-gradient(135deg, #1e40af, #3b82f6);
-  border-radius: 10px;
+  width: 36px;
+  height: 36px;
+  background: #1565C0;
+  border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -209,7 +209,7 @@
 .report-score-bar-fill {
   height: 100%;
   border-radius: 4px;
-  background: linear-gradient(90deg, #1e40af, #3b82f6);
+  background: #1565C0;
   transition: width 0.6s ease;
 }
 .report-score-pct {
@@ -638,7 +638,7 @@
 }
 .report-gen-overall-fill {
   height: 100%;
-  background: linear-gradient(90deg, #1e40af, #3b82f6);
+  background: #1565C0;
   border-radius: 4px;
   transition: width 0.4s ease;
 }

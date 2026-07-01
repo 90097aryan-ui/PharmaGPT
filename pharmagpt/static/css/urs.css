@@ -12,7 +12,7 @@
 
 /* ── Page Header ─────────────────────────────────────────────────────────────── */
 .urs-page-header {
-  background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%);
+  background: #1E293B;
   color: #fff;
   padding: 20px 28px;
   display: flex;
@@ -416,7 +416,7 @@
 .urs-section-header .section-icon {
   width: 32px;
   height: 32px;
-  background: linear-gradient(135deg, var(--blue), var(--accent));
+  background: #1565C0;
   border-radius: 8px;
   display: flex;
   align-items: center;
@@ -447,7 +447,7 @@
 }
 .urs-category-card.selected {
   border-color: var(--blue);
-  background: linear-gradient(135deg, #EFF6FF, #E3F2FD);
+  background: #EEF4FB;
 }
 
 .urs-category-icon {
@@ -538,7 +538,7 @@
 }
 
 .urs-table th {
-  background: linear-gradient(135deg, var(--navy), var(--navy-light));
+  background: #1E293B;
   color: #fff;
   padding: 10px 12px;
   text-align: left;
@@ -648,7 +648,7 @@
 
 /* ── AI Generation Panel ─────────────────────────────────────────────────────── */
 .urs-ai-panel {
-  background: linear-gradient(135deg, #EFF6FF, #E8EAF6);
+  background: #EEF4FB;
   border: 1px solid #BBDEFB;
   border-radius: var(--radius);
   padding: 20px;
@@ -665,7 +665,7 @@
 .urs-ai-icon {
   width: 36px;
   height: 36px;
-  background: linear-gradient(135deg, var(--blue), var(--accent));
+  background: #1565C0;
   border-radius: 10px;
   display: flex;
   align-items: center;
@@ -905,7 +905,7 @@
 }
 
 .urs-version-badge {
-  background: linear-gradient(135deg, var(--navy), var(--blue));
+  background: #1E293B;
   color: #fff;
   padding: 6px 12px;
   border-radius: 20px;
@@ -1086,7 +1086,7 @@
   width: 36px;
   height: 36px;
   border-radius: 8px;
-  background: linear-gradient(135deg, var(--blue), var(--accent));
+  background: #1565C0;
   display: flex;
   align-items: center;
   justify-content: center;

@@ -29,9 +29,9 @@
 
 /* ── Risk page header ────────────────────────────────────────────────────────── */
 .risk-page-header {
-  background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%);
+  background: #1E293B;
   color: #fff;
-  padding: 20px 32px;
+  padding: 14px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -535,8 +535,9 @@
 
 /* ── AI panel ────────────────────────────────────────────────────────────────── */
 .risk-ai-panel {
-  background: linear-gradient(135deg, #EEF4FD 0%, #F3F6FB 100%);
-  border: 1.5px solid #BBDEFB;
+  background: #EEF4FB;
+  border: 1px solid #D5DDE5;
+  border-left: 3px solid #1565C0;
   border-radius: 12px;
   padding: 20px 24px;
   margin-bottom: 20px;
