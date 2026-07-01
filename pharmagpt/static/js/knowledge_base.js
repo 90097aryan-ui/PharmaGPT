@@ -28,6 +28,11 @@
     folderCounts: {},
   };
 
+  // Statuses considered "still working" — polled until terminal.
+  const EXTRACTION_IN_PROGRESS_STATUSES = new Set(['pending', 'processing']);
+  const EXTRACTION_FAILED_STATUSES = new Set(['failed', 'error', 'partial']);
+  const extractionPollTimers = new Map(); // kbId -> interval handle
+
   // ── Load & render ──────────────────────────────────────────────────────────
 
   async function loadKBDocuments() {
@@ -116,6 +121,7 @@
               <span class="kb-type-pill">${doc.file_type.toUpperCase()}</span>
               ${doc.effective_date ? `<span class="kb-date-pill">📅 Eff: ${doc.effective_date}</span>` : ''}
               ${doc.review_date ? `<span class="kb-date-pill kb-review-pill">🔄 Rev: ${doc.review_date}</span>` : ''}
+              ${renderExtractionBadge(doc)}
             </div>
             ${tagsHtml ? `<div class="kb-tags-row">${tagsHtml}</div>` : ''}
           </div>
@@ -125,6 +131,67 @@
           </div>
         </div>`;
     }).join('');
+
+    docs.forEach(doc => {
+      if (EXTRACTION_IN_PROGRESS_STATUSES.has(doc.extraction_status)) {
+        kbPollExtraction(doc.id);
+      }
+    });
+  }
+
+  function renderExtractionBadge(doc) {
+    const status = doc.extraction_status;
+    if (!status || status === 'ok') return '';
+
+    if (EXTRACTION_IN_PROGRESS_STATUSES.has(status)) {
+      const total = doc.extraction_progress_total || 0;
+      const current = doc.extraction_progress_current || 0;
+      const label = total ? `Extracting page ${current}/${total}…` : 'Extracting…';
+      return `<span class="kb-date-pill kb-ext-badge-pending">${label}</span>`;
+    }
+    if (status === 'empty') {
+      return `<span class="kb-date-pill kb-ext-badge-empty">No text found</span>`;
+    }
+    if (status === 'partial') {
+      return `<span class="kb-date-pill kb-ext-badge-partial">Partial (${doc.quality_score ?? 0}%)</span>`;
+    }
+    return `<span class="kb-date-pill kb-ext-badge-failed">Extraction failed</span>`;
+  }
+
+  // ── Extraction progress polling ─────────────────────────────────────────────
+
+  function kbPollExtraction(id) {
+    if (extractionPollTimers.has(id)) return;
+
+    const timer = setInterval(async () => {
+      try {
+        const resp = await fetch(`/kb/documents/${id}/status`);
+        const status = await resp.json();
+
+        if (!EXTRACTION_IN_PROGRESS_STATUSES.has(status.extraction_status)) {
+          clearInterval(timer);
+          extractionPollTimers.delete(id);
+          await loadKBDocuments();
+          if (state.selectedDoc && state.selectedDoc.id === id) await kbSelectDoc(id);
+        }
+      } catch {
+        clearInterval(timer);
+        extractionPollTimers.delete(id);
+      }
+    }, 1500);
+
+    extractionPollTimers.set(id, timer);
+  }
+
+  async function kbRetryExtraction(id) {
+    try {
+      const resp = await fetch(`/kb/documents/${id}/retry`, { method: 'POST' });
+      if (!resp.ok) throw new Error();
+      await loadKBDocuments();
+      if (state.selectedDoc && state.selectedDoc.id === id) await kbSelectDoc(id);
+    } catch {
+      alert('Could not retry extraction. Please try again.');
+    }
   }
 
   // ── Document detail panel ──────────────────────────────────────────────────
@@ -163,6 +230,10 @@
       <div class="kb-detail-toolbar">
         <button class="kb-dtool-btn kb-dtool-view" onclick="kbViewDoc(${doc.id})">👁 View</button>
         <button class="kb-dtool-btn kb-dtool-dl"   onclick="kbDownloadDoc(${doc.id})">⬇ Download</button>
+        ${EXTRACTION_FAILED_STATUSES.has(doc.extraction_status)
+          ? `<button class="kb-dtool-btn kb-dtool-retry" onclick="kbRetryExtraction(${doc.id})">🔁 Retry Extraction</button>`
+          : ''
+        }
         <div class="kb-dtool-sep"></div>
         <button class="kb-dtool-btn kb-dtool-del"  onclick="kbDeleteDoc(${doc.id})">🗑 Delete</button>
       </div>
@@ -193,8 +264,14 @@
   }
 
   function buildPreview(doc) {
-    if (!doc.text_content || doc.extraction_status !== 'ok') {
-      return `<div class="kb-preview-empty">No text preview available${doc.extraction_status === 'error' ? ' (extraction failed)' : ''}.</div>`;
+    if (EXTRACTION_IN_PROGRESS_STATUSES.has(doc.extraction_status)) {
+      const total = doc.extraction_progress_total || 0;
+      const current = doc.extraction_progress_current || 0;
+      const label = total ? `Extracting page ${current}/${total}…` : 'Extraction starting…';
+      return `<div class="kb-preview-empty">${label}</div>`;
+    }
+    if (!doc.text_content || (doc.extraction_status !== 'ok' && doc.extraction_status !== 'partial')) {
+      return `<div class="kb-preview-empty">No text preview available${EXTRACTION_FAILED_STATUSES.has(doc.extraction_status) ? ' (extraction failed)' : ''}.</div>`;
     }
     const snippet = doc.text_content.slice(0, 2500);
     const truncated = doc.text_content.length > 2500;
@@ -281,8 +358,9 @@
       const resp = await fetch('/kb/documents', { method: 'POST', body: fd });
       const data = await resp.json();
       if (resp.ok) {
-        showUploadStatus('success', `✓ "${data.title}" added to Knowledge Base.`);
+        showUploadStatus('success', `✓ "${data.title}" added — extracting text in the background…`);
         setTimeout(() => { closeKBUploadModal(); loadKBDocuments(); }, 1200);
+        kbPollExtraction(data.id);
       } else {
         showUploadStatus('error', data.error || 'Upload failed.');
       }
@@ -403,6 +481,7 @@
   window.kbViewDoc          = kbViewDoc;
   window.kbDownloadDoc      = kbDownloadDoc;
   window.kbDeleteDoc        = kbDeleteDoc;
+  window.kbRetryExtraction  = kbRetryExtraction;
   window.kbSearch           = kbSearch;
   window.kbClearSearch      = kbClearSearch;
   window.kbCloseDetail      = kbCloseDetail;

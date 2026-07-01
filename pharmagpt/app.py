@@ -16,7 +16,10 @@ import uuid
 from flask import Flask, render_template, session
 
 from pharmagpt.config import FLASK_SECRET_KEY, FLASK_DEBUG, FLASK_PORT, MAX_FILE_SIZE
+from pharmagpt.logging_config import configure_logging
 from pharmagpt import database as db
+
+configure_logging()
 
 from pharmagpt.routes.projects       import bp as projects_bp
 from pharmagpt.routes.chat           import bp as chat_bp

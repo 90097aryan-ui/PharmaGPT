@@ -18,6 +18,12 @@ const FILE_COLORS = {
   txt:  "#607080",   // grey
 };
 
+// Statuses considered "still working" — the row keeps polling while in one
+// of these states. Anything else (ok, empty, partial, failed, error) is terminal.
+const EXTRACTION_IN_PROGRESS_STATUSES = new Set(["pending", "processing"]);
+const EXTRACTION_FAILED_STATUSES = new Set(["failed", "error", "partial"]);
+const extractionPollTimers = new Map(); // docId -> interval handle
+
 // ── Load and render document list ─────────────────────────────────────────────
 
 async function loadDocuments() {
@@ -62,6 +68,7 @@ function renderDocuments(documents) {
           <span class="doc-type-badge" style="border-color:${color};color:${color}">${ext.toUpperCase()}</span>
           <span>${size}</span>
           <span>${date}</span>
+          ${renderExtractionBadge(doc)}
         </div>
       </div>
       <div class="doc-actions">
@@ -70,6 +77,10 @@ function renderDocuments(documents) {
           : `<span class="doc-btn doc-btn-view doc-btn-disabled" title="This file type cannot be previewed in the browser">View</span>`
         }
         <a class="doc-btn doc-btn-download" href="/documents/${doc.id}/download" download>Download</a>
+        ${EXTRACTION_FAILED_STATUSES.has(doc.extraction_status)
+          ? `<button class="doc-btn doc-btn-retry" data-id="${doc.id}">Retry Extraction</button>`
+          : ""
+        }
         <button class="doc-btn doc-btn-delete" data-id="${doc.id}" data-name="${escapeHtml(doc.original_name)}">Delete</button>
       </div>
     `;
@@ -80,8 +91,74 @@ function renderDocuments(documents) {
       confirmDeleteDocument(btn.dataset.id, btn.dataset.name);
     });
 
+    const retryBtn = row.querySelector(".doc-btn-retry");
+    if (retryBtn) {
+      retryBtn.addEventListener("click", (e) => retryDocumentExtraction(e.currentTarget.dataset.id));
+    }
+
     docListEl.appendChild(row);
+
+    if (EXTRACTION_IN_PROGRESS_STATUSES.has(doc.extraction_status)) {
+      pollDocumentExtraction(doc.id);
+    }
   });
+}
+
+function renderExtractionBadge(doc) {
+  const status = doc.extraction_status;
+  if (!status || status === "ok") return "";
+
+  if (EXTRACTION_IN_PROGRESS_STATUSES.has(status)) {
+    const total = doc.extraction_progress_total || 0;
+    const current = doc.extraction_progress_current || 0;
+    const label = total ? `Extracting page ${current}/${total}…` : "Extracting…";
+    return `<span class="doc-extract-badge doc-extract-pending">${label}</span>`;
+  }
+  if (status === "empty") {
+    return `<span class="doc-extract-badge doc-extract-empty">No text found (scanned document?)</span>`;
+  }
+  if (status === "partial") {
+    return `<span class="doc-extract-badge doc-extract-partial">Partial (${doc.quality_score ?? 0}% quality)</span>`;
+  }
+  if (status === "failed" || status === "error") {
+    return `<span class="doc-extract-badge doc-extract-failed">Extraction failed</span>`;
+  }
+  return "";
+}
+
+// ── Extraction progress polling ────────────────────────────────────────────────
+
+function pollDocumentExtraction(docId) {
+  if (extractionPollTimers.has(docId)) return; // already polling this document
+
+  const timer = setInterval(async () => {
+    try {
+      const res = await fetch(`/documents/${docId}/status`);
+      const status = await res.json();
+
+      if (!EXTRACTION_IN_PROGRESS_STATUSES.has(status.extraction_status)) {
+        clearInterval(timer);
+        extractionPollTimers.delete(docId);
+        await loadDocuments();
+      }
+    } catch {
+      clearInterval(timer);
+      extractionPollTimers.delete(docId);
+    }
+  }, 1500);
+
+  extractionPollTimers.set(docId, timer);
+}
+
+async function retryDocumentExtraction(docId) {
+  try {
+    const res = await fetch(`/documents/${docId}/retry`, { method: "POST" });
+    if (!res.ok) throw new Error();
+    showDocStatus("Retrying extraction…", "info");
+    await loadDocuments();
+  } catch {
+    showDocStatus("Could not retry extraction. Please try again.", "error");
+  }
 }
 
 // ── Upload ────────────────────────────────────────────────────────────────────
@@ -116,8 +193,9 @@ async function uploadFile(file) {
     if (!res.ok) {
       showDocStatus(data.error || "Upload failed.", "error");
     } else {
-      showDocStatus(`"${data.original_name}" uploaded successfully.`, "success");
+      showDocStatus(`"${data.original_name}" uploaded — extracting text in the background…`, "success");
       await loadDocuments();
+      pollDocumentExtraction(data.id);
     }
   } catch {
     showDocStatus("Network error during upload. Please try again.", "error");

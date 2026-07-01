@@ -30,3 +30,22 @@ MAX_FILE_SIZE = 50 * 1024 * 1024
 
 # File types users are allowed to upload
 ALLOWED_EXTENSIONS = {"pdf", "docx", "xlsx", "txt"}
+
+# ── Document extraction engine settings ───────────────────────────────────────
+# See pharmagpt/services/document_processor.py and services/extraction/ for
+# how these are used.
+
+# Maximum seconds a single page may take in a single engine before the
+# pipeline abandons it and falls back to the next engine (or skips the page).
+PAGE_TIMEOUT_SECONDS = int(os.getenv("PAGE_TIMEOUT_SECONDS", 10))
+
+# Thread pool size for background extraction jobs (services/job_runner.py).
+EXTRACTION_WORKERS = int(os.getenv("EXTRACTION_WORKERS", 2))
+
+# Run gc.collect() + drop cached page objects every N pages during extraction,
+# bounding peak memory on very large (1000+ page) documents.
+GC_INTERVAL_PAGES = int(os.getenv("GC_INTERVAL_PAGES", 20))
+
+# Persist extraction progress to SQLite every N pages (avoids a DB write per
+# page on very large documents while keeping the progress UI responsive).
+PROGRESS_WRITE_EVERY_N_PAGES = int(os.getenv("PROGRESS_WRITE_EVERY_N_PAGES", 5))

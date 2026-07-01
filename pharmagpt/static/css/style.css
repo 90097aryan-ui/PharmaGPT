@@ -1204,6 +1204,43 @@ header {
   transform: scale(1.03);
 }
 
+.doc-btn-retry {
+  background: #FFF3E0;
+  color: #E65100;
+}
+
+.doc-btn-retry:hover {
+  background: #FFE0B2;
+}
+
+/* ── Extraction status badges (document rows + KB detail panel) ────────────── */
+.doc-extract-badge {
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.doc-extract-pending {
+  background: #E3F2FD;
+  color: #1565C0;
+}
+
+.doc-extract-empty {
+  background: #FFF3E0;
+  color: #E65100;
+}
+
+.doc-extract-partial {
+  background: #FFF8E1;
+  color: #F57F17;
+}
+
+.doc-extract-failed {
+  background: #FFEBEE;
+  color: #C62828;
+}
+
 /* ── Use Project Documents toggle ───────────────────────────────────────────── */
 .use-docs-row {
   display: flex;
@@ -2628,6 +2665,8 @@ header {
 .kb-dtool-dl:hover   { background: #C8E6C9; }
 .kb-dtool-del  { margin-left: auto; }
 .kb-dtool-del:hover  { background: #FFEBEE; color: #C62828; border-color: #FFCDD2; }
+.kb-dtool-retry { background: #FFF3E0; color: #E65100; border-color: #FFE0B2; }
+.kb-dtool-retry:hover { background: #FFE0B2; }
 .kb-dtool-sep  { flex: 1; }
 
 /* ── Metadata grid ───────────────────────────────────────────────────────────── */
@@ -2663,10 +2702,23 @@ header {
   font-weight: 500;
 }
 
-.kb-ext-ok    { color: #2E7D32; }
-.kb-ext-empty { color: #E65100; }
-.kb-ext-error { color: var(--error); }
+.kb-ext-ok         { color: #2E7D32; }
+.kb-ext-empty      { color: #E65100; }
+.kb-ext-error      { color: var(--error); }
+.kb-ext-failed     { color: var(--error); }
+.kb-ext-partial    { color: #F57F17; }
+.kb-ext-pending,
+.kb-ext-processing { color: #1565C0; }
 .kb-overdue   { color: #C62828; font-weight: 700; }
+
+.kb-ext-badge-pending, .kb-ext-badge-empty, .kb-ext-badge-partial, .kb-ext-badge-failed {
+  font-weight: 600;
+  border: none;
+}
+.kb-ext-badge-pending { background: #E3F2FD; color: #1565C0; }
+.kb-ext-badge-empty   { background: #FFF3E0; color: #E65100; }
+.kb-ext-badge-partial { background: #FFF8E1; color: #F57F17; }
+.kb-ext-badge-failed  { background: #FFEBEE; color: #C62828; }
 
 .kb-meta-tags-row {
   display: flex;

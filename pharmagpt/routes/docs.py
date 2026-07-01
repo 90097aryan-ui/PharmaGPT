@@ -4,21 +4,19 @@ routes/docs.py — Project document upload, view, download, delete, and insights
 Routes
 ------
 GET    /projects/<id>/documents      list documents for a project
-POST   /projects/<id>/documents      upload a file
+POST   /projects/<id>/documents      upload a file (extraction runs in the background)
+GET    /documents/<id>/status        poll extraction progress/result
+POST   /documents/<id>/retry         re-run extraction after a failure
 GET    /documents/<id>/view          view inline (PDF/TXT) or download
 GET    /documents/<id>/download      force-download
 DELETE /documents/<id>               delete file + metadata
 GET    /projects/<id>/insights       aggregated document statistics
 """
 
-import logging
-
 from pharmagpt import database as db
 from pharmagpt import documents as doc_utils
-from pharmagpt.services.extractor import extract_text
+from pharmagpt.services.document_processor import process_document_async
 from flask import Blueprint, jsonify, request, send_file
-
-logger = logging.getLogger(__name__)
 
 bp = Blueprint("documents", __name__)
 
@@ -34,12 +32,14 @@ def list_documents(project_id):
 @bp.route("/projects/<int:project_id>/documents", methods=["POST"])
 def upload_document(project_id):
     """
-    Accept a multipart/form-data file upload and store it inside the project.
-    Text is extracted synchronously after saving; extraction failures are
-    absorbed so the upload HTTP response is never blocked.
+    Accept a multipart/form-data file upload, store it inside the project,
+    and kick off text extraction in the background. The HTTP response
+    returns as soon as the file is saved to disk — never blocked on
+    extraction, no matter how large the document is (see
+    services/document_processor.py).
 
     Form field: file  (PDF, DOCX, XLSX, or TXT — max 50 MB)
-    Returns the new document metadata dict on success.
+    Returns the new document metadata dict (extraction_status: "pending").
     """
     if not db.get_project(project_id):
         return jsonify({"error": "Project not found"}), 404
@@ -65,29 +65,51 @@ def upload_document(project_id):
         file_size=file_size,
     )
 
-    _extract_and_store(
-        doc_id=doc["id"],
+    db.create_pending_document_text(doc["id"], project_id)
+    process_document_async(
+        "project", doc["id"],
+        doc_utils.get_file_path(project_id, stored_filename),
+        extension,
         project_id=project_id,
-        file_path=doc_utils.get_file_path(project_id, stored_filename),
-        extension=extension,
     )
+    doc["extraction_status"] = "pending"
     return jsonify(doc), 201
 
 
-def _extract_and_store(doc_id: int, project_id: int,
-                       file_path: str, extension: str) -> None:
-    """
-    Extract text from a project document and persist it to document_text.
-    All exceptions are caught and logged so the upload response is unaffected.
-    """
-    try:
-        text, page_count = extract_text(file_path, extension)
-        word_count = len(text.split())
-        status = "ok" if text.strip() else "empty"
-        db.save_document_text(doc_id, project_id, text, page_count, word_count, status)
-    except Exception as exc:
-        logger.error("Text extraction failed for document %s: %s", doc_id, exc)
-        db.save_document_text(doc_id, project_id, "", 0, 0, "error")
+@bp.route("/documents/<int:doc_id>/status", methods=["GET"])
+def document_extraction_status(doc_id):
+    """Poll extraction progress/result for a project document."""
+    if not db.get_document(doc_id):
+        return jsonify({"error": "Document not found"}), 404
+
+    status = db.get_document_text_status(doc_id)
+    if not status:
+        # Extremely unlikely — the row is created synchronously at upload —
+        # but report "pending" rather than 404 so a poller never has to
+        # special-case a brief race.
+        status = {"document_id": doc_id, "extraction_status": "pending"}
+    return jsonify(status)
+
+
+@bp.route("/documents/<int:doc_id>/retry", methods=["POST"])
+def retry_document_extraction(doc_id):
+    """Re-run extraction for a document whose previous attempt failed (or
+    partially failed). Never deletes the stored file — it is retried in place."""
+    doc = db.get_document(doc_id)
+    if not doc:
+        return jsonify({"error": "Document not found"}), 404
+
+    if not doc_utils.file_exists(doc["project_id"], doc["stored_filename"]):
+        return jsonify({"error": "File not found on disk — cannot retry"}), 404
+
+    db.create_pending_document_text(doc_id, doc["project_id"])
+    process_document_async(
+        "project", doc_id,
+        doc_utils.get_file_path(doc["project_id"], doc["stored_filename"]),
+        doc["file_type"],
+        project_id=doc["project_id"],
+    )
+    return jsonify({"status": "pending"}), 202
 
 
 @bp.route("/documents/<int:doc_id>/view")

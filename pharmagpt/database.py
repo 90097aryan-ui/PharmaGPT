@@ -40,6 +40,19 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    """
+    Add a column to an existing table if it isn't already there.
+
+    SQLite has no `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, so this checks
+    PRAGMA table_info() first. Safe to call on every startup — purely
+    additive, never touches existing data.
+    """
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
 def init_db() -> None:
     """Create tables if they do not already exist. Safe to call on every startup."""
     conn = get_connection()
@@ -182,6 +195,21 @@ def init_db() -> None:
     """)
     conn.commit()
 
+    # ── Document Processing Engine — additive columns ─────────────────────────
+    # See services/document_processor.py and services/extraction/. Existing
+    # extraction_status values ('ok' | 'empty' | 'error') keep working
+    # unmodified; the new async multi-engine pipeline additionally uses
+    # 'pending' | 'processing' | 'partial' | 'failed'.
+    for _table in ("document_text", "kb_documents"):
+        _add_column_if_missing(conn, _table, "extraction_progress_current", "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing(conn, _table, "extraction_progress_total",   "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing(conn, _table, "extraction_engine",           "TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, _table, "quality_score",               "REAL NOT NULL DEFAULT 0")
+        _add_column_if_missing(conn, _table, "extraction_seconds",          "REAL NOT NULL DEFAULT 0")
+        _add_column_if_missing(conn, _table, "pages_failed",                "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing(conn, _table, "error_message",               "TEXT NOT NULL DEFAULT ''")
+    conn.commit()
+
     # ── Risk Management Suite tables ──────────────────────────────────────────
     from pharmagpt.risk_database import RISK_SCHEMA
     conn.executescript(RISK_SCHEMA)
@@ -305,10 +333,27 @@ def save_document(project_id: int, original_name: str, stored_filename: str,
 
 
 def get_project_documents(project_id: int) -> list[dict]:
-    """Return all documents for a project, newest first."""
+    """
+    Return all documents for a project, newest first, left-joined with their
+    document_text row so the list view can show extraction status/progress
+    without a second round-trip per document. `extraction_status` defaults to
+    'pending' for a document whose background job hasn't created its
+    document_text row yet (should be momentary in practice).
+    """
     conn = get_connection()
     rows = conn.execute(
-        "SELECT * FROM documents WHERE project_id = ? ORDER BY upload_date DESC",
+        """SELECT d.*,
+                  COALESCE(dt.extraction_status, 'pending') AS extraction_status,
+                  COALESCE(dt.extraction_progress_current, 0) AS extraction_progress_current,
+                  COALESCE(dt.extraction_progress_total, 0)   AS extraction_progress_total,
+                  COALESCE(dt.extraction_engine, '')  AS extraction_engine,
+                  COALESCE(dt.quality_score, 0)       AS quality_score,
+                  COALESCE(dt.pages_failed, 0)         AS pages_failed,
+                  dt.page_count, dt.word_count
+           FROM documents d
+           LEFT JOIN document_text dt ON dt.document_id = d.id
+           WHERE d.project_id = ?
+           ORDER BY d.upload_date DESC""",
         (project_id,),
     ).fetchall()
     conn.close()
@@ -336,16 +381,75 @@ def delete_document(doc_id: int) -> None:
 
 # ── Document text CRUD ────────────────────────────────────────────────────────
 
-def save_document_text(document_id: int, project_id: int, text_content: str,
-                       page_count: int, word_count: int,
-                       extraction_status: str = "ok") -> None:
-    """Insert (or replace) extracted text for a document."""
+def create_pending_document_text(document_id: int, project_id: int) -> None:
+    """
+    Create a placeholder document_text row immediately after a project
+    document is uploaded — before the background extraction job has even
+    started — so GET /documents/<id>/status always has a row to return
+    instead of a transient 404.
+    """
     conn = get_connection()
     conn.execute(
         """INSERT OR REPLACE INTO document_text
            (document_id, project_id, text_content, page_count, word_count, extraction_status)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (document_id, project_id, text_content, page_count, word_count, extraction_status),
+           VALUES (?, ?, '', 0, 0, 'pending')""",
+        (document_id, project_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_document_text_progress(document_id: int, current: int, total: int,
+                                   engine: str = "") -> None:
+    """Persist in-flight extraction progress. Called (throttled) from the
+    extraction pipeline's progress_cb so any process can poll status."""
+    conn = get_connection()
+    conn.execute(
+        """UPDATE document_text
+           SET extraction_status = 'processing',
+               extraction_progress_current = ?,
+               extraction_progress_total = ?,
+               extraction_engine = ?
+           WHERE document_id = ?""",
+        (current, total, engine, document_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_document_text_status(document_id: int) -> dict | None:
+    """Lightweight status/progress projection for GET /documents/<id>/status."""
+    conn = get_connection()
+    row = conn.execute(
+        """SELECT document_id, extraction_status, extraction_progress_current,
+                  extraction_progress_total, extraction_engine, quality_score,
+                  pages_failed, page_count, word_count, error_message
+           FROM document_text WHERE document_id = ?""",
+        (document_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def save_document_text(document_id: int, project_id: int, text_content: str,
+                       page_count: int, word_count: int,
+                       extraction_status: str = "ok", *,
+                       pages_failed: int = 0, engine_used: str = "",
+                       quality_score: float = 0.0, extraction_seconds: float = 0.0,
+                       error_message: str = "") -> None:
+    """Insert (or replace) extracted text for a document — the final commit
+    at the end of extraction (sync or async). Extra keyword-only stats
+    parameters are additive; existing positional-only callers keep working."""
+    conn = get_connection()
+    conn.execute(
+        """INSERT OR REPLACE INTO document_text
+           (document_id, project_id, text_content, page_count, word_count, extraction_status,
+            pages_failed, extraction_engine, quality_score, extraction_seconds, error_message,
+            extraction_progress_current, extraction_progress_total)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (document_id, project_id, text_content, page_count, word_count, extraction_status,
+         pages_failed, engine_used, quality_score, extraction_seconds, error_message,
+         page_count, page_count),
     )
     conn.commit()
     conn.close()
@@ -667,7 +771,9 @@ def get_kb_documents(folder: str | None = None, tag: str | None = None,
     rows = conn.execute(
         f"""SELECT id, title, folder, tags, doc_version, effective_date, review_date,
                    original_name, file_type, file_size, word_count, page_count,
-                   extraction_status, upload_date
+                   extraction_status, upload_date, extraction_progress_current,
+                   extraction_progress_total, extraction_engine, quality_score,
+                   pages_failed, error_message
             FROM kb_documents {where} ORDER BY upload_date DESC""",
         params,
     ).fetchall()
@@ -686,17 +792,71 @@ def get_kb_document(kb_id: int) -> dict | None:
 
 
 def update_kb_document_text(kb_id: int, text_content: str, word_count: int,
-                             page_count: int, extraction_status: str) -> None:
-    """Store extracted text for a KB document after upload."""
+                             page_count: int, extraction_status: str, *,
+                             pages_failed: int = 0, engine_used: str = "",
+                             quality_score: float = 0.0, extraction_seconds: float = 0.0,
+                             error_message: str = "") -> None:
+    """Store extracted text for a KB document — the final commit at the end
+    of extraction (sync or async). Extra keyword-only stats parameters are
+    additive; existing positional-only callers keep working."""
     conn = get_connection()
     conn.execute(
         """UPDATE kb_documents
-           SET text_content = ?, word_count = ?, page_count = ?, extraction_status = ?
+           SET text_content = ?, word_count = ?, page_count = ?, extraction_status = ?,
+               pages_failed = ?, extraction_engine = ?, quality_score = ?,
+               extraction_seconds = ?, error_message = ?,
+               extraction_progress_current = ?, extraction_progress_total = ?
            WHERE id = ?""",
-        (text_content, word_count, page_count, extraction_status, kb_id),
+        (text_content, word_count, page_count, extraction_status, pages_failed, engine_used,
+         quality_score, extraction_seconds, error_message, page_count, page_count, kb_id),
     )
     conn.commit()
     conn.close()
+
+
+def mark_kb_pending(kb_id: int) -> None:
+    """Reset a KB document to 'pending' — called right after upload (before
+    the background job starts) and by the retry endpoint."""
+    conn = get_connection()
+    conn.execute(
+        """UPDATE kb_documents
+           SET extraction_status = 'pending', extraction_progress_current = 0,
+               extraction_progress_total = 0, extraction_engine = '',
+               quality_score = 0, extraction_seconds = 0, pages_failed = 0,
+               error_message = ''
+           WHERE id = ?""",
+        (kb_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_kb_progress(kb_id: int, current: int, total: int, engine: str = "") -> None:
+    """Persist in-flight extraction progress for a KB document."""
+    conn = get_connection()
+    conn.execute(
+        """UPDATE kb_documents
+           SET extraction_status = 'processing', extraction_progress_current = ?,
+               extraction_progress_total = ?, extraction_engine = ?
+           WHERE id = ?""",
+        (current, total, engine, kb_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_kb_document_status(kb_id: int) -> dict | None:
+    """Lightweight status/progress projection for GET /kb/documents/<id>/status."""
+    conn = get_connection()
+    row = conn.execute(
+        """SELECT id, extraction_status, extraction_progress_current, extraction_progress_total,
+                  extraction_engine, quality_score, pages_failed, page_count, word_count,
+                  error_message
+           FROM kb_documents WHERE id = ?""",
+        (kb_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 def delete_kb_document(kb_id: int) -> None:

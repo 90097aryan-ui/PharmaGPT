@@ -4,22 +4,20 @@ routes/knowledge_base.py — Global Knowledge Base document management.
 Routes
 ------
 GET    /kb/documents                 list KB docs with optional filters
-POST   /kb/documents                 upload a file with metadata
+POST   /kb/documents                 upload a file with metadata (extraction runs in the background)
 GET    /kb/documents/<id>            get single doc + text preview
+GET    /kb/documents/<id>/status     poll extraction progress/result
+POST   /kb/documents/<id>/retry      re-run extraction after a failure
 GET    /kb/documents/<id>/view       view inline (PDF/TXT) or download
 GET    /kb/documents/<id>/download   force-download
 DELETE /kb/documents/<id>            delete doc + file
 GET    /kb/folders/counts            per-folder document counts for sidebar badges
 """
 
-import logging
-
 from pharmagpt import database as db
 from pharmagpt import documents as doc_utils
-from pharmagpt.services.extractor import extract_text
+from pharmagpt.services.document_processor import process_document_async
 from flask import Blueprint, jsonify, request, send_file
-
-logger = logging.getLogger(__name__)
 
 bp = Blueprint("knowledge_base", __name__)
 
@@ -98,23 +96,36 @@ def kb_upload_document():
         file_size=file_size,
     )
 
-    _extract_and_store_kb(kb_doc["id"], doc_utils.get_kb_file_path(stored_filename), extension)
+    db.mark_kb_pending(kb_doc["id"])
+    process_document_async("kb", kb_doc["id"], doc_utils.get_kb_file_path(stored_filename), extension)
     return jsonify(db.get_kb_document(kb_doc["id"])), 201
 
 
-def _extract_and_store_kb(kb_id: int, file_path: str, extension: str) -> None:
-    """
-    Extract text from a KB document and persist it. Absorbs all errors so
-    the upload response is never blocked by extraction failures.
-    """
-    try:
-        text, page_count = extract_text(file_path, extension)
-        word_count = len(text.split())
-        status = "ok" if text.strip() else "empty"
-        db.update_kb_document_text(kb_id, text, word_count, page_count, status)
-    except Exception as exc:
-        logger.error("KB text extraction failed for document %s: %s", kb_id, exc)
-        db.update_kb_document_text(kb_id, "", 0, 0, "error")
+@bp.route("/kb/documents/<int:kb_id>/status", methods=["GET"])
+def kb_extraction_status(kb_id):
+    """Poll extraction progress/result for a Knowledge Base document."""
+    status = db.get_kb_document_status(kb_id)
+    if not status:
+        return jsonify({"error": "Document not found"}), 404
+    return jsonify(status)
+
+
+@bp.route("/kb/documents/<int:kb_id>/retry", methods=["POST"])
+def kb_retry_extraction(kb_id):
+    """Re-run extraction for a KB document whose previous attempt failed (or
+    partially failed). Never deletes the stored file — it is retried in place."""
+    doc = db.get_kb_document(kb_id)
+    if not doc:
+        return jsonify({"error": "Document not found"}), 404
+
+    if not doc_utils.kb_file_exists(doc["stored_filename"]):
+        return jsonify({"error": "File not found on disk — cannot retry"}), 404
+
+    db.mark_kb_pending(kb_id)
+    process_document_async(
+        "kb", kb_id, doc_utils.get_kb_file_path(doc["stored_filename"]), doc["file_type"],
+    )
+    return jsonify({"status": "pending"}), 202
 
 
 @bp.route("/kb/documents/<int:kb_id>", methods=["GET"])
