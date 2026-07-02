@@ -38,10 +38,31 @@ function _gdUpdateHeader() {
   if (tag) tag.textContent = gdProject ? gdProject.name : "No project selected";
 }
 
+const GD_STEP_LABELS = {
+  1: "Project", 2: "Doc Type", 3: "Equipment",
+  4: "Questions", 5: "Review", 6: "Generate",
+};
+
+function _gdUpdateBreadcrumb() {
+  const el = document.getElementById("gd-breadcrumb");
+  if (!el) return;
+  const projCrumb = gdProject ? _gdEsc(gdProject.name) : "No project selected";
+  const stepCrumb = GD_STEP_LABELS[gdStep] || "";
+  el.innerHTML = `
+    <span>Dashboard</span>
+    <span class="gd-crumb-sep">›</span>
+    <span>${projCrumb}</span>
+    <span class="gd-crumb-sep">›</span>
+    <span>Generate Document</span>
+    <span class="gd-crumb-sep">›</span>
+    <span class="gd-crumb-current">Step ${gdStep} — ${stepCrumb}</span>`;
+}
+
 // ── Step rendering ─────────────────────────────────────────────────────────────
 function _gdRenderStep(n) {
   gdStep = n;
   _gdUpdateProgress(n);
+  _gdUpdateBreadcrumb();
 
   for (let i = 1; i <= 6; i++) {
     const p = document.getElementById(`gd-panel-${i}`);
@@ -131,6 +152,7 @@ function gdSelectProject(id, el) {
   // Find from window projects cache or build minimal object
   gdProject = { id, name: el.querySelector(".gd-proj-name")?.textContent || "" };
   _gdUpdateHeader();
+  _gdUpdateBreadcrumb();
 }
 
 // ── Step 2: Document Type ──────────────────────────────────────────────────────
@@ -643,7 +665,86 @@ function gdBack() {
   if (gdStep > 1) _gdRenderStep(gdStep - 1);
 }
 
+// Capture whatever the current step has typed/selected into gdEquipment /
+// gdAnswers before navigating away (Save Draft / Back to Project / Cancel),
+// without advancing the wizard step.
+function _gdCollectCurrentStep() {
+  if (gdStep === 3) _gdCollectEquipment();
+  if (gdStep === 4) _gdCollectAnswers();
+  if (gdStep === 5) _gdCollectReview();
+}
+
+// ── Wizard-level navigation (breadcrumb toolbar) ───────────────────────────────
+
+function _gdHasProgress() {
+  return !!(gdDocType || Object.keys(gdEquipment).some(k => gdEquipment[k]) ||
+            Object.keys(gdAnswers).some(k => gdAnswers[k]));
+}
+
+function gdBackToProject() {
+  _gdCollectCurrentStep();
+  if (_gdHasProgress() && !confirm("Leave Generate Document? Unsaved progress will be lost unless you Save Draft first.")) {
+    return;
+  }
+  if (gdProject && window.selectProject) {
+    window.selectProject(gdProject);
+  }
+  if (window.showView) {
+    window.showView(gdProject ? "view-chat" : "view-dashboard");
+  }
+  // Keep the sidebar highlight in sync with whichever view we just switched to.
+  document.querySelectorAll(".sidebar-item[data-view]").forEach(n => n.classList.remove("active"));
+  const nav = document.getElementById(gdProject ? "nav-chat" : "nav-dashboard");
+  if (nav) nav.classList.add("active");
+  if (!gdProject && window.loadDashboard) window.loadDashboard();
+}
+
+function gdCancel() {
+  _gdCollectCurrentStep();
+  if (_gdHasProgress() && !confirm("Cancel document generation? All progress on this document will be discarded.")) {
+    return;
+  }
+  gdBackToProject();
+}
+
+async function gdSaveDraft() {
+  _gdCollectCurrentStep();
+
+  if (!gdProject) {
+    _gdShowToast("Select a project first (Step 1) before saving a draft.", "error");
+    return;
+  }
+
+  const docType = gdDocType || "DRAFT";
+  const payload = {
+    project_id: gdProject.id,
+    doc_type:   docType,
+    title:      `${docType} — Draft (${new Date().toLocaleString()})`,
+    form_data:  { equipment: gdEquipment, answers: gdAnswers, step: gdStep },
+    // `content` is required by the save endpoint; a real markdown draft isn't
+    // generated until Step 6 (AI generation is deferred to v1.0), so persist
+    // the structured inputs collected so far as the placeholder content.
+    content:    JSON.stringify({ equipment: gdEquipment, answers: gdAnswers }, null, 2),
+  };
+
+  try {
+    const res = await fetch("/validation/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error("Save failed");
+    _gdShowToast("Draft saved to project.", "success");
+  } catch {
+    _gdShowToast("Could not save draft. Please try again.", "error");
+  }
+}
+
 function _gdShowError(msg) {
+  _gdShowToast(msg, "error");
+}
+
+function _gdShowToast(msg, kind) {
   let el = document.getElementById("gd-error-toast");
   if (!el) {
     el = document.createElement("div");
@@ -651,6 +752,7 @@ function _gdShowError(msg) {
     el.className = "gd-error-toast";
     document.body.appendChild(el);
   }
+  el.classList.toggle("success", kind === "success");
   el.textContent = msg;
   el.classList.add("visible");
   setTimeout(() => el.classList.remove("visible"), 3000);
@@ -670,6 +772,9 @@ function _gdEscAttr(str) {
 window.openGenDocument  = openGenDocument;
 window.gdNext           = gdNext;
 window.gdBack           = gdBack;
+window.gdBackToProject  = gdBackToProject;
+window.gdSaveDraft      = gdSaveDraft;
+window.gdCancel         = gdCancel;
 window.gdSelectProject  = gdSelectProject;
 window.gdSelectDocType  = gdSelectDocType;
 window.gdBuildDraft     = gdBuildDraft;

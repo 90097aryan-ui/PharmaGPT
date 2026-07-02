@@ -26,17 +26,40 @@ Database file: pharmagpt/pharmagpt.db
 import sqlite3
 import os
 
-# Absolute path to the SQLite file — sits inside the pharmagpt/ package folder.
-DB_PATH = os.path.join(os.path.dirname(__file__), "pharmagpt.db")
+# Absolute path to the SQLite file.
+#
+# IMPORTANT — deployment note: the default below sits inside the pharmagpt/
+# package folder, which lives on the *application* filesystem. On platforms
+# with an ephemeral/read-only filesystem (e.g. Render web services without a
+# persistent disk), that folder is reset on every restart, redeploy, or
+# idle-spindown — every INSERT commits successfully in the moment, but the
+# data silently disappears the next time the dyno/container restarts,
+# because init_db() just creates a brand-new empty file again. This is why
+# "project creation appears successful but the table is later empty" can
+# happen with correctly-committing code.
+#
+# Set DB_PATH to a file on a mounted persistent volume in production (see
+# render.yaml) to fix this at the infrastructure level; it defaults to the
+# previous in-package path for local development.
+DB_PATH = os.getenv("DB_PATH") or os.path.join(os.path.dirname(__file__), "pharmagpt.db")
 
 
 def get_connection() -> sqlite3.Connection:
     """Open (or create) the database and return a connection.
     row_factory=sqlite3.Row makes every row behave like a dict."""
-    conn = sqlite3.connect(DB_PATH)
+    # timeout: wait for locks instead of raising "database is locked"
+    # immediately — matters once multiple gunicorn workers/threads share
+    # this one SQLite file (see Procfile: --workers=2 --threads=4).
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     # Enforce foreign-key constraints (SQLite disables them by default)
     conn.execute("PRAGMA foreign_keys = ON")
+    # WAL lets readers and writers work concurrently instead of the default
+    # rollback-journal mode, which takes an exclusive lock for the whole
+    # duration of every write — the more likely source of lock contention
+    # under concurrent gunicorn workers/threads.
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 30000")
     return conn
 
 

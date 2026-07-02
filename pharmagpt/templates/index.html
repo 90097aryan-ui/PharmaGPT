@@ -641,6 +641,16 @@
         <span class="gd-project-tag" id="gd-project-tag">No project selected</span>
       </div>
 
+      <!-- Breadcrumb + wizard-level navigation (Back to Project / Save Draft / Cancel) -->
+      <div class="gd-toolbar">
+        <div class="gd-breadcrumb" id="gd-breadcrumb"></div>
+        <div class="gd-toolbar-actions">
+          <button class="gd-btn-tertiary" id="gd-btn-back-to-project" onclick="gdBackToProject()">← Back to Project</button>
+          <button class="gd-btn-tertiary" onclick="gdSaveDraft()">💾 Save Draft</button>
+          <button class="gd-btn-tertiary gd-btn-cancel" onclick="gdCancel()">✕ Cancel</button>
+        </div>
+      </div>
+
       <!-- 6-step progress bar -->
       <div class="gd-progress-bar">
         <div class="gd-step-dot active" id="gd-dot-1"></div>

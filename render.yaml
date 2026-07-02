@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: pharmagpt
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn pharmagpt.app:app --workers=2 --threads=4 --timeout=60
+    disk:
+      name: pharmagpt-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: DB_PATH
+        value: /var/data/pharmagpt.db
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: FLASK_DEBUG
+        value: "false"

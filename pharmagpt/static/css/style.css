@@ -3510,6 +3510,27 @@ header {
   background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.85);
   border-radius: 20px; border: 1px solid rgba(255,255,255,0.18);
 }
+.gd-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 24px; background: #fff; border-bottom: 1px solid var(--border);
+  flex-shrink: 0; gap: 12px; flex-wrap: wrap;
+}
+.gd-breadcrumb {
+  font-size: 11.5px; color: var(--text-muted); font-weight: 500;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.gd-breadcrumb .gd-crumb-current { color: var(--navy); font-weight: 700; }
+.gd-crumb-sep { color: var(--border); }
+.gd-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.gd-btn-tertiary {
+  background: #fff; color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px; padding: 6px 14px;
+  font-size: 11.5px; font-weight: 500; cursor: pointer; transition: background 0.12s;
+  font-family: inherit; white-space: nowrap;
+}
+.gd-btn-tertiary:hover { background: var(--bg); }
+.gd-btn-tertiary.gd-btn-cancel { color: #B71C1C; border-color: rgba(183,28,28,0.25); }
+.gd-btn-tertiary.gd-btn-cancel:hover { background: rgba(183,28,28,0.06); }
 .gd-progress-bar {
   display: flex; align-items: center; padding: 14px 32px;
   background: #fff; border-bottom: 1.5px solid var(--border);
@@ -3540,7 +3561,9 @@ header {
 .gd-step-label.done   { color: #2E7D32; }
 .gd-panel { flex: 1; flex-direction: column; overflow-y: auto; }
 .gd-step-content {
-  max-width: 820px; width: 100%; margin: 0 auto;
+  /* Matches the 1100px column width already used for .vw-panel-inner —
+     820px left roughly half the screen empty on standard desktop widths. */
+  max-width: 1100px; width: 100%; margin: 0 auto;
   padding: 28px 24px; display: flex; flex-direction: column; gap: 20px;
 }
 .gd-step-title { font-size: 17px; font-weight: 700; color: var(--navy); margin: 0; }
@@ -3741,3 +3764,4 @@ select.gd-input { cursor: pointer; }
   pointer-events: none; z-index: 9999;
 }
 .gd-error-toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+.gd-error-toast.success { background: #2E7D32; }

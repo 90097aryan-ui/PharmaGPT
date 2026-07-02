@@ -1,9 +1,18 @@
 # PharmaGPT — Database Reference
 
 **Engine:** SQLite 3  
-**File:** `pharmagpt/pharmagpt.db` (auto-created on first run)  
+**File:** `pharmagpt/pharmagpt.db` by default; overridable via the `DB_PATH` env var (auto-created on first run)  
 **Managed by:** `pharmagpt/database.py`  
 All foreign keys use `ON DELETE CASCADE`.
+
+> **Deployment note:** `pharmagpt.db` is git-ignored and lives on the app
+> filesystem by default. On platforms with an ephemeral filesystem (Render
+> web services without a mounted disk, most PaaS free tiers, etc.), that
+> file is wiped on every restart/redeploy/idle-spindown — writes commit
+> successfully but vanish on the next cold start. `render.yaml` mounts a
+> persistent disk at `/var/data` and sets `DB_PATH=/var/data/pharmagpt.db`
+> so data survives restarts. If you deploy elsewhere, make sure `DB_PATH`
+> points at a persistent volume.
 
 ---
 

@@ -150,6 +150,7 @@ def extract_document(
     # ── Open: try engines in priority order until one succeeds ─────────────
     handles: dict[str, object] = {}
     primary: ExtractionEngine | None = None
+    open_errors: list[str] = []
     for engine in engines:
         try:
             handles[engine.name] = engine.open(file_path)
@@ -158,10 +159,18 @@ def extract_document(
             break
         except EngineOpenError as exc:
             logger.warning("Engine %s could not open %s: %s", engine.name, document_name, exc)
+            open_errors.append(f"{engine.name}: {exc}")
 
     if primary is None:
         logger.error("All engines failed to open %s — extraction failed", document_name)
         result.status = "failed"
+        # Without this, a corrupted/unsupported file finalizes with status
+        # "failed" but an empty error_message — the Retry button shows with
+        # no explanation of what actually went wrong.
+        result.page_errors.append({
+            "page": None,
+            "error": "Could not open document with any engine — " + "; ".join(open_errors),
+        })
         result.extraction_time_seconds = round(time.monotonic() - start, 3)
         return result
 
