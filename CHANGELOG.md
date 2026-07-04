@@ -5,6 +5,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased] — 2026-07-02 — Quality Management Suite (Phase 1)
+
+### Added
+- **Quality Management Suite** — PharmaGPT's second major pillar, parallel in scope to the Validation pillar. Phase 1 ships three modules:
+  - **Document Control** — SOP/Protocol/Specification/Test Method/Format/Template/Logbook/Checklist/Policy/Manual/Work Instruction lifecycle (Draft → Under Review → Pending Approval → Effective → Under Revision → Obsolete), auto-numbering, version history, training requirement tracking, distribution & acknowledgement, AI draft generation (streamed), AI regulatory compliance review.
+  - **Deviation Management** — Minor/Major/Critical/Market deviations across Manufacturing/Laboratory/Engineering/Validation categories, full lifecycle (Initiated → ... → Closed), AI Investigation Assistant (Fishbone/Ishikawa + 5-Why + timeline + root cause in one call), AI impact-assessment suggestions, AI CAPA-seed suggestions with one-click create-and-link.
+  - **CAPA** — Corrective/Preventive actions with owners, due dates, escalation, effectiveness checks, AI draft/effectiveness suggestions, AI Quality Trend Summary across CAPAs and Deviations.
+  - Every module ships the full common feature set: Dashboard, List + Filters + Search, Detail View, Attachments, Comments, Audit Trail, Electronic Signature/Approval Workflow, Print, DOCX Export, Status Badges.
+  - Deviation ↔ CAPA linkage is a real, queryable relationship in both directions, driven either manually or by the AI CAPA Suggestion flow.
+  - New nested "Quality Management" sidebar section with independently-collapsible Document Control / Deviation Management / CAPA sub-groups, plus a unified cross-module QMS dashboard.
+  - `qms_database.py` (schema + shared Attachments/Comments/Audit-Trail/Approval tables, polymorphic across all 3 modules) + `qms_document_database.py` / `qms_deviation_database.py` / `qms_capa_database.py`.
+  - `routes/qms_common.py`, `routes/qms_documents.py`, `routes/qms_deviations.py`, `routes/qms_capa.py`.
+  - `services/qms_shared.py`, `services/qms_document_service.py`, `services/qms_deviation_service.py`, `services/qms_capa_service.py`.
+  - `prompts/qms_document_prompt.py`, `prompts/qms_deviation_prompt.py`, `prompts/qms_capa_prompt.py`.
+  - `static/css/qms.css`, `static/js/qms_common.js`, `static/js/qms_documents.js`, `static/js/qms_deviations.js`, `static/js/qms_capa.js`.
+  - `tests/test_qms_database.py`, `tests/test_qms_routes.py` — 42 new tests, all passing alongside the existing 41.
+  - Full reference: [`docs/QMS_PHASE1.md`](docs/QMS_PHASE1.md).
+
+### Fixed
+- `database.py::get_dashboard_stats()` — `pending_capas`/`pending_deviations` now count from the real `qms_capas`/`qms_deviations` tables instead of the legacy one-shot `generated_documents` wizard rows.
+
+---
+
 ## [0.7.0] — 2026-06-27 — Knowledge Base
 
 ### Added

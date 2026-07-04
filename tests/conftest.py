@@ -37,3 +37,14 @@ def db_path(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", test_db)
     db.init_db()
     return test_db
+
+
+@pytest.fixture()
+def client(db_path):
+    """Flask test client wired to the db_path fixture's throwaway database.
+    pharmagpt.app may already be imported from an earlier test — that's fine,
+    since every DB call resolves db.DB_PATH dynamically at call time rather
+    than caching it, so each test still gets full isolation."""
+    import pharmagpt.app as appmod
+
+    return appmod.app.test_client()

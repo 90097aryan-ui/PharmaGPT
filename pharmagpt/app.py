@@ -32,6 +32,10 @@ from pharmagpt.routes.risk           import bp as risk_bp
 from pharmagpt.routes.urs            import bp as urs_bp
 from pharmagpt.routes.qual           import bp as qual_bp
 from pharmagpt.routes.report         import bp as report_bp
+from pharmagpt.routes.qms_common     import bp as qms_common_bp
+from pharmagpt.routes.qms_documents  import bp as qms_documents_bp
+from pharmagpt.routes.qms_deviations import bp as qms_deviations_bp
+from pharmagpt.routes.qms_capa       import bp as qms_capa_bp
 
 
 # ── Application setup ─────────────────────────────────────────────────────────
@@ -56,6 +60,10 @@ app.register_blueprint(risk_bp)
 app.register_blueprint(urs_bp)
 app.register_blueprint(qual_bp)
 app.register_blueprint(report_bp)
+app.register_blueprint(qms_common_bp)
+app.register_blueprint(qms_documents_bp)
+app.register_blueprint(qms_deviations_bp)
+app.register_blueprint(qms_capa_bp)
 
 
 # ── SPA shell ─────────────────────────────────────────────────────────────────

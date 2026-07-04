@@ -204,3 +204,37 @@ CREATE TABLE users (
     created_at    TIMESTAMP DEFAULT current_timestamp
 );
 ```
+
+---
+
+## Quality Management Suite (Phase 1) — added 2026-07-02
+
+Second major pillar (Document Control, Deviation Management, CAPA). Schema
+lives in `pharmagpt/qms_database.py` (`QMS_SCHEMA`, hooked into
+`database.py::init_db()`), CRUD is split across `qms_document_database.py` /
+`qms_deviation_database.py` / `qms_capa_database.py`. Full reference:
+[`docs/QMS_PHASE1.md`](docs/QMS_PHASE1.md).
+
+```
+qms_documents ──< qms_document_versions
+              ──< qms_document_distribution
+              ──< qms_document_training
+
+qms_capas ──< qms_capa_actions
+          ──< qms_capa_effectiveness
+
+qms_deviations ──< qms_deviation_investigation (1:1)
+               ──< qms_deviation_impact
+               ──< qms_deviation_capa_link >── qms_capas
+
+-- Shared across all three (and future Phase 2/3 modules), keyed by
+-- (record_type, record_id) instead of one copy per module:
+qms_attachments   -- record_type: 'document' | 'deviation' | 'capa'
+qms_comments
+qms_audit_trail
+qms_approvals     -- e-signature trail: performed_by, role, electronic_sig (typed, no PKI)
+```
+
+`qms_documents`, `qms_deviations`, and `qms_capas` each carry a nullable
+`project_id REFERENCES projects(id) ON DELETE SET NULL` — quality records are
+not deleted when the referenced validation project is.

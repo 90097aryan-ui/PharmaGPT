@@ -391,3 +391,29 @@ cd D:\PharmaAgent
 - `python-docx` — DOCX read + write
 - `openpyxl` — XLSX extraction
 - `python-dotenv` — `.env` loading
+
+---
+
+## Quality Management Suite (Phase 1) — added 2026-07-02
+
+Second major pillar, parallel to the Validation pillar. Document Control,
+Deviation Management, and CAPA — complete, tested (42 new tests, all
+passing), and manually verified end-to-end in the browser including live
+Gemini AI calls (draft generation, AI Investigation Assistant, impact/CAPA/
+effectiveness suggestions, Quality Trend Summary). Full reference:
+[`docs/QMS_PHASE1.md`](docs/QMS_PHASE1.md).
+
+New files: `qms_database.py`, `qms_document_database.py`,
+`qms_deviation_database.py`, `qms_capa_database.py`,
+`routes/qms_common.py`, `routes/qms_documents.py`, `routes/qms_deviations.py`,
+`routes/qms_capa.py`, `services/qms_shared.py`, `services/qms_document_service.py`,
+`services/qms_deviation_service.py`, `services/qms_capa_service.py`,
+`prompts/qms_document_prompt.py`, `prompts/qms_deviation_prompt.py`,
+`prompts/qms_capa_prompt.py`, `static/css/qms.css`, `static/js/qms_common.js`,
+`static/js/qms_documents.js`, `static/js/qms_deviations.js`, `static/js/qms_capa.js`,
+`tests/test_qms_database.py`, `tests/test_qms_routes.py`.
+
+Phase 2 (Change Control, Non-Conformance, OOS/OOT) and Phase 3 (Audit
+Management, Supplier Quality, Training Management, Complaint Management) are
+not yet built — the shared Attachments/Comments/Audit-Trail/Approval tables
+are already polymorphic and ready for them.

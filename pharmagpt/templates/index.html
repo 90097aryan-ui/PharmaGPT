@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/urs.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/qual.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/report.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/qms.css') }}" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
@@ -103,6 +104,42 @@
       <div id="qual-nav-items" style="display:none"></div>
       <div id="report-nav-items" style="display:none"></div>
       <div id="val-nav-items" style="display:none"></div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Quality Management Suite (Phase 1: Document Control, Deviations, CAPA) -->
+      <div class="sidebar-section">
+        <div class="sidebar-label-row">
+          <span class="sidebar-label">Quality Management</span>
+          <button class="val-collapse-btn" id="qms-collapse-btn" onclick="toggleQMSSection()">&#9650;</button>
+        </div>
+        <div id="qms-nav-items">
+          <div class="sidebar-item" id="nav-qms-dashboard" data-view="view-qms-dashboard">
+            <span class="icon">&#9632;</span> QMS Dashboard
+          </div>
+
+          <div class="qms-nav-group">
+            <div class="qms-nav-group-label">Document Control</div>
+            <div class="sidebar-item qms-sub-item" id="nav-qms-documents" data-view="view-qms-documents">
+              <span class="icon">&#9632;</span> Documents
+            </div>
+          </div>
+
+          <div class="qms-nav-group">
+            <div class="qms-nav-group-label">Deviation Management</div>
+            <div class="sidebar-item qms-sub-item" id="nav-qms-deviations" data-view="view-qms-deviations">
+              <span class="icon">&#9632;</span> Deviations
+            </div>
+          </div>
+
+          <div class="qms-nav-group">
+            <div class="qms-nav-group-label">CAPA</div>
+            <div class="sidebar-item qms-sub-item" id="nav-qms-capa" data-view="view-qms-capa">
+              <span class="icon">&#9632;</span> CAPA
+            </div>
+          </div>
+        </div>
+      </div>
 
       <!-- Regulatory Coverage -->
       <div class="sidebar-section">
@@ -1490,6 +1527,28 @@
 
   </main>
 
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- ── Quality Management Suite Views ─────────────────────────────────── -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+
+  <main class="qms-view" id="view-qms-dashboard" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+    <div id="qms-dashboard-body"></div>
+  </main>
+
+  <main class="qms-view" id="view-qms-documents" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+    <div id="qms-documents-body"></div>
+  </main>
+
+  <main class="qms-view" id="view-qms-deviations" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+    <div id="qms-deviations-body"></div>
+  </main>
+
+  <main class="qms-view" id="view-qms-capa" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+    <div id="qms-capa-body"></div>
+  </main>
+
+  <!-- ══ End Quality Management Suite ══════════════════════════════════════ -->
+
   <!-- Load order: dashboard → projects → documents → insights → validation_config → validation → knowledge_base → val_workspace → chat -->
   <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
   <script src="{{ url_for('static', filename='js/projects.js') }}"></script>
@@ -1504,6 +1563,10 @@
   <script src="{{ url_for('static', filename='js/urs.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qual.js') }}"></script>
   <script src="{{ url_for('static', filename='js/report.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/qms_common.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/qms_documents.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/qms_deviations.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/qms_capa.js') }}"></script>
   <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
 
   <!-- ── Validation sidebar nav items (rendered from config) ──────────────── -->
@@ -1614,6 +1677,22 @@
 
         if (targetId === "view-gen-doc") {
           if (window.openGenDocument) window.openGenDocument();
+        }
+
+        if (targetId === "view-qms-dashboard") {
+          if (window.initQMSDashboard) window.initQMSDashboard();
+        }
+
+        if (targetId === "view-qms-documents") {
+          if (window.initQMSDocuments) window.initQMSDocuments();
+        }
+
+        if (targetId === "view-qms-deviations") {
+          if (window.initQMSDeviations) window.initQMSDeviations();
+        }
+
+        if (targetId === "view-qms-capa") {
+          if (window.initQMSCapa) window.initQMSCapa();
         }
       });
     });

@@ -17,6 +17,20 @@
 | v0.5 | AI Document Intelligence (RAG) | ✅ Done |
 | v0.6 | Validation Document Generator | ✅ Done |
 | v0.7 | Knowledge Base | ✅ Done |
+| — | Quality Management Suite — Phase 1 (Document Control, Deviation Management, CAPA) | ✅ Done (2026-07-02) |
+
+---
+
+## Quality Management Suite — Phases 2 & 3 (Not Yet Built)
+
+QMS Phase 1 (Document Control, Deviation Management, CAPA) is complete —
+see [`docs/QMS_PHASE1.md`](QMS_PHASE1.md). Its shared Attachments/Comments/
+Audit-Trail/Approval tables are polymorphic (`record_type` + `record_id`) and
+require no schema changes to extend to future modules — only a new
+`record_type` string and the module's own master table.
+
+**Phase 2:** Change Control · Non-Conformance · OOS/OOT
+**Phase 3:** Audit Management · Supplier Quality · Training Management · Complaint Management
 
 ---
 

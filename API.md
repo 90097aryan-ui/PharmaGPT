@@ -367,3 +367,46 @@ Each line is `data: <payload>\n\n`. The client reads with `ReadableStream` / `Te
 - `[DONE]` — success, no source documents used
 - `[DONE:file1.pdf,file2.docx]` — success, these source files were used (chat only)
 - `[ERROR] <message>` — failure; message is shown to the user
+
+---
+
+## Quality Management Suite (Phase 1) — added 2026-07-02
+
+Full reference: [`docs/QMS_PHASE1.md`](docs/QMS_PHASE1.md). All bodies are JSON except file
+upload (multipart/form-data) and DOCX export (binary download).
+
+**Shared** (`routes/qms_common.py`) — `record_type` ∈ `document | deviation | capa`:
+- `GET /qms/dashboard` — unified stats across all 3 modules
+- `GET /qms/meta` — enum lists (doc types, statuses, categories) for dropdowns
+- `GET|POST /qms/<record_type>/<id>/attachments`, `GET /qms/attachments/<id>/download`, `DELETE /qms/attachments/<id>`
+- `GET|POST /qms/<record_type>/<id>/comments`
+- `GET /qms/<record_type>/<id>/audit-trail`
+- `GET /qms/<record_type>/<id>/approval` (POST is module-specific — see below, since each module maps the action to a different status transition)
+
+**Document Control** (`routes/qms_documents.py`, prefix `/qms/documents`):
+- `GET|POST /qms/documents`, `GET|PUT|DELETE /qms/documents/<id>`
+- `POST /qms/documents/<id>/generate` — AI draft generation (SSE stream)
+- `POST /qms/documents/<id>/review` — AI regulatory compliance review
+- `GET|POST /qms/documents/<id>/versions`, `GET|POST /qms/documents/<id>/training`, `PUT /qms/documents/training/<id>`
+- `GET|POST /qms/documents/<id>/distribution`, `POST /qms/documents/distribution/<id>/acknowledge`
+- `POST /qms/documents/<id>/approval` — status transition + e-signature
+- `GET /qms/documents/<id>/report`, `POST /qms/documents/<id>/export/docx`
+
+**Deviation Management** (`routes/qms_deviations.py`, prefix `/qms/deviations`):
+- `GET|POST /qms/deviations`, `GET|PUT|DELETE /qms/deviations/<id>`
+- `POST /qms/deviations/<id>/investigate` — AI Investigation Assistant (fishbone/5-Why/timeline/root cause)
+- `GET|PUT /qms/deviations/<id>/investigation`
+- `POST /qms/deviations/<id>/suggest-impact`, `GET|POST /qms/deviations/<id>/impact`
+- `POST /qms/deviations/<id>/suggest-capa`, `POST /qms/deviations/<id>/link-capa`, `GET /qms/deviations/<id>/capas`
+- `POST /qms/deviations/<id>/approval`
+- `GET /qms/deviations/<id>/report`, `POST /qms/deviations/<id>/export/docx`
+
+**CAPA** (`routes/qms_capa.py`, prefix `/qms/capa`):
+- `GET|POST /qms/capa`, `GET|PUT|DELETE /qms/capa/<id>`
+- `POST /qms/capa/<id>/suggest-draft`, `POST /qms/capa/<id>/suggest-effectiveness`
+- `GET /qms/capa/trend-summary` — AI Quality Trend Summary across CAPAs & Deviations
+- `GET|POST /qms/capa/<id>/actions`, `POST /qms/capa/actions/<id>/escalate`
+- `GET|POST /qms/capa/<id>/effectiveness`
+- `GET /qms/capa/<id>/deviations` — linked deviations
+- `POST /qms/capa/<id>/approval`
+- `GET /qms/capa/<id>/report`, `POST /qms/capa/<id>/export/docx`

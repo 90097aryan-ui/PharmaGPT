@@ -1414,6 +1414,24 @@ _DOC_TYPE_LABELS = {
     "CAPA":           "Corrective and Preventive Action Report",
     "Deviation":      "Deviation Report",
     "Change Control": "Change Control Record",
+
+    # ── Quality Management Suite — Document Control doc_type values ──────────
+    "SOP":              "Standard Operating Procedure",
+    "Protocol":         "Protocol",
+    "Specification":    "Specification",
+    "Test Method":      "Test Method",
+    "Format":           "Format",
+    "Template":         "Template",
+    "Logbook":          "Logbook",
+    "Checklist":        "Checklist",
+    "Policy":           "Policy",
+    "Manual":           "Manual",
+    "Work Instruction": "Work Instruction",
+
+    # ── Quality Management Suite — Deviation / CAPA workflow records ─────────
+    # (distinct from the legacy one-shot "Deviation"/"CAPA" wizard doc types above)
+    "Deviation-Record": "Deviation Record",
+    "CAPA-Record":      "CAPA Record",
 }
 
 

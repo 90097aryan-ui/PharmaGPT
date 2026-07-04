@@ -1,0 +1,473 @@
+# ARCHITECTURE.md — PharmaGPT System Architecture
+
+> Part of the permanent [PROJECT_MEMORY](CLAUDE.md) set. Describes the system as it exists in the
+> working tree at commit `684ca7d` (v0.9.8) plus the uncommitted QMS Phase 1 work — see
+> [PROJECT_STATUS.md](PROJECT_STATUS.md) for what's committed vs. in-progress.
+
+---
+
+## 1. System Overview
+
+PharmaGPT is a **monolithic Flask web application** with a vanilla-JavaScript single-page
+frontend. All application logic, file storage, and the database live in a single process on a
+single machine — there are no microservices, message queues, or external caches.
+
+```
+ Browser (SPA)
+     │  HTTP + Server-Sent Events (SSE)
+     ▼
+ Flask App (pharmagpt/app.py)
+     │
+     ├── SQLite (pharmagpt.db)  ── all persistent state
+     ├── File System (uploads/{project_id}/, uploads/kb/)
+     └── Google Gemini API (external, gemini-2.5-flash)
+```
+
+Rationale for the monolith (see [DECISIONS.md](DECISIONS.md) DEC-002): zero infrastructure to run
+(`python -m flask run`), trivial to debug (single process, no distributed tracing), and a
+documented migration path exists for each shortcut (SQLite → PostgreSQL, in-memory history cache →
+Redis) when v1.0 scale requires it.
+
+---
+
+## 2. Technology Stack
+
+| Layer | Choice | Notes |
+|---|---|---|
+| Language | Python 3.14.6 | |
+| Web framework | Flask 3.1.3 + Werkzeug 3.1.8 | Blueprint-per-domain |
+| Production server | gunicorn 26.0.0 | `--workers=2 --threads=4 --timeout=60` |
+| Database | SQLite 3 | raw `sqlite3` module, no ORM |
+| AI | Google `google-genai` 2.10.0, model `gemini-2.5-flash` | streaming + non-streaming calls |
+| Document generation | `python-docx` 1.2.0 | custom Markdown → DOCX state machine |
+| Document extraction | `pypdf`, `pdfplumber`, `PyMuPDF`, `openpyxl` | multi-engine fallback pipeline |
+| Frontend | Vanilla JavaScript (ES modules as IIFEs) | no build step, no framework |
+| Templating | Jinja2 (single shell template) | `templates/index.html` |
+| Background jobs | `concurrent.futures.ThreadPoolExecutor` | via `services/job_runner.py` |
+| Deployment | Render (`render.yaml` + `Procfile`) | persistent disk for SQLite file |
+| Testing | pytest 8.3.4 | `tests/`, ~83 tests total |
+
+---
+
+## 3. Folder Structure
+
+```
+D:\PharmaAgent\
+├── pharmagpt/
+│   ├── app.py                    Flask app factory; registers all blueprints; calls init_db()
+│   ├── config.py                 Env-driven config: Gemini model, secret key, upload limits,
+│   │                              extraction timeouts (PAGE_TIMEOUT_SECONDS, GC_INTERVAL_PAGES,
+│   │                              EXTRACTION_WORKERS)
+│   ├── database.py                Core schema + CRUD: projects, messages, documents,
+│   │                              document_text, generated_documents, val_projects,
+│   │                              val_audit_trail, kb_documents, dashboard stats
+│   ├── state.py                   Shared runtime singletons: Gemini client, per-project
+│   │                              conversation history cache (in-memory dict)
+│   ├── logging_config.py          Logging setup
+│   ├── documents.py                File upload/download utilities, filename collision handling
+│   ├── prompts.py                  PHARMA_SYSTEM_PROMPT (core chat persona)
+│   ├── risk_database.py            Risk Management Suite schema + CRUD
+│   ├── urs_database.py             URS Management Suite schema + CRUD
+│   ├── qual_database.py            Qualification (IQ/OQ/PQ) Suite schema + CRUD (997 lines)
+│   ├── report_database.py          Validation Report Suite schema + CRUD
+│   ├── qms_database.py             QMS shared polymorphic schema (attachments/comments/
+│   │                              audit_trail/approvals) + numbering helpers   [uncommitted]
+│   ├── qms_document_database.py    QMS Document Control schema + CRUD          [uncommitted]
+│   ├── qms_deviation_database.py   QMS Deviation Management schema + CRUD      [uncommitted]
+│   ├── qms_capa_database.py        QMS CAPA schema + CRUD                      [uncommitted]
+│   │
+│   ├── routes/                    One Flask Blueprint per domain (see §5)
+│   ├── services/                  Business logic / AI orchestration (see §6)
+│   ├── services/extraction/       Document Intelligence Engine (see §8)
+│   ├── review/                    Deterministic (non-AI) validation-document scoring engine
+│   ├── equipment/profiles/        Equipment-type reference libraries (analytical, manufacturing,
+│   │                              packaging, processing, quality_control, sterilization, testing)
+│   ├── prompts/                   Per-domain Gemini prompt templates (17 files)
+│   ├── static/css/                style.css (core, ~3,300 lines) + one CSS file per suite
+│   │                              (risk.css, urs.css, qual.css, report.css, qms.css)
+│   ├── static/js/                 One IIFE module per feature area (18 files, see §7)
+│   ├── templates/index.html       Single SPA shell — all views are JS-toggled divs
+│   └── uploads/                   {project_id}/ per-project files, kb/ Knowledge Base files
+│
+├── tests/                         pytest suite (~83 tests; see PROJECT_STATUS.md)
+├── docs/                          Detailed reference docs (ARCHITECTURE, DESIGN_SYSTEM,
+│                                  PRODUCT_REQUIREMENTS, CODE_REVIEW, QMS_PHASE1, ROADMAP,
+│                                  CHANGELOG — some entries supersede root-level files; see
+│                                  DECISIONS.md DEC-014 for which is authoritative)
+├── PROJECT_MEMORY/                This document set (permanent project memory)
+├── API.md, DATABASE.md            Root-level fine-grained technical references
+├── render.yaml, Procfile          Deployment configuration
+└── requirements.txt               Full pinned dependency list (pip freeze)
+```
+
+---
+
+## 4. Database Architecture
+
+Raw `sqlite3` throughout — no ORM (DEC-002). Every function opens and closes its own connection;
+`PRAGMA foreign_keys = ON` is set on every connection because SQLite disables FK enforcement by
+default. Row access uses `sqlite3.Row` (dict-like).
+
+**No migration framework** (no Alembic / Flask-Migrate). Two coexisting strategies:
+1. **Dev-only full reset** — delete `pharmagpt.db`, restart, `init_db()` recreates everything
+   (documented as acceptable only pre-v1.0/pre-Postgres).
+2. **Additive-only column guard** — `_add_column_if_missing()` pattern gated on
+   `PRAGMA table_info()`, used by the Document Intelligence Engine to add extraction-progress
+   columns without a destructive reset. **This is the required pattern for all future schema
+   changes** (see [CLAUDE.md](CLAUDE.md) Development Rules).
+
+**Table families:**
+
+| Family | Tables | Owner file |
+|---|---|---|
+| Core | `projects`, `messages`, `documents`, `document_text`, `generated_documents` | `database.py` |
+| Validation Workspace (v0.8, partial) | `val_projects`, `val_audit_trail` | `database.py` |
+| Knowledge Base | `kb_documents` | `database.py` |
+| Risk Management | risk assessment tables (hazard/likelihood/severity/mitigation) | `risk_database.py` |
+| URS Management | URS projects + requirements | `urs_database.py` |
+| Qualification | IQ/OQ/PQ phase + results tables | `qual_database.py` |
+| Validation Report | report templates + completion records | `report_database.py` |
+| QMS shared *(uncommitted)* | `qms_attachments`, `qms_comments`, `qms_audit_trail`, `qms_approvals` — all polymorphic on `(record_type, record_id)`, `record_type ∈ {document, deviation, capa}` | `qms_database.py` |
+| QMS Document Control *(uncommitted)* | `qms_documents`, `qms_document_versions`, `qms_document_distribution`, `qms_document_training` | `qms_document_database.py` |
+| QMS Deviation *(uncommitted)* | `qms_deviations`, `qms_deviation_investigation`, `qms_deviation_impact`, `qms_deviation_capa_link` | `qms_deviation_database.py` |
+| QMS CAPA *(uncommitted)* | `qms_capas`, `qms_capa_actions`, `qms_capa_effectiveness` | `qms_capa_database.py` |
+
+Full column-level detail lives in the root-level `DATABASE.md` — this file summarizes structure
+and relationships only.
+
+**Foreign key policy:** most FKs `ON DELETE CASCADE` (child data is meaningless without the
+parent). QMS master tables (`qms_documents`/`qms_deviations`/`qms_capas`) instead use a nullable
+`project_id` with `ON DELETE SET NULL` — a deliberate choice (DEC-011) since GxP quality records
+must legally outlive the equipment/project record that originated them.
+
+---
+
+## 5. Route Layer
+
+14 Flask blueprints, registered in `pharmagpt/app.py`:
+
+| Blueprint file | Name | URL prefix | Domain |
+|---|---|---|---|
+| `routes/projects.py` | `projects` | (none) | Project CRUD, chat history |
+| `routes/chat.py` | `chat` | (none) | `POST /stream` — SSE AI chat |
+| `routes/docs.py` | `documents` | (none) | Document upload/view/download/delete, extraction status |
+| `routes/validation.py` | `validation` | (none) | One-shot validation document generator (wizard) |
+| `routes/knowledge_base.py` | `knowledge_base` | (none) | Global Knowledge Base CRUD/search |
+| `routes/workspace.py` | `workspace` | (none) | Validation Workspace projects, audit trail (v0.8) |
+| `routes/dashboard.py` | `dashboard` | (none) | Home dashboard stats |
+| `routes/risk.py` | `risk` | `/risk` | Risk Management Suite |
+| `routes/urs.py` | `urs` | `/urs` | URS Management Suite |
+| `routes/qual.py` | `qual` | `/qual` | Qualification (IQ/OQ/PQ) Suite |
+| `routes/report.py` | `report` | `/report` | Validation Report Suite |
+| `routes/qms_common.py` *(uncommitted)* | `qms_common` | `/qms` | QMS meta, dashboard, shared attachments/comments/audit/approval endpoints |
+| `routes/qms_documents.py` *(uncommitted)* | `qms_documents` | `/qms/documents` | Document Control |
+| `routes/qms_deviations.py` *(uncommitted)* | `qms_deviations` | `/qms/deviations` | Deviation Management |
+| `routes/qms_capa.py` *(uncommitted)* | `qms_capa` | `/qms/capa` | CAPA |
+
+Full endpoint-level detail (every method/path/purpose) lives in the root-level `API.md`.
+
+**Known gap:** the Risk, URS, Qualification, and Validation Report suites' sidebar navigation
+containers exist in `templates/index.html` but are `display:none` with no wired toggle — they are
+functionally complete on the backend but have no live entry point in the current UI. This is a
+pre-existing, explicitly-flagged gap (see [PROJECT_STATUS.md](PROJECT_STATUS.md) → Known
+Limitations), contrasted with QMS, which is fully wired into the sidebar.
+
+---
+
+## 6. Service Layer
+
+`pharmagpt/services/` — business logic and AI orchestration, kept separate from route handlers.
+
+**Core / cross-cutting:**
+- `document_processor.py` — async extraction orchestrator (submits to `job_runner`)
+- `document_search.py` — keyword/Jaccard RAG search over project documents (feeds `/stream`)
+- `retrieval_engine.py` — LLM-based document retrieval/ranking
+- `doc_generator.py` — shared AI document-generation framework (validation wizard, risk, etc.)
+- `doc_exporter.py` / `docx_generator.py` — Markdown → DOCX export (state-machine converter)
+- `docx_reader.py`, `excel_reader.py` — format-specific text extraction (used by extraction engines)
+- `job_runner.py` — `JobRunner` interface; active implementation `ThreadPoolJobRunner`
+  (`ThreadPoolExecutor`); `CeleryJobRunner` stub reserved for future Redis-backed swap
+
+**Per-domain AI services** (each pairs with a `prompts/*_prompt.py` template):
+- `risk_service.py`, `urs_service.py` (+ `urs_requirement_library.py`), `qual_service.py`,
+  `report_service.py`
+- `qms_shared.py` *(uncommitted)* — shared `call_gemini()` / `stream_gemini()` /
+  `parse_json_response()` helpers used by all three QMS services below
+- `qms_document_service.py`, `qms_deviation_service.py`, `qms_capa_service.py` *(uncommitted)*
+
+---
+
+## 7. Frontend Layer
+
+No client-side router, no framework. `templates/index.html` is a single shell; every "page" is a
+`<div>` toggled via `display`. Each feature area is one vanilla-JS file in `static/js/`, written
+as an IIFE that exposes a small API on `window` (e.g. `window.ProjectModule`). SSE is used for
+both chat (`/stream`) and AI generation endpoints, with a critical implementation detail: **Flask's
+request context is not available inside a generator function** — all `request.*` data must be
+captured in the outer function scope before `generate()` is defined.
+
+18 JS modules: `dashboard.js`, `projects.js`, `chat.js`, `documents.js`, `insights.js`,
+`validation.js`, `validation_config.js`, `val_workspace.js`, `knowledge_base.js`,
+`gen_document.js`, `risk.js`, `urs.js`, `qual.js`, `report.js`, and *(uncommitted)* `qms_common.js`,
+`qms_documents.js`, `qms_deviations.js`, `qms_capa.js`.
+
+---
+
+## 8. AI Layer
+
+Single Gemini client singleton (`state.py`), model `gemini-2.5-flash`, shared across every
+feature. Two calling conventions:
+- **Streaming** (SSE) — interactive chat, validation-doc generation, QMS document drafting —
+  `temperature=0.3` for structured document generation (vs. default for conversational chat) to
+  keep formal-document structure consistent across generations (DEC-006).
+- **Non-streaming** (single JSON response) — AI Investigation Assistant, impact-assessment
+  suggestions, CAPA suggestions, compliance review, quality trend summaries.
+
+Prompts are centralized per domain in `pharmagpt/prompts/` (17 files) rather than inlined in
+routes/services — reuse these before writing a new prompt.
+
+---
+
+## 9. Document Intelligence Engine (`services/extraction/`)
+
+Replaces the earlier synchronous, single-engine (`pdfplumber`-only) extractor — the old
+`extractor.py`/`pdf_reader.py` were deleted, not kept as a fallback (DEC-009). This rewrite was
+triggered by a production incident on Render: a 48-page/1.43MB real-world manual caused a
+synchronous in-request `pdfplumber` call to exceed the gunicorn worker timeout, producing a
+`SIGKILL` and an HTTP 500 for the user.
+
+**Extraction pipeline:**
+1. Route layer (`routes/docs.py`, `routes/knowledge_base.py`) saves the file, inserts a `pending`
+   DB row, and **returns HTTP 201 immediately** — extraction never blocks the upload request.
+2. `document_processor.py::process_document_async()` is the single entry point.
+3. `job_runner.py::ThreadPoolJobRunner.submit()` dispatches the work to a background thread.
+4. `extraction/pipeline.py::extract_document()` loops page-by-page: try the primary engine
+   (timeout-bounded) → on failure/timeout, try the next engine in the fallback chain → on total
+   failure for that page, log and skip it, continuing the document. Progress is reported via a
+   callback every page.
+5. Result is written back into `document_text` / `kb_documents`; status flows
+   `pending → processing → ok | partial | empty | failed`.
+6. Frontend polls a `/status` endpoint every 1.5s and offers a **Retry Extraction** action on
+   failure — the uploaded file is never deleted, so retry is always possible.
+
+**Fallback chains** (`extraction/registry.py`):
+
+| Format | Engine order |
+|---|---|
+| PDF | `pypdf` (primary, fastest) → `pdfplumber` (best layout/table fidelity) → `PyMuPDF` (most resilient to malformed PDFs) → `OCRPlaceholderEngine` (always raises — real OCR not implemented yet) |
+| DOCX | `python-docx` |
+| XLSX | `openpyxl` |
+| TXT | plain read |
+
+Fallback operates at two levels: **document-level** (which engine can even open the file) and
+**page-level** (a specific page fails/times out on the primary engine — the next engine is opened
+lazily, cached, and retried just for that page).
+
+**Timeout mechanism:** each page-extraction attempt runs in its own fresh daemon thread, joined
+with a configurable `PAGE_TIMEOUT_SECONDS` (default 10s). Known CPython limitation: a hung thread
+cannot be force-killed — it is abandoned, not terminated. A `ProcessPoolExecutor`-based redesign
+is the documented future path if this becomes a real problem (DEC-009).
+
+**Memory management:** pages are processed one at a time; engine-specific caches are flushed after
+each page; `gc.collect()` runs every `GC_INTERVAL_PAGES` (default 20) pages and once more after the
+whole document completes.
+
+**Quality scoring** (`extraction/stats.py`): `quality_score = pages_extracted / page_count * 100`
+(1 decimal place). Status derives from this: `ok` (100%), `partial` (some pages failed), `empty`
+(zero extractable text), `failed` (could not open the file at all).
+
+**Background execution:** `ThreadPoolExecutor`, not Celery (DEC-004) — appropriate for the current
+Flask + gunicorn + SQLite-on-Render stack with no Redis. All progress/results persist to SQLite
+(not process memory), so status polling works correctly across gunicorn's multiple worker
+processes.
+
+**Backward compatibility:** every existing consumer of extracted text
+(`document_search.py`, `retrieval_engine.py`, chat, validation generation, Risk/URS/Qual/Report
+context injection) reads `document_text`/`kb_documents` unchanged, filtered on
+`extraction_status='ok'` — zero code changes were required in those consumers. The only visible
+behavior change is that a freshly-uploaded document is briefly invisible to search/RAG while
+extraction runs in the background.
+
+Full architectural detail (performance benchmarks, test fixture list, page-timeout regression
+test) lives in the root-level `SYSTEM_ARCHITECTURE_DOCUMENT_PROCESSING.md`.
+
+---
+
+## 10. Knowledge Base
+
+Project-independent document library (`kb_documents` table, files under `uploads/kb/`). 8 fixed
+folders (SOP, Validation, Qualification, Protocols, Reports, Regulations, Vendor Documents,
+Others), metadata (title, tags, version, effective date, review date), 4 combinable search filters
+(title, tag, file type, keyword). Uses the same Document Intelligence Engine as project documents
+(async extraction, status polling, retry).
+
+---
+
+## 11. Validation Suite
+
+Two distinct, currently-coexisting mechanisms — do not conflate them:
+
+- **Validation Document Generator (wizard, v0.6)** — one-shot AI generation across 11 doc types
+  (URS, DQ, FAT, SAT, IQ, OQ, PQ, FMEA, CAPA, Deviation, Change Control) via a 4-step form,
+  config-driven (`validation_config.js`), saved to `generated_documents`. This is a quick draft
+  tool, not a stateful workflow.
+- **Validation Workspace (v0.8, partial)** — stateful, full-lifecycle validation projects
+  (`val_projects`, `val_audit_trail`) with owner/approver/target-date/risk-category fields and an
+  audit trail. Backend + initial UI exist; full workflow (electronic signatures, approval states)
+  is still on the roadmap.
+- **Risk / URS / Qualification / Validation Report suites** — dedicated, fully-built backend
+  modules (each with its own database file, routes, service, prompts, CSS, JS) added in a single
+  commit on 2026-06-30. Backend-complete; **sidebar navigation is not yet wired** (see §5 Known
+  gap).
+
+---
+
+## 12. Quality Management Suite *(uncommitted working-tree code)*
+
+PharmaGPT's second major pillar, parallel in scope to the Validation pillar. Three modules —
+Document Control, Deviation Management, CAPA — built on the shared polymorphic tables described in
+§4, with a nested "Quality Management" sidebar section (chosen over flat top-level entries because
+Phases 2/3 will add 6 more modules; a flat structure would leave 9 top-level suite sections).
+
+- **Document Control** — lifecycle `Draft → Under Review → Pending Approval → Effective → Under
+  Revision → Obsolete`; auto-numbered (`SOP-QA-0001`); version history; training tracking;
+  distribution/acknowledgement; AI draft generation (streamed) and AI regulatory compliance review.
+- **Deviation Management** — severities Minor/Major/Critical/Market; lifecycle `Initiated → ... →
+  Closed`; AI Investigation Assistant (Fishbone/Ishikawa + 5-Why + timeline + root cause in one
+  call); AI impact-assessment and CAPA-seed suggestions with one-click create-and-link.
+- **CAPA** — Corrective/Preventive actions, owners, due dates, escalation, effectiveness checks, AI
+  draft/effectiveness suggestions, AI Quality Trend Summary across CAPAs and Deviations.
+- **Deviation ↔ CAPA linkage** — real queryable relation via `qms_deviation_capa_link`; linking
+  auto-transitions the deviation to `CAPA Assigned`.
+
+Full detail lives in `docs/QMS_PHASE1.md`.
+
+---
+
+## 13. Project Workspace / Document Generator
+
+See §11 above (Validation Document Generator) for the wizard mechanism, and `doc_exporter.py` /
+`docx_generator.py` for the export mechanism (Markdown → DOCX via a custom state machine, plus
+client-side `window.print()` for PDF — chosen to avoid a WeasyPrint/GTK dependency on the Windows
+development environment, DEC-007).
+
+---
+
+## 14. Module Relationships
+
+Two parallel pillars share the same shared-service foundation:
+
+```
+                 ┌─────────────┐
+                 │   Project   │
+                 └──────┬──────┘
+                        │
+                 ┌──────▼──────┐
+                 │Knowledge Base│  (project-independent, but referenced for context)
+                 └──────┬──────┘
+                        │
+        ┌───────────────┼────────────────┐
+        ▼                                 ▼
+ ┌─────────────┐                   ┌─────────────┐
+ │    Risk     │                   │     URS     │
+ └──────┬──────┘                   └──────┬──────┘
+        │                                 │
+        └───────────────┬─────────────────┘
+                         ▼
+              ┌─────────────────────┐
+              │  IQ → OQ → PQ (Qual) │
+              └──────────┬──────────┘
+                         ▼
+              ┌─────────────────────┐
+              │  Validation Report   │
+              └──────────┬──────────┘
+                         ▼
+              ┌─────────────────────┐
+              │      Deviation       │◄──────────┐
+              └──────────┬──────────┘            │
+                         ▼                        │ qms_deviation_capa_link
+              ┌─────────────────────┐            │
+              │         CAPA         │────────────┘
+              └──────────┬──────────┘
+                         ▼
+              ┌─────────────────────┐
+              │    Change Control     │  (planned — not yet built)
+              └──────────┬──────────┘
+                         ▼
+              ┌─────────────────────┐
+              │       Training        │  (planned — not yet built)
+              └──────────┬──────────┘
+                         ▼
+              ┌─────────────────────┐
+              │        Audit          │  (planned — not yet built)
+              └──────────┬──────────┘
+                         ▼
+              ┌─────────────────────┐
+              │  Management Review    │  (planned — not yet built)
+              └─────────────────────┘
+```
+
+**Accuracy note:** this end-to-end chain represents the *intended* platform vision. In the current
+codebase, the Risk → URS → Qual → Report leg is backend-complete but not linked to Deviation/CAPA
+by any foreign key today — the only real, queryable cross-suite link that exists is
+`qms_deviation_capa_link` (Deviation ↔ CAPA). Change Control, Training, Audit, and Management
+Review do not exist in the codebase yet.
+
+---
+
+## 15. Database Philosophy
+
+- One SQLite file, no ORM, additive-only schema changes (§4).
+- **Shared Attachments / Shared Comments / Shared Audit Trail / Shared Approval Engine** —
+  implemented once as polymorphic QMS tables and intended to be reused by every future module
+  (Phase 2/3 QMS modules, and ideally Change Control/Training/Audit when built) by adding a new
+  `record_type` string rather than new tables.
+- **Shared Notifications** — not yet implemented; planned as a `notifications` table + SSE
+  delivery for v0.9. Do not assume this exists.
+
+---
+
+## 16. Security Principles
+
+Per the repository's own code review (`docs/CODE_REVIEW.md`, scope v0.7, findings-only — no code
+was modified as part of that review):
+
+- No authentication/authorization system exists yet (planned v0.9, RBAC with roles).
+- E-signatures across Risk/Qual/QMS approvals are **typed-name, not PKI-based** — sufficient for
+  the current pre-auth stage, explicitly flagged as needing revisit once real auth exists.
+- Known, not-yet-remediated issues from the code review: unsanitized `marked.parse()` output
+  rendered via `innerHTML` in `chat.js` (XSS risk, needs DOMPurify), a hardcoded fallback Flask
+  secret key in `config.py`, no CSRF protection on POST/DELETE routes, no rate limiting on
+  streaming endpoints. **Treat these as open items** — see [PROJECT_STATUS.md](PROJECT_STATUS.md)
+  → Known Issues. Do not introduce new unsanitized `innerHTML` usage or new unauthenticated
+  state-changing routes without flagging the same class of risk.
+- Uploads are constrained by `secure_filename`, a 50MB size cap, and MIME/extension checks (400,
+  413, 415 responses on violation). `.env` and `.db` are excluded from version control; API keys
+  are never exposed client-side.
+
+---
+
+## 17. Coding Standards Summary
+
+SOLID, DRY, KISS — enforced in practice by file-size discipline (split by responsibility once a
+file nears ~1000 lines) and by the Development Rules in [CLAUDE.md](CLAUDE.md).
+
+---
+
+## 18. Enterprise Scalability
+
+- **Future PostgreSQL** — SQLite was chosen for zero-config v0.x development; a migration path is
+  a stated v1.0 goal (DEC-003). Avoid SQLite-only syntax in new code where a Postgres-compatible
+  alternative is equally simple.
+- **Future Microservices** — not currently planned; the monolith is deliberate for this stage
+  (DEC-002). Revisit only if a specific module (e.g., the extraction engine) needs independent
+  scaling.
+- **Cloud Architecture Vision** — Render today (single web service + persistent disk); Docker
+  packaging and rate limiting/HTTPS/security headers are stated v1.0 goals.
+
+---
+
+## Platform Vision
+
+Become an enterprise Pharmaceutical Digital Quality & Validation Platform comparable to
+**TrackWise, MasterControl, and Veeva Vault Quality.**

@@ -253,6 +253,11 @@ def init_db() -> None:
     conn.executescript(REPORT_SCHEMA)
     conn.commit()
 
+    # ── Quality Management Suite tables (Document Control, Deviation, CAPA) ────
+    from pharmagpt.qms_database import QMS_SCHEMA
+    conn.executescript(QMS_SCHEMA)
+    conn.commit()
+
     conn.close()
 
 
@@ -912,8 +917,8 @@ def get_dashboard_stats() -> dict:
             (SELECT COUNT(*) FROM val_projects)                               AS val_projects,
             (SELECT COUNT(*) FROM kb_documents)                               AS kb_documents,
             (SELECT COUNT(*) FROM generated_documents)                        AS protocols_generated,
-            (SELECT COUNT(*) FROM generated_documents WHERE doc_type='CAPA')  AS pending_capas,
-            (SELECT COUNT(*) FROM generated_documents WHERE doc_type='Deviation') AS pending_deviations
+            (SELECT COUNT(*) FROM qms_capas WHERE status NOT IN ('Closed','Rejected'))      AS pending_capas,
+            (SELECT COUNT(*) FROM qms_deviations WHERE status NOT IN ('Closed','Rejected')) AS pending_deviations
     """).fetchone()
 
     recent_projects = conn.execute(
