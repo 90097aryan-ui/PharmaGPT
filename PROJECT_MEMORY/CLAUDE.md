@@ -72,9 +72,13 @@ part of the same task** — do not leave the memory out of sync with the code yo
 - Maintain backward compatibility. New extraction/status fields must be additive; existing
   consumers (`document_search.py`, `retrieval_engine.py`, chat/validation routes) must keep working
   unmodified.
-- Maintain UI consistency — dark theme, existing color tokens and component classes in
-  `static/css/style.css` (and suite-specific CSS that reuses those tokens, e.g. `qms.css`). See
-  [ARCHITECTURE.md](ARCHITECTURE.md) → Design System summary.
+- Maintain UI consistency — the "Premium Enterprise" palette v3.0 (Walnut Brown/warm neutrals,
+  DEC-018 + DEC-019, 2026-07-05), existing `:root` color tokens and component classes in
+  `static/css/style.css` (and suite-specific CSS that reuses those tokens, e.g. `qms.css`). Use
+  Lucide icons (`<span class="icon" data-lucide="...">`, auto-converted by the global
+  `refreshIcons()`/`MutationObserver` in `templates/index.html`) for any new icon — never a Unicode
+  emoji or a hand-authored inline SVG. See `docs/DESIGN_SYSTEM.md` for the full token/component
+  reference (needs a v3.0 update — see DEC-019).
 - Use **additive database migrations only**. This project has no migration framework (Alembic /
   Flask-Migrate). Add columns via a guarded `_add_column_if_missing()`-style helper (see
   `document_processor`/`database.py` precedent). Never drop or rename a column or table in place.

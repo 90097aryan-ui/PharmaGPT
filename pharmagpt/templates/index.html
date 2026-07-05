@@ -6,14 +6,16 @@
   <title>PharmaGPT — Pharmaceutical Validation Platform</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/risk.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/urs.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/qual.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/report.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/qms.css') }}" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 </head>
 <body>
 
@@ -47,16 +49,16 @@
       <div class="sidebar-section">
         <div class="sidebar-label">Main Menu</div>
         <div class="sidebar-item active" id="nav-dashboard" data-view="view-dashboard">
-          <span class="icon">&#9632;</span> Dashboard
+          <span class='icon' data-lucide='layout-dashboard'></span> Dashboard
         </div>
         <div class="sidebar-item" id="nav-kb" data-view="view-kb">
-          <span class="icon">&#9632;</span> Knowledge Base
+          <span class='icon' data-lucide='library'></span> Knowledge Base
         </div>
         <div class="sidebar-item" id="nav-chat" data-view="view-chat">
-          <span class="icon">&#9632;</span> AI Assistant
+          <span class='icon' data-lucide='sparkles'></span> AI Assistant
         </div>
         <div class="sidebar-item" id="nav-gen-doc" data-view="view-gen-doc">
-          <span class="icon">&#9632;</span> Generate Document
+          <span class='icon' data-lucide='file-plus-2'></span> Generate Document
         </div>
       </div>
 
@@ -77,13 +79,13 @@
       <div class="sidebar-section">
         <div class="sidebar-label">Documents</div>
         <div class="sidebar-item" id="nav-documents" data-view="view-documents">
-          <span class="icon">&#9632;</span> Project Documents
+          <span class='icon' data-lucide='folder-open'></span> Project Documents
         </div>
         <div class="sidebar-item" id="nav-insights" data-view="view-insights">
-          <span class="icon">&#9632;</span> Document Insights
+          <span class='icon' data-lucide='bar-chart-3'></span> Document Insights
         </div>
         <div class="sidebar-item" id="nav-val-workspace" data-view="view-val-workspace">
-          <span class="icon">&#9632;</span> Validation Workspace
+          <span class='icon' data-lucide='clipboard-check'></span> Validation Workspace
         </div>
       </div>
 
@@ -111,46 +113,33 @@
       <div class="sidebar-section">
         <div class="sidebar-label-row">
           <span class="sidebar-label">Quality Management</span>
-          <button class="val-collapse-btn" id="qms-collapse-btn" onclick="toggleQMSSection()">&#9650;</button>
+          <button class="val-collapse-btn" id="qms-collapse-btn" onclick="toggleQMSSection()"><span class='icon' data-lucide='chevron-up'></span></button>
         </div>
         <div id="qms-nav-items">
           <div class="sidebar-item" id="nav-qms-dashboard" data-view="view-qms-dashboard">
-            <span class="icon">&#9632;</span> QMS Dashboard
+            <span class='icon' data-lucide='layout-dashboard'></span> QMS Dashboard
           </div>
 
           <div class="qms-nav-group">
             <div class="qms-nav-group-label">Document Control</div>
             <div class="sidebar-item qms-sub-item" id="nav-qms-documents" data-view="view-qms-documents">
-              <span class="icon">&#9632;</span> Documents
+              <span class='icon' data-lucide='file-text'></span> Documents
             </div>
           </div>
 
           <div class="qms-nav-group">
             <div class="qms-nav-group-label">Deviation Management</div>
             <div class="sidebar-item qms-sub-item" id="nav-qms-deviations" data-view="view-qms-deviations">
-              <span class="icon">&#9632;</span> Deviations
+              <span class='icon' data-lucide='alert-triangle'></span> Deviations
             </div>
           </div>
 
           <div class="qms-nav-group">
             <div class="qms-nav-group-label">CAPA</div>
             <div class="sidebar-item qms-sub-item" id="nav-qms-capa" data-view="view-qms-capa">
-              <span class="icon">&#9632;</span> CAPA
+              <span class='icon' data-lucide='repeat'></span> CAPA
             </div>
           </div>
-        </div>
-      </div>
-
-      <!-- Regulatory Coverage -->
-      <div class="sidebar-section">
-        <div class="sidebar-label">Regulatory Scope</div>
-        <div class="expertise-tags">
-          <span class="tag">USFDA</span><span class="tag">MHRA</span>
-          <span class="tag">EU GMP</span><span class="tag">WHO-GMP</span>
-          <span class="tag">ICH Q9</span><span class="tag">21 CFR</span>
-          <span class="tag">GAMP 5</span><span class="tag">Annex 15</span>
-          <span class="tag">CDSCO</span><span class="tag">TGA</span>
-          <span class="tag">Schedule M</span><span class="tag">FSSAI</span>
         </div>
       </div>
 
@@ -162,51 +151,58 @@
       <!-- Header -->
       <div class="dash-header">
         <div class="dash-header-left">
-          <span class="dash-icon">🏠</span>
+          <span class="dash-icon" data-lucide="layout-dashboard"></span>
           <div>
             <h2 class="dash-title">Home Dashboard</h2>
-            <p class="dash-subtitle">PharmaGPT v0.8 — System Overview</p>
+            <p class="dash-subtitle">Everything that needs your attention, at a glance</p>
           </div>
         </div>
-        <button class="dash-refresh-btn" onclick="loadDashboard()">↻ Refresh</button>
+        <button class="dash-refresh-btn" onclick="loadDashboard()"><span class='icon' data-lucide='refresh-cw'></span> Refresh</button>
       </div>
 
       <!-- Stat cards -->
       <div class="dash-stats-grid" id="dash-stats-grid">
         <div class="dash-stat-card dash-stat-projects">
-          <div class="dash-stat-icon">📁</div>
+          <div class="dash-stat-icon" data-lucide="folder"></div>
           <div class="dash-stat-value" id="dash-stat-projects">—</div>
           <div class="dash-stat-label">Projects</div>
+          <div class="dash-stat-sub">Across all active work</div>
         </div>
         <div class="dash-stat-card dash-stat-val">
-          <div class="dash-stat-icon">🏗</div>
+          <div class="dash-stat-icon" data-lucide="hard-hat"></div>
           <div class="dash-stat-value" id="dash-stat-val">—</div>
           <div class="dash-stat-label">Validation Projects</div>
+          <div class="dash-stat-sub">In the Validation Workspace</div>
         </div>
         <div class="dash-stat-card dash-stat-kb">
-          <div class="dash-stat-icon">🗂</div>
+          <div class="dash-stat-icon" data-lucide="library"></div>
           <div class="dash-stat-value" id="dash-stat-kb">—</div>
           <div class="dash-stat-label">Knowledge Base Docs</div>
+          <div class="dash-stat-sub">In the document library</div>
         </div>
         <div class="dash-stat-card dash-stat-proto">
-          <div class="dash-stat-icon">📋</div>
+          <div class="dash-stat-icon" data-lucide="file-text"></div>
           <div class="dash-stat-value" id="dash-stat-proto">—</div>
           <div class="dash-stat-label">Protocols Generated</div>
+          <div class="dash-stat-sub">Via the document generator</div>
         </div>
         <div class="dash-stat-card dash-stat-capa">
-          <div class="dash-stat-icon">🔄</div>
+          <div class="dash-stat-icon" data-lucide="repeat"></div>
           <div class="dash-stat-value" id="dash-stat-capa">—</div>
           <div class="dash-stat-label">Pending CAPAs</div>
+          <div class="dash-stat-sub" id="dash-stat-capa-sub">Awaiting closure</div>
         </div>
         <div class="dash-stat-card dash-stat-dev">
-          <div class="dash-stat-icon">⚡</div>
+          <div class="dash-stat-icon" data-lucide="alert-triangle"></div>
           <div class="dash-stat-value" id="dash-stat-dev">—</div>
           <div class="dash-stat-label">Pending Deviations</div>
+          <div class="dash-stat-sub" id="dash-stat-dev-sub">Requiring investigation</div>
         </div>
         <div class="dash-stat-card dash-stat-score">
-          <div class="dash-stat-icon">🔬</div>
+          <div class="dash-stat-icon" data-lucide="microscope"></div>
           <div class="dash-stat-value" id="dash-stat-score">—</div>
           <div class="dash-stat-label">Avg Validation Score</div>
+          <div class="dash-stat-sub">This session</div>
         </div>
       </div>
 
@@ -217,7 +213,7 @@
         <div class="dash-card" id="dash-recent-activity">
           <div class="dash-card-header">
             <span class="dash-card-title">Recent Activity</span>
-            <span class="dash-card-icon">⚡</span>
+            <span class="dash-card-icon" data-lucide="activity"></span>
           </div>
           <div class="dash-card-body" id="dash-activity-body">
             <div class="dash-loading">Loading…</div>
@@ -228,7 +224,7 @@
         <div class="dash-card" id="dash-recent-projects-card">
           <div class="dash-card-header">
             <span class="dash-card-title">Recent Projects</span>
-            <span class="dash-card-icon">📁</span>
+            <span class="dash-card-icon" data-lucide="folder"></span>
           </div>
           <div class="dash-card-body" id="dash-projects-body">
             <div class="dash-loading">Loading…</div>
@@ -239,7 +235,7 @@
         <div class="dash-card" id="dash-upcoming-card">
           <div class="dash-card-header">
             <span class="dash-card-title">Upcoming Reviews</span>
-            <span class="dash-card-icon">📅</span>
+            <span class="dash-card-icon" data-lucide="calendar-clock"></span>
           </div>
           <div class="dash-card-body" id="dash-upcoming-body">
             <div class="dash-loading">Loading…</div>
@@ -250,7 +246,7 @@
         <div class="dash-card" id="dash-convs-card">
           <div class="dash-card-header">
             <span class="dash-card-title">Recent AI Conversations</span>
-            <span class="dash-card-icon">💬</span>
+            <span class="dash-card-icon" data-lucide="message-square"></span>
           </div>
           <div class="dash-card-body" id="dash-convs-body">
             <div class="dash-loading">Loading…</div>
@@ -261,7 +257,7 @@
         <div class="dash-card dash-card-health" id="dash-health-card">
           <div class="dash-card-header">
             <span class="dash-card-title">System Health</span>
-            <span class="dash-card-icon">🩺</span>
+            <span class="dash-card-icon" data-lucide="heart-pulse"></span>
           </div>
           <div class="dash-card-body" id="dash-health-body">
             <div class="dash-loading">Loading…</div>
@@ -277,7 +273,7 @@
       <!-- Active project banner -->
       <div id="active-project-banner" class="active-project-banner" style="display:none">
         <div class="apb-left">
-          <span class="apb-icon">📁</span>
+          <span class="apb-icon" data-lucide="folder"></span>
           <div>
             <div class="apb-name" id="active-project-name">—</div>
             <div class="apb-meta" id="active-project-meta">—</div>
@@ -290,7 +286,7 @@
 
       <!-- Welcome banner -->
       <div class="welcome-banner">
-        <span class="icon">🔬</span>
+        <span class='icon' data-lucide='flask-conical'></span>
         <p>
           <strong>PharmaGPT</strong> is your AI-powered pharmaceutical consultant with 30+ years of simulated
           expertise. Select or create a <strong>Project</strong> in the sidebar, then ask about GMP compliance,
@@ -318,7 +314,7 @@
             placeholder="Select or create a project to start chatting…"
             rows="1"
           ></textarea>
-          <button id="send-btn" title="Send (Enter)" disabled>&#9654;</button>
+          <button id="send-btn" title="Send (Enter)" disabled><span class="icon" data-lucide="send"></span></button>
         </div>
         <p class="input-hint">Press <strong>Enter</strong> to send &nbsp;·&nbsp; <strong>Shift + Enter</strong> for a new line</p>
       </div>
@@ -338,7 +334,7 @@
       <!-- Upload zone -->
       <div class="doc-upload-section">
         <div class="doc-drop-zone" id="doc-drop-zone">
-          <div class="drop-icon">📂</div>
+          <div class="drop-icon" data-lucide="upload-cloud"></div>
           <p class="drop-label">Drag &amp; drop a file here</p>
           <p class="drop-sub">PDF, DOCX, XLSX, TXT &nbsp;·&nbsp; Max 50 MB</p>
           <button class="btn-upload" id="doc-upload-btn">Choose File</button>
@@ -355,7 +351,7 @@
         </div>
 
         <div class="doc-empty" id="doc-empty">
-          <div style="font-size:40px;margin-bottom:12px">📂</div>
+          <div class="icon" style="width:40px;height:40px;margin:0 auto 12px" data-lucide="folder-open"></div>
           <p>No documents uploaded yet.</p>
           <p style="font-size:12px;margin-top:4px">Upload your first file using the area above.</p>
         </div>
@@ -369,7 +365,7 @@
     <main class="insights-container" id="view-insights" style="display:none">
       <div id="insights-panel">
         <div class="insights-empty">
-          <div class="insights-empty-icon">📊</div>
+          <div class="insights-empty-icon" data-lucide="bar-chart-3"></div>
           <p>Select a project to view its Document Insights.</p>
         </div>
       </div>
@@ -381,23 +377,23 @@
       <!-- KB header bar -->
       <div class="kb-header">
         <div class="kb-header-left">
-          <span class="kb-header-icon">🗂</span>
+          <span class="kb-header-icon" data-lucide="library"></span>
           <div>
             <h2 class="kb-header-title">Knowledge Base</h2>
             <p class="kb-header-sub">Permanent document library — SOPs, protocols, regulations &amp; more</p>
           </div>
         </div>
-        <button class="kb-btn-upload" onclick="openKBUploadModal()">＋ Add Document</button>
+        <button class="kb-btn-upload" onclick="openKBUploadModal()"><span class='icon' data-lucide='plus'></span> Add Document</button>
       </div>
 
       <!-- Search bar -->
       <div class="kb-search-bar">
         <div class="kb-search-field">
-          <span class="kb-search-icon">🔤</span>
+          <span class="kb-search-icon" data-lucide="type"></span>
           <input id="kb-search-title" type="text" placeholder="Search by title…" class="kb-search-input" />
         </div>
         <div class="kb-search-field">
-          <span class="kb-search-icon">🏷</span>
+          <span class="kb-search-icon" data-lucide="tag"></span>
           <input id="kb-search-tag" type="text" placeholder="Filter by tag…" class="kb-search-input" />
         </div>
         <select id="kb-search-filetype" class="kb-search-select">
@@ -408,11 +404,11 @@
           <option value="txt">TXT</option>
         </select>
         <div class="kb-search-field kb-search-keyword">
-          <span class="kb-search-icon">🔍</span>
+          <span class="kb-search-icon" data-lucide="search"></span>
           <input id="kb-search-keyword" type="text" placeholder="Keyword inside document…" class="kb-search-input" />
         </div>
-        <button class="kb-btn-search" onclick="kbSearch()">Search</button>
-        <button class="kb-btn-clear-search" onclick="kbClearSearch()">✕ Clear</button>
+        <button class="kb-btn-search" onclick="kbSearch()"><span class='icon' data-lucide='search'></span> Search</button>
+        <button class="kb-btn-clear-search" onclick="kbClearSearch()"><span class='icon' data-lucide='x'></span> Clear</button>
       </div>
 
       <!-- KB body: folder sidebar + doc list + detail panel -->
@@ -432,7 +428,7 @@
           </div>
 
           <div class="kb-doc-empty" id="kb-doc-empty" style="display:none">
-            <div class="kb-empty-icon">🗂</div>
+            <div class="kb-empty-icon" data-lucide="library"></div>
             <p>No documents found.</p>
             <p class="kb-empty-sub">Upload your first document using the <strong>+ Add Document</strong> button above.</p>
           </div>
@@ -452,13 +448,13 @@
       <!-- Dashboard header -->
       <div class="vw-dash-header">
         <div class="vw-dash-header-left">
-          <span class="vw-dash-icon">🏗</span>
+          <span class="vw-dash-icon" data-lucide="hard-hat"></span>
           <div>
             <h2 class="vw-dash-title">Validation Workspace</h2>
             <p class="vw-dash-sub">Manage equipment qualification &amp; validation projects end-to-end</p>
           </div>
         </div>
-        <button class="vw-btn-create" id="vw-btn-create">＋ New Validation Project</button>
+        <button class="vw-btn-create" id="vw-btn-create"><span class='icon' data-lucide='plus'></span> New Validation Project</button>
       </div>
 
       <!-- Stats bar -->
@@ -488,7 +484,7 @@
 
       <!-- Empty state -->
       <div class="vw-empty" id="vw-empty" style="display:none">
-        <div class="vw-empty-icon">🏗</div>
+        <div class="vw-empty-icon" data-lucide="hard-hat"></div>
         <p class="vw-empty-title">No validation projects yet</p>
         <p class="vw-empty-sub">Click <strong>New Validation Project</strong> to get started.</p>
       </div>
@@ -500,7 +496,7 @@
 
       <!-- Workspace top bar -->
       <div class="vw-ws-topbar">
-        <button class="vw-ws-back" id="vw-ws-back">← Dashboard</button>
+        <button class="vw-ws-back" id="vw-ws-back"><span class='icon' data-lucide='arrow-left'></span> Dashboard</button>
         <div class="vw-ws-title-block">
           <h2 class="vw-ws-name" id="vw-ws-proj-name">—</h2>
           <span class="vw-ws-meta" id="vw-ws-proj-meta">—</span>
@@ -565,7 +561,7 @@
               <p class="vw-section-sub">Map requirements through qualification phases</p>
             </div>
             <div class="vw-coming-soon">
-              <span class="vw-cs-icon">🔗</span>
+              <span class="vw-cs-icon" data-lucide="link-2"></span>
               <p>Traceability matrix builder — coming in v0.8 Step 2</p>
             </div>
           </div>
@@ -579,7 +575,7 @@
               <p class="vw-section-sub">Risk register and FMEA for this validation project</p>
             </div>
             <div class="vw-coming-soon">
-              <span class="vw-cs-icon">⚠️</span>
+              <span class="vw-cs-icon" data-lucide="alert-triangle"></span>
               <p>Risk register — coming in v0.8 Step 2</p>
             </div>
           </div>
@@ -593,7 +589,7 @@
               <p class="vw-section-sub">Supporting files, signed protocols, and raw data</p>
             </div>
             <div class="vw-coming-soon">
-              <span class="vw-cs-icon">📎</span>
+              <span class="vw-cs-icon" data-lucide="paperclip"></span>
               <p>File attachments — coming in v0.8 Step 2</p>
             </div>
           </div>
@@ -661,53 +657,36 @@
 
     </main>
 
-  </div>
-
-    <!-- ── Generate Document view (v0.9) ───────────────────────────────────── -->
-    <main class="gd-container" id="view-gen-doc" style="display:none">
+    <!-- ── Generate Document view (v0.9) — Enterprise Workspace ─────────────── -->
+    <main class="ent-workspace" id="view-gen-doc" style="display:none">
 
       <!-- Header -->
-      <div class="gd-header">
-        <div class="gd-header-left">
-          <span class="gd-header-icon">✨</span>
+      <div class="ent-ws-header">
+        <div class="ent-ws-header-left">
+          <span class="ent-ws-icon" data-lucide="sparkles"></span>
           <div>
-            <h2 class="gd-header-title">Generate Document</h2>
-            <p class="gd-header-sub">AI-powered GMP document generator &mdash; v0.9</p>
+            <h2 class="ent-ws-title">Generate Document</h2>
+            <p class="ent-ws-sub">AI-powered GMP document generator &mdash; v0.9</p>
           </div>
         </div>
-        <span class="gd-project-tag" id="gd-project-tag">No project selected</span>
+        <div class="ent-ws-tags">
+          <span class="ent-ws-tag is-empty" id="gd-project-tag">No project selected</span>
+          <span class="ent-ws-tag is-empty" id="gd-doctype-tag">No document type selected</span>
+        </div>
       </div>
 
       <!-- Breadcrumb + wizard-level navigation (Back to Project / Save Draft / Cancel) -->
-      <div class="gd-toolbar">
-        <div class="gd-breadcrumb" id="gd-breadcrumb"></div>
-        <div class="gd-toolbar-actions">
-          <button class="gd-btn-tertiary" id="gd-btn-back-to-project" onclick="gdBackToProject()">← Back to Project</button>
-          <button class="gd-btn-tertiary" onclick="gdSaveDraft()">💾 Save Draft</button>
-          <button class="gd-btn-tertiary gd-btn-cancel" onclick="gdCancel()">✕ Cancel</button>
+      <div class="ent-ws-toolbar">
+        <div class="ent-ws-breadcrumb" id="gd-breadcrumb"></div>
+        <div class="ent-ws-actions">
+          <button class="ent-ws-btn" id="gd-btn-back-to-project" onclick="gdBackToProject()"><span class='icon' data-lucide='arrow-left'></span> Back to Project</button>
+          <button class="ent-ws-btn" onclick="gdSaveDraft()"><span class='icon' data-lucide='save'></span> Save Draft</button>
+          <button class="ent-ws-btn ent-ws-btn-danger" onclick="gdCancel()"><span class='icon' data-lucide='x'></span> Cancel</button>
         </div>
       </div>
 
       <!-- 6-step progress bar -->
-      <div class="gd-progress-bar">
-        <div class="gd-step-dot active" id="gd-dot-1"></div>
-        <span class="gd-step-label active" id="gd-lbl-1">Project</span>
-        <div class="gd-step-line" id="gd-line-1"></div>
-        <div class="gd-step-dot" id="gd-dot-2"></div>
-        <span class="gd-step-label" id="gd-lbl-2">Doc Type</span>
-        <div class="gd-step-line" id="gd-line-2"></div>
-        <div class="gd-step-dot" id="gd-dot-3"></div>
-        <span class="gd-step-label" id="gd-lbl-3">Equipment</span>
-        <div class="gd-step-line" id="gd-line-3"></div>
-        <div class="gd-step-dot" id="gd-dot-4"></div>
-        <span class="gd-step-label" id="gd-lbl-4">Questions</span>
-        <div class="gd-step-line" id="gd-line-4"></div>
-        <div class="gd-step-dot" id="gd-dot-5"></div>
-        <span class="gd-step-label" id="gd-lbl-5">Review</span>
-        <div class="gd-step-line" id="gd-line-5"></div>
-        <div class="gd-step-dot" id="gd-dot-6"></div>
-        <span class="gd-step-label" id="gd-lbl-6">Generate</span>
-      </div>
+      <div class="ent-ws-progress" id="gd-progress"></div>
 
       <!-- Wizard panels -->
       <div id="gd-wizard" style="display:flex; flex:1; overflow:hidden;">
@@ -729,16 +708,16 @@
     <main id="view-risk-dashboard" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
       <div class="risk-page-header">
         <div>
-          <h2>⚠️ Risk Management</h2>
+          <h2><span class='icon' data-lucide='alert-triangle'></span> Risk Management</h2>
           <p>ICH Q9 · GAMP 5 · EU GMP Annex 15 · WHO-GMP · 21 CFR · ISO 14971</p>
         </div>
         <div class="risk-header-actions">
-          <button class="btn-risk-secondary" onclick="loadAssessmentList()">📋 All Assessments</button>
-          <button class="btn-risk-primary" onclick="startNewWizard()">➕ New Assessment</button>
+          <button class="btn-risk-secondary" onclick="loadAssessmentList()"><span class='icon' data-lucide='clipboard-list'></span> All Assessments</button>
+          <button class="btn-risk-primary" onclick="startNewWizard()"><span class='icon' data-lucide='plus'></span> New Assessment</button>
         </div>
       </div>
       <div class="risk-body" id="risk-dash-body">
-        <div class="risk-empty"><div class="risk-empty-icon">⚠️</div><h3>Loading dashboard…</h3></div>
+        <div class="risk-empty"><div class="risk-empty-icon"><span class='icon' data-lucide='alert-triangle'></span></div><h3>Loading dashboard…</h3></div>
       </div>
     </main>
 
@@ -746,12 +725,12 @@
     <main id="view-risk-new" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
       <div class="risk-page-header">
         <div>
-          <h2 id="risk-new-header-title">📋 Risk Assessments</h2>
+          <h2 id="risk-new-header-title"><span class='icon' data-lucide='clipboard-list'></span> Risk Assessments</h2>
           <p>Create, manage, and review pharmaceutical risk assessments</p>
         </div>
         <div class="risk-header-actions">
-          <button class="btn-risk-secondary" id="risk-back-to-list-btn" onclick="backToList()" style="display:none">← Back to List</button>
-          <button class="btn-risk-primary" onclick="startNewWizard()">➕ New Assessment</button>
+          <button class="btn-risk-secondary" id="risk-back-to-list-btn" onclick="backToList()" style="display:none"><span class='icon' data-lucide='arrow-left'></span> Back to List</button>
+          <button class="btn-risk-primary" onclick="startNewWizard()"><span class='icon' data-lucide='plus'></span> New Assessment</button>
         </div>
       </div>
 
@@ -782,7 +761,7 @@
       <!-- List view -->
       <div class="risk-body" id="risk-list-view">
         <div id="risk-list-body">
-          <div class="risk-empty"><div class="risk-empty-icon">📋</div><h3>Loading…</h3></div>
+          <div class="risk-empty"><div class="risk-empty-icon"><span class='icon' data-lucide='clipboard-list'></span></div><h3>Loading…</h3></div>
         </div>
       </div>
 
@@ -808,7 +787,7 @@
             </div>
             <div class="wizard-nav">
               <button class="btn-risk-secondary" onclick="backToList()">Cancel</button>
-              <button class="btn-risk-primary" onclick="wizardNext()">Next →</button>
+              <button class="btn-risk-primary" onclick="wizardNext()">Next <span class='icon' data-lucide='arrow-right'></span></button>
             </div>
           </div>
 
@@ -886,8 +865,8 @@
               </div>
             </div>
             <div class="wizard-nav">
-              <button class="btn-risk-secondary" onclick="wizardBack()">← Back</button>
-              <button class="btn-risk-primary" onclick="wizardNext()">Next →</button>
+              <button class="btn-risk-secondary" onclick="wizardBack()"><span class='icon' data-lucide='arrow-left'></span> Back</button>
+              <button class="btn-risk-primary" onclick="wizardNext()">Next <span class='icon' data-lucide='arrow-right'></span></button>
             </div>
           </div>
 
@@ -900,15 +879,15 @@
               </div>
             </div>
             <div class="wizard-nav">
-              <button class="btn-risk-secondary" onclick="wizardBack()">← Back</button>
-              <button class="btn-risk-primary" onclick="wizardNext()">Next →</button>
+              <button class="btn-risk-secondary" onclick="wizardBack()"><span class='icon' data-lucide='arrow-left'></span> Back</button>
+              <button class="btn-risk-primary" onclick="wizardNext()">Next <span class='icon' data-lucide='arrow-right'></span></button>
             </div>
           </div>
 
           <!-- Step 4: Review & Create -->
           <div class="wizard-panel" id="wizard-panel-4">
             <div class="risk-section-card">
-              <div class="risk-section-title">✅ Review &amp; Create</div>
+              <div class="risk-section-title"><span class='icon' data-lucide='check-circle-2'></span> Review &amp; Create</div>
               <div class="risk-section-body">
                 <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
                   Your assessment will be created and opened in the editor where you can:
@@ -923,8 +902,8 @@
               </div>
             </div>
             <div class="wizard-nav">
-              <button class="btn-risk-secondary" onclick="wizardBack()">← Back</button>
-              <button class="btn-risk-primary" onclick="createAndOpenAssessment()">Create &amp; Open →</button>
+              <button class="btn-risk-secondary" onclick="wizardBack()"><span class='icon' data-lucide='arrow-left'></span> Back</button>
+              <button class="btn-risk-primary" onclick="createAndOpenAssessment()">Create &amp; Open <span class='icon' data-lucide='arrow-right'></span></button>
             </div>
           </div>
 
@@ -942,15 +921,15 @@
     <main id="view-risk-library" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
       <div class="risk-page-header">
         <div>
-          <h2>📚 Risk Library</h2>
+          <h2><span class='icon' data-lucide='book-open'></span> Risk Library</h2>
           <p>Reusable risk database — enriched from approved assessments</p>
         </div>
         <div class="risk-header-actions">
-          <button class="btn-risk-primary" onclick="loadLibrary()">🔄 Refresh</button>
+          <button class="btn-risk-primary" onclick="loadLibrary()"><span class='icon' data-lucide='repeat'></span> Refresh</button>
         </div>
       </div>
       <div class="risk-body" id="risk-library-body">
-        <div class="risk-empty"><div class="risk-empty-icon">📚</div><h3>Loading library…</h3></div>
+        <div class="risk-empty"><div class="risk-empty-icon"><span class='icon' data-lucide='book-open'></span></div><h3>Loading library…</h3></div>
       </div>
     </main>
 
@@ -958,12 +937,12 @@
     <main id="view-risk-templates" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
       <div class="risk-page-header">
         <div>
-          <h2>📁 Templates</h2>
+          <h2><span class='icon' data-lucide='folder'></span> Templates</h2>
           <p>Pre-built risk assessment templates for common pharmaceutical activities</p>
         </div>
       </div>
       <div class="risk-body" id="risk-templates-body">
-        <div class="risk-empty"><div class="risk-empty-icon">📁</div><h3>Loading templates…</h3></div>
+        <div class="risk-empty"><div class="risk-empty-icon"><span class='icon' data-lucide='folder'></span></div><h3>Loading templates…</h3></div>
       </div>
     </main>
 
@@ -971,13 +950,13 @@
     <main id="view-risk-reports" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
       <div class="risk-page-header">
         <div>
-          <h2>📊 Risk Reports</h2>
+          <h2><span class='icon' data-lucide='bar-chart-3'></span> Risk Reports</h2>
           <p>Generate and export professional GMP-compliant risk reports</p>
         </div>
       </div>
       <div class="risk-body" id="risk-reports-body">
         <div class="risk-empty">
-          <div class="risk-empty-icon">📊</div>
+          <div class="risk-empty-icon"><span class='icon' data-lucide='bar-chart-3'></span></div>
           <h3>Select an Assessment</h3>
           <p>Open an assessment and click "Report" to generate a risk report here.</p>
         </div>
@@ -988,13 +967,13 @@
     <main id="view-risk-approval" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
       <div class="risk-page-header">
         <div>
-          <h2>✅ Review &amp; Approval</h2>
+          <h2><span class='icon' data-lucide='check-circle-2'></span> Review &amp; Approval</h2>
           <p>Assessment review workflow, approval trail, and status management</p>
         </div>
       </div>
       <div class="risk-body" id="risk-approval-body">
         <div class="risk-empty">
-          <div class="risk-empty-icon">✅</div>
+          <div class="risk-empty-icon"><span class='icon' data-lucide='check-circle-2'></span></div>
           <h3>Select an Assessment to Review</h3>
           <p>Open an assessment from the list and click "Review" to manage approvals.</p>
         </div>
@@ -1005,12 +984,12 @@
     <main id="view-risk-assistant" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
       <div class="risk-page-header">
         <div>
-          <h2>🤖 AI Risk Assistant</h2>
+          <h2><span class='icon' data-lucide='bot'></span> AI Risk Assistant</h2>
           <p>Expert pharmaceutical risk management guidance powered by Gemini 2.5 Flash</p>
         </div>
       </div>
       <div class="risk-body" id="risk-assistant-body">
-        <div class="risk-empty"><div class="risk-empty-icon">🤖</div><h3>Loading…</h3></div>
+        <div class="risk-empty"><div class="risk-empty-icon"><span class='icon' data-lucide='bot'></span></div><h3>Loading…</h3></div>
       </div>
     </main>
 
@@ -1024,12 +1003,12 @@
     <main id="view-urs-dashboard" class="urs-container" style="display:none">
       <div class="urs-page-header">
         <div>
-          <h2>📋 URS Management Suite</h2>
+          <h2><span class='icon' data-lucide='clipboard-list'></span> URS Management Suite</h2>
           <p>GAMP 5 · ASTM E2500 · EU GMP Annex 15 · 21 CFR Part 11 · WHO GMP · ICH Q9/Q10</p>
         </div>
         <div class="urs-header-actions">
-          <button class="btn-urs-secondary" onclick="loadURSList()">📋 All URS</button>
-          <button class="btn-urs-primary" onclick="startNewURS()">➕ New URS</button>
+          <button class="btn-urs-secondary" onclick="loadURSList()"><span class='icon' data-lucide='clipboard-list'></span> All URS</button>
+          <button class="btn-urs-primary" onclick="startNewURS()"><span class='icon' data-lucide='plus'></span> New URS</button>
         </div>
       </div>
       <div class="urs-body" id="urs-dash-body">
@@ -1041,12 +1020,12 @@
     <main id="view-urs-list" class="urs-container" style="display:none">
       <div class="urs-page-header">
         <div>
-          <h2>📋 URS Documents</h2>
+          <h2><span class='icon' data-lucide='clipboard-list'></span> URS Documents</h2>
           <p>All User Requirement Specifications</p>
         </div>
         <div class="urs-header-actions">
-          <button class="btn-urs-secondary" onclick="loadURSDashboard()">🏠 Dashboard</button>
-          <button class="btn-urs-primary" onclick="startNewURS()">➕ New URS</button>
+          <button class="btn-urs-secondary" onclick="loadURSDashboard()"><span class='icon' data-lucide='home'></span> Dashboard</button>
+          <button class="btn-urs-primary" onclick="startNewURS()"><span class='icon' data-lucide='plus'></span> New URS</button>
         </div>
       </div>
       <div class="urs-search-bar">
@@ -1072,10 +1051,10 @@
       </div>
       <div class="urs-list-grid" id="urs-list-grid"></div>
       <div class="urs-empty" id="urs-list-empty" style="display:none">
-        <div class="urs-empty-icon">📋</div>
+        <div class="urs-empty-icon"><span class='icon' data-lucide='clipboard-list'></span></div>
         <div class="urs-empty-title">No URS Documents Found</div>
         <div class="urs-empty-sub">Create your first URS to get started.</div>
-        <button class="btn-urs-primary" style="margin-top:16px" onclick="startNewURS()">➕ Create New URS</button>
+        <button class="btn-urs-primary" style="margin-top:16px" onclick="startNewURS()"><span class='icon' data-lucide='plus'></span> Create New URS</button>
       </div>
     </main>
 
@@ -1083,11 +1062,11 @@
     <main id="view-urs-new" class="urs-container" style="display:none">
       <div class="urs-page-header">
         <div>
-          <h2>➕ New User Requirement Specification</h2>
+          <h2><span class='icon' data-lucide='plus'></span> New User Requirement Specification</h2>
           <p>Create a GMP-compliant URS with AI-assisted requirement generation</p>
         </div>
         <div class="urs-header-actions">
-          <button class="btn-urs-secondary" onclick="loadURSDashboard()">✕ Cancel</button>
+          <button class="btn-urs-secondary" onclick="loadURSDashboard()"><span class='icon' data-lucide='x'></span> Cancel</button>
         </div>
       </div>
       <!-- Step indicator -->
@@ -1113,20 +1092,20 @@
     <!-- ── URS Detail View ────────────────────────────────────────────────── -->
     <main id="view-urs-detail" class="urs-container" style="display:none">
       <div class="urs-detail-header">
-        <button class="urs-detail-back" onclick="loadURSList()">← Back to List</button>
+        <button class="urs-detail-back" onclick="loadURSList()"><span class='icon' data-lucide='arrow-left'></span> Back to List</button>
         <div style="flex:1">
           <div class="urs-detail-title" id="urs-detail-title">Loading…</div>
         </div>
         <span id="urs-detail-status" class="urs-tag urs-tag-status draft">Draft</span>
-        <button class="btn-urs-primary" onclick="exportURSDocx(ursState.currentURS?.id, ursState.currentURS?.urs_number)">⬇ Export DOCX</button>
+        <button class="btn-urs-primary" onclick="exportURSDocx(ursState.currentURS?.id, ursState.currentURS?.urs_number)"><span class='icon' data-lucide='arrow-down-to-line'></span> Export DOCX</button>
       </div>
       <div class="urs-detail-tab-bar">
-        <button class="urs-detail-tab active" data-tab="overview"      onclick="switchDetailTab('overview')">📊 Overview</button>
-        <button class="urs-detail-tab"        data-tab="requirements"  onclick="switchDetailTab('requirements')">📋 Requirements</button>
-        <button class="urs-detail-tab"        data-tab="review"        onclick="switchDetailTab('review')">🤖 AI Review</button>
-        <button class="urs-detail-tab"        data-tab="approval"      onclick="switchDetailTab('approval')">✅ Approval</button>
-        <button class="urs-detail-tab"        data-tab="versions"      onclick="switchDetailTab('versions')">🕐 Versions</button>
-        <button class="urs-detail-tab"        data-tab="traceability"  onclick="switchDetailTab('traceability')">🔗 Traceability</button>
+        <button class="urs-detail-tab active" data-tab="overview"      onclick="switchDetailTab('overview')"><span class='icon' data-lucide='bar-chart-3'></span> Overview</button>
+        <button class="urs-detail-tab"        data-tab="requirements"  onclick="switchDetailTab('requirements')"><span class='icon' data-lucide='clipboard-list'></span> Requirements</button>
+        <button class="urs-detail-tab"        data-tab="review"        onclick="switchDetailTab('review')"><span class='icon' data-lucide='bot'></span> AI Review</button>
+        <button class="urs-detail-tab"        data-tab="approval"      onclick="switchDetailTab('approval')"><span class='icon' data-lucide='check-circle-2'></span> Approval</button>
+        <button class="urs-detail-tab"        data-tab="versions"      onclick="switchDetailTab('versions')"><span class='icon' data-lucide='clock'></span> Versions</button>
+        <button class="urs-detail-tab"        data-tab="traceability"  onclick="switchDetailTab('traceability')"><span class='icon' data-lucide='link-2'></span> Traceability</button>
       </div>
       <div style="flex:1;overflow:hidden;position:relative">
         <div class="urs-detail-panel active" data-tab="overview"     style="height:100%;overflow-y:auto;padding:24px 28px"></div>
@@ -1145,12 +1124,12 @@
       <!-- Page Header -->
       <div class="qual-page-header">
         <div>
-          <h2>🧪 Qualification Management Suite</h2>
+          <h2><span class='icon' data-lucide='test-tube-2'></span> Qualification Management Suite</h2>
           <p>IQ / OQ / PQ Protocol Management · EU GMP Annex 15 · GAMP 5 · 21 CFR Part 211</p>
         </div>
         <div class="qual-header-actions">
           <button class="btn-qual-secondary" onclick="qualShowNew()">+ New Qualification</button>
-          <button class="btn-qual-secondary" onclick="qualShowList()">📋 All Qualifications</button>
+          <button class="btn-qual-secondary" onclick="qualShowList()"><span class='icon' data-lucide='clipboard-list'></span> All Qualifications</button>
         </div>
       </div>
 
@@ -1179,7 +1158,7 @@
   <div class="modal" id="project-modal">
     <div class="modal-header">
       <h2>New Project</h2>
-      <button class="modal-close" id="modal-close">✕</button>
+      <button class="modal-close" id="modal-close"><span class='icon' data-lucide='x'></span></button>
     </div>
     <form id="project-form" class="modal-body" autocomplete="off">
       <div class="form-group">
@@ -1235,7 +1214,7 @@
   <div class="modal vw-create-modal" id="vw-create-modal">
     <div class="modal-header">
       <h2>New Validation Project</h2>
-      <button class="modal-close" id="vw-modal-close">✕</button>
+      <button class="modal-close" id="vw-modal-close"><span class='icon' data-lucide='x'></span></button>
     </div>
     <form id="vw-create-form" class="modal-body" autocomplete="off">
 
@@ -1350,7 +1329,7 @@
   <div class="modal kb-upload-modal" id="kb-upload-modal">
     <div class="modal-header">
       <h2>Add to Knowledge Base</h2>
-      <button class="modal-close" onclick="closeKBUploadModal()">✕</button>
+      <button class="modal-close" onclick="closeKBUploadModal()"><span class='icon' data-lucide='x'></span></button>
     </div>
     <form id="kb-upload-form" class="modal-body" autocomplete="off" onsubmit="submitKBUpload(event)">
 
@@ -1428,23 +1407,23 @@
     <!-- Module header -->
     <div class="report-header">
       <div class="report-header-left">
-        <div class="report-header-icon">📋</div>
+        <div class="report-header-icon"><span class='icon' data-lucide='clipboard-list'></span></div>
         <div>
           <div class="report-header-title">Validation Report Management Suite</div>
           <div class="report-header-subtitle">EU GMP Annex 15 · GAMP 5 · 21 CFR Part 11 · WHO GMP · ICH Q9</div>
         </div>
       </div>
       <div class="report-header-actions">
-        <button class="report-btn report-btn-outline report-btn-sm" onclick="reportShowDashboard()">🏠 Dashboard</button>
-        <button class="report-btn report-btn-outline report-btn-sm" onclick="reportShowList()">📋 All Reports</button>
-        <button class="report-btn report-btn-primary report-btn-sm" onclick="reportShowNew()">➕ New Report</button>
+        <button class="report-btn report-btn-outline report-btn-sm" onclick="reportShowDashboard()"><span class='icon' data-lucide='home'></span> Dashboard</button>
+        <button class="report-btn report-btn-outline report-btn-sm" onclick="reportShowList()"><span class='icon' data-lucide='clipboard-list'></span> All Reports</button>
+        <button class="report-btn report-btn-primary report-btn-sm" onclick="reportShowNew()"><span class='icon' data-lucide='plus'></span> New Report</button>
       </div>
     </div>
 
     <!-- Dashboard view -->
     <div class="report-view active" id="report-view-dashboard">
       <div id="report-dash-body">
-        <div style="text-align:center;padding:60px;color:#475569">
+        <div style="text-align:center;padding:60px;color:var(--text-muted)">
           <div class="report-spinner"></div>
         </div>
       </div>
@@ -1455,10 +1434,10 @@
       <div class="report-inner">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:12px">
           <div>
-            <h2 style="color:#f1f5f9;font-size:18px;font-weight:700">All Validation Reports</h2>
-            <p style="color:#64748b;font-size:13px;margin-top:3px">GMP-compliant Validation Report lifecycle management</p>
+            <h2 style="color:var(--navy);font-size:18px;font-weight:700">All Validation Reports</h2>
+            <p style="color:var(--text-muted);font-size:13px;margin-top:3px">GMP-compliant Validation Report lifecycle management</p>
           </div>
-          <button class="report-btn report-btn-primary" onclick="reportShowNew()">➕ New Report</button>
+          <button class="report-btn report-btn-primary" onclick="reportShowNew()"><span class='icon' data-lucide='plus'></span> New Report</button>
         </div>
 
         <!-- Filters -->
@@ -1486,7 +1465,7 @@
             <option>Warehouse</option>
             <option>Utilities</option>
           </select>
-          <button class="report-btn report-btn-outline report-btn-sm" onclick="loadReportList()">↻ Refresh</button>
+          <button class="report-btn report-btn-outline report-btn-sm" onclick="loadReportList()"><span class='icon' data-lucide='refresh-cw'></span> Refresh</button>
         </div>
 
         <div class="report-panel" style="overflow:auto">
@@ -1504,7 +1483,7 @@
               </tr>
             </thead>
             <tbody id="report-list-body">
-              <tr><td colspan="8" style="text-align:center;padding:40px;color:#475569">Loading...</td></tr>
+              <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted)">Loading...</td></tr>
             </tbody>
           </table>
         </div>
@@ -1514,7 +1493,7 @@
     <!-- New Report wizard view -->
     <div class="report-view" id="report-view-new">
       <div id="report-new-body">
-        <div style="text-align:center;padding:60px;color:#475569">
+        <div style="text-align:center;padding:60px;color:var(--text-muted)">
           <div class="report-spinner"></div>
         </div>
       </div>
@@ -1549,7 +1528,12 @@
 
   <!-- ══ End Quality Management Suite ══════════════════════════════════════ -->
 
-  <!-- Load order: dashboard → projects → documents → insights → validation_config → validation → knowledge_base → val_workspace → chat -->
+  </div><!-- /app-body — closes here, not after view-validation, so every module
+             (Generate Document, Risk, URS, Qual, Report, QMS) renders inside the
+             sidebar + content flex layout instead of full-width below it -->
+
+  <!-- Load order: workspace (shared shell) <span class='icon' data-lucide='arrow-right'></span> dashboard <span class='icon' data-lucide='arrow-right'></span> projects <span class='icon' data-lucide='arrow-right'></span> documents <span class='icon' data-lucide='arrow-right'></span> insights <span class='icon' data-lucide='arrow-right'></span> validation_config <span class='icon' data-lucide='arrow-right'></span> validation <span class='icon' data-lucide='arrow-right'></span> knowledge_base <span class='icon' data-lucide='arrow-right'></span> val_workspace <span class='icon' data-lucide='arrow-right'></span> chat -->
+  <script src="{{ url_for('static', filename='js/workspace.js') }}"></script>
   <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
   <script src="{{ url_for('static', filename='js/projects.js') }}"></script>
   <script src="{{ url_for('static', filename='js/documents.js') }}"></script>
@@ -1576,9 +1560,9 @@
       if (!container || !window.VALIDATION_DOC_ORDER) return;
 
       const icons = {
-        URS: "📋", DQ: "📐", FAT: "🏭", SAT: "🔩",
-        IQ: "🔧", OQ: "🔬", PQ: "📊",
-        FMEA: "⚠️", CAPA: "🔄", Deviation: "⚡", "Change Control": "🔀",
+        URS: "<span class='icon' data-lucide='clipboard-list'></span>", DQ: "<span class='icon' data-lucide='ruler'></span>", FAT: "<span class='icon' data-lucide='factory'></span>", SAT: "<span class='icon' data-lucide='wrench'></span>",
+        IQ: "<span class='icon' data-lucide='wrench'></span>", OQ: "<span class='icon' data-lucide='microscope'></span>", PQ: "<span class='icon' data-lucide='bar-chart-3'></span>",
+        FMEA: "<span class='icon' data-lucide='alert-triangle'></span>", CAPA: "<span class='icon' data-lucide='repeat'></span>", Deviation: "<span class='icon' data-lucide='zap'></span>", "Change Control": "<span class='icon' data-lucide='shuffle'></span>",
       };
 
       window.VALIDATION_DOC_ORDER.forEach(type => {
@@ -1587,7 +1571,7 @@
         item.className = "sidebar-item val-nav-item";
         item.dataset.doctype = type;
         item.innerHTML = `
-          <span class="icon" style="font-size:13px">${icons[type] || "📄"}</span>
+          <span class="icon" style="font-size:13px">${icons[type] || "<span class='icon' data-lucide='file-text'></span>"}</span>
           <span class="val-nav-label">${type}</span>
           <span class="val-nav-sub">${cfg.label ? cfg.label.replace(type + " — ", "").replace(type, "").trim() : ""}</span>
         `;
@@ -1637,9 +1621,41 @@
     const navItems = document.querySelectorAll(".sidebar-item[data-view]");
     const views    = document.querySelectorAll("main[id^='view-']");
 
+    // Tracks whichever view is currently on screen, so the Enterprise
+    // Workspace shell (global header hide/show, unsaved-changes guard) can
+    // react correctly regardless of whether navigation happens via the
+    // sidebar or a workspace's own "Back to Project"/"Cancel" buttons.
+    let __activeViewId = "view-dashboard";
+    window.__ws_setActiveView = function (targetId) {
+      if (__activeViewId === "view-gen-doc" && targetId !== "view-gen-doc" && window.Workspace) {
+        window.Workspace.exit();
+      }
+      if (targetId === "view-gen-doc" && window.Workspace) {
+        window.Workspace.enter();
+      }
+      __activeViewId = targetId;
+    };
+
     navItems.forEach(nav => {
-      nav.addEventListener("click", () => {
+      nav.addEventListener("click", async () => {
         const targetId = nav.dataset.view;
+
+        // Enterprise Workspace guard: confirm before leaving a workspace with
+        // unsaved changes (e.g. mid-wizard in Generate Document) via a direct
+        // sidebar click, rather than the workspace's own Back/Cancel buttons.
+        if (__activeViewId === "view-gen-doc" && targetId !== "view-gen-doc" &&
+            window.gdHasUnsavedChanges && window.gdHasUnsavedChanges()) {
+          const ok = window.Workspace
+            ? await window.Workspace.confirmDialog({
+                title: "Leave Generate Document?",
+                message: "Unsaved progress will be lost unless you Save Draft first.",
+                confirmLabel: "Leave", cancelLabel: "Stay", danger: true,
+              })
+            : confirm("Leave Generate Document? Unsaved progress will be lost unless you Save Draft first.");
+          if (!ok) return;
+        }
+
+        window.__ws_setActiveView(targetId);
 
         navItems.forEach(n => n.classList.remove("active"));
         document.querySelectorAll(".val-nav-item").forEach(n => n.classList.remove("active"));
@@ -1735,6 +1751,7 @@
 
     // Hide all views then show a specific view (shared helper)
     function showView(targetId) {
+      if (window.__ws_setActiveView) window.__ws_setActiveView(targetId);
       document.querySelectorAll("main[id^='view-']").forEach(v => v.style.display = "none");
       document.querySelectorAll(".sidebar-item").forEach(n => n.classList.remove("active"));
       const target = document.getElementById(targetId);
@@ -1815,6 +1832,43 @@
         if (target) target.style.display = "flex";
       };
     }
+  </script>
+
+  <!-- ── Lucide icon system: converts every <span data-lucide="..."> into an
+       inline SVG, and re-runs automatically whenever any module injects new
+       icon markup dynamically (dashboard cards, suite views, modals, etc.)
+       so individual JS modules never need to call this themselves. ──────── -->
+  <script>
+    (function () {
+      let converting = false;
+
+      function refreshIcons() {
+        if (!window.lucide || converting) return;
+        // Guard against the MutationObserver re-triggering on the DOM
+        // changes createIcons() itself makes (span -> svg replacement).
+        converting = true;
+        observer.disconnect();
+        window.lucide.createIcons();
+        observer.observe(document.body, { childList: true, subtree: true });
+        converting = false;
+      }
+      window.refreshIcons = refreshIcons;
+
+      const observer = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          if (m.addedNodes && m.addedNodes.length) {
+            for (const n of m.addedNodes) {
+              if (n.nodeType === 1 && (n.matches?.("[data-lucide]") || n.querySelector?.("[data-lucide]"))) {
+                refreshIcons();
+                return;
+              }
+            }
+          }
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      refreshIcons();
+    })();
   </script>
 
 </body>

@@ -80,7 +80,7 @@ function renderProjectList(projects) {
 
     item.innerHTML = `
       <div class="proj-item-left">
-        <div class="proj-icon">📁</div>
+        <div class="proj-icon"><span class=\'icon\' data-lucide=\'folder\'></span></div>
         <div class="proj-item-info">
           <div class="proj-item-name">${escapeHtml(p.name)}</div>
           <div class="proj-item-sub">${escapeHtml(p.equipment_name || p.department || "—")}</div>
@@ -88,7 +88,7 @@ function renderProjectList(projects) {
       </div>
       <div class="proj-item-right">
         ${badge}
-        <button class="proj-delete-btn" data-id="${p.id}" title="Delete project">✕</button>
+        <button class="proj-delete-btn" data-id="${p.id}" title="Delete project"><span class=\'icon\' data-lucide=\'trash-2\'></span></button>
       </div>
     `;
 

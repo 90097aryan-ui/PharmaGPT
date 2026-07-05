@@ -109,12 +109,12 @@ async function rApi(path, opts = {}) {
 async function loadReportDashboard() {
   const el = document.getElementById('report-dash-body');
   if (!el) return;
-  el.innerHTML = '<div style="padding:40px;text-align:center;color:#475569"><div class="report-spinner"></div></div>';
+  el.innerHTML = '<div style="padding:40px;text-align:center;color:#66615B"><div class="report-spinner"></div></div>';
   try {
     const d = await rApi('/dashboard');
     el.innerHTML = renderReportDashboard(d);
   } catch (e) {
-    el.innerHTML = `<div class="report-empty"><div class="report-empty-icon">⚠️</div><div class="report-empty-title">${e.message}</div></div>`;
+    el.innerHTML = `<div class="report-empty"><div class="report-empty-icon"><span class=\'icon\' data-lucide=\'alert-triangle\'></span></div><div class="report-empty-title">${e.message}</div></div>`;
   }
 }
 
@@ -125,32 +125,32 @@ function renderReportDashboard(d) {
   <div class="report-inner">
     <div class="report-stats-grid">
       <div class="report-stat-card stat-total">
-        <div class="report-stat-icon">📋</div>
+        <div class="report-stat-icon"><span class=\'icon\' data-lucide=\'clipboard-list\'></span></div>
         <div class="report-stat-value">${d.total}</div>
         <div class="report-stat-label">Total Reports</div>
       </div>
       <div class="report-stat-card stat-draft">
-        <div class="report-stat-icon">📝</div>
+        <div class="report-stat-icon"><span class=\'icon\' data-lucide=\'pencil-line\'></span></div>
         <div class="report-stat-value">${d.draft}</div>
         <div class="report-stat-label">Draft</div>
       </div>
       <div class="report-stat-card stat-review">
-        <div class="report-stat-icon">🔍</div>
+        <div class="report-stat-icon"><span class=\'icon\' data-lucide=\'search\'></span></div>
         <div class="report-stat-value">${d.under_review}</div>
         <div class="report-stat-label">Under Review</div>
       </div>
       <div class="report-stat-card stat-approved">
-        <div class="report-stat-icon">✅</div>
+        <div class="report-stat-icon"><span class=\'icon\' data-lucide=\'check-circle-2\'></span></div>
         <div class="report-stat-value">${d.approved}</div>
         <div class="report-stat-label">Approved</div>
       </div>
       <div class="report-stat-card stat-score">
-        <div class="report-stat-icon">🤖</div>
+        <div class="report-stat-icon"><span class=\'icon\' data-lucide=\'bot\'></span></div>
         <div class="report-stat-value">${d.ai_generated}</div>
         <div class="report-stat-label">AI Generated</div>
       </div>
       <div class="report-stat-card stat-score">
-        <div class="report-stat-icon">📦</div>
+        <div class="report-stat-icon"><span class=\'icon\' data-lucide=\'package\'></span></div>
         <div class="report-stat-value">${d.released + d.archived}</div>
         <div class="report-stat-label">Released / Archived</div>
       </div>
@@ -190,7 +190,7 @@ function renderReportDashboard(d) {
         </div>
         <div class="report-panel-body" style="padding:0">
           ${d.recent.length === 0
-            ? '<div class="report-empty" style="padding:30px"><div class="report-empty-icon">📋</div><div>No reports yet</div></div>'
+            ? '<div class="report-empty" style="padding:30px"><div class="report-empty-icon"><span class=\'icon\' data-lucide=\'clipboard-list\'></span></div><div>No reports yet</div></div>'
             : `<table class="report-list-table">
                 <thead><tr>
                   <th>Report #</th><th>Equipment</th><th>Department</th>
@@ -199,7 +199,7 @@ function renderReportDashboard(d) {
                 <tbody>
                   ${d.recent.map(r => `
                   <tr onclick="openReport(${r.id})">
-                    <td><strong style="color:#93c5fd">${r.report_number || '—'}</strong></td>
+                    <td><strong style="color:#2D2A28">${r.report_number || '—'}</strong></td>
                     <td>${r.equipment_name || r.title || '—'}</td>
                     <td>${r.department || '—'}</td>
                     <td><span class="report-badge badge-${r.status}">${r.status}</span></td>
@@ -225,8 +225,8 @@ function renderReportDashboard(d) {
           <div class="report-panel-body">
             ${d.by_department.map(r => `
             <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:13px">
-              <span style="color:#94a3b8">${r.department}</span>
-              <span style="color:#3b82f6;font-weight:700">${r.cnt}</span>
+              <span style="color:#9A948C">${r.department}</span>
+              <span style="color:#8A6B52;font-weight:700">${r.cnt}</span>
             </div>`).join('')}
           </div>
         </div>` : ''}
@@ -239,8 +239,8 @@ function renderReportDashboard(d) {
               const pct = d.total > 0 ? Math.round(r.cnt / d.total * 100) : 0;
               return `<div style="margin-bottom:10px">
                 <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-                  <span style="color:#94a3b8;text-transform:capitalize">${r.status.replace('_',' ')}</span>
-                  <span style="color:#64748b">${r.cnt} (${pct}%)</span>
+                  <span style="color:#9A948C;text-transform:capitalize">${r.status.replace('_',' ')}</span>
+                  <span style="color:#66615B">${r.cnt} (${pct}%)</span>
                 </div>
                 <div class="report-score-bar-bg"><div class="report-score-bar-fill" style="width:${pct}%"></div></div>
               </div>`;
@@ -257,7 +257,7 @@ function renderReportDashboard(d) {
 async function loadReportList() {
   const body = document.getElementById('report-list-body');
   if (!body) return;
-  body.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:#475569"><div class="report-spinner"></div></td></tr>';
+  body.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:#66615B"><div class="report-spinner"></div></td></tr>';
 
   const q = new URLSearchParams({
     status: ReportState.filters.status || '',
@@ -268,15 +268,15 @@ async function loadReportList() {
   try {
     const reports = await rApi('/?' + q);
     if (!reports.length) {
-      body.innerHTML = '<tr><td colspan="8"><div class="report-empty"><div class="report-empty-icon">📋</div><div class="report-empty-title">No reports found</div><div class="report-empty-sub">Create your first validation report to get started</div><button class="report-btn report-btn-primary" onclick="reportShowNew()">+ New Report</button></div></td></tr>';
+      body.innerHTML = '<tr><td colspan="8"><div class="report-empty"><div class="report-empty-icon"><span class=\'icon\' data-lucide=\'clipboard-list\'></span></div><div class="report-empty-title">No reports found</div><div class="report-empty-sub">Create your first validation report to get started</div><button class="report-btn report-btn-primary" onclick="reportShowNew()">+ New Report</button></div></td></tr>';
       return;
     }
     body.innerHTML = reports.map(r => `
       <tr onclick="openReport(${r.id})">
-        <td><strong style="color:#93c5fd">${r.report_number || '—'}</strong></td>
+        <td><strong style="color:#2D2A28">${r.report_number || '—'}</strong></td>
         <td>
-          <div style="font-weight:600;color:#e2e8f0">${r.title}</div>
-          <div style="font-size:11px;color:#64748b">${r.equipment_name || ''}</div>
+          <div style="font-weight:600;color:#2D2A28">${r.title}</div>
+          <div style="font-size:11px;color:#66615B">${r.equipment_name || ''}</div>
         </td>
         <td>${r.department || '—'}</td>
         <td><span class="report-badge badge-${r.status}">${r.status.replace('_',' ')}</span></td>
@@ -288,14 +288,14 @@ async function loadReportList() {
           </div>
         </td>
         <td>
-          <span style="font-size:13px;font-weight:700;${r.ai_readiness_score>=80?'color:#4ade80':r.ai_readiness_score>=60?'color:#fbbf24':'color:#f87171'}">
+          <span style="font-size:13px;font-weight:700;${r.ai_readiness_score>=80?'color:#5F8A61':r.ai_readiness_score>=60?'color:#C59A41':'color:#CE7975'}">
             ${r.ai_readiness_score || 0}%
           </span>
         </td>
-        <td style="font-size:11px;color:#475569">${(r.created_at||'').slice(0,10)}</td>
+        <td style="font-size:11px;color:#66615B">${(r.created_at||'').slice(0,10)}</td>
       </tr>`).join('');
   } catch (e) {
-    body.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:30px;color:#f87171">${e.message}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:30px;color:#CE7975">${e.message}</td></tr>`;
   }
 }
 
@@ -330,24 +330,24 @@ function renderNewReportWizard() {
     <div class="report-wizard-steps">
       ${[['1','Link Modules'],['2','Report Details'],['3','Create']].map(([n,l],i) => `
         <div class="report-wizard-step ${ReportState.wizardStep == n ? 'active' : ReportState.wizardStep > n ? 'done' : ''}" onclick="reportWizardStep(${n})">
-          <div class="report-wizard-step-num">${ReportState.wizardStep > n ? '✓' : n}</div>
+          <div class="report-wizard-step-num">${ReportState.wizardStep > n ? '<span class=\'icon\' data-lucide=\'check\'></span>' : n}</div>
           ${l}
         </div>`).join('')}
     </div>
 
     <!-- Step 1: Link Modules -->
     <div class="report-wizard-panel ${ReportState.wizardStep === 1 ? 'active' : ''}" id="rwiz-1">
-      <h3 style="color:#e2e8f0;margin-bottom:6px">Link to Completed Qualification</h3>
-      <p style="color:#64748b;font-size:13px;margin-bottom:18px">
+      <h3 style="color:#2D2A28;margin-bottom:6px">Link to Completed Qualification</h3>
+      <p style="color:#66615B;font-size:13px;margin-bottom:18px">
         Select a qualification project to automatically populate the report with IQ/OQ/PQ data.
       </p>
 
       <div style="margin-bottom:20px">
-        <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:#66615B;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">
           Qualification Project (IQ/OQ/PQ)
         </div>
         ${quals.length === 0
-          ? '<div style="color:#475569;font-size:13px;padding:14px;background:#0a0f1e;border-radius:8px;border:1px solid #1e293b">No qualification projects found. You can still create a standalone report.</div>'
+          ? '<div style="color:#66615B;font-size:13px;padding:14px;background:#FFFFFF;border-radius:8px;border:1px solid #E6DED6">No qualification projects found. You can still create a standalone report.</div>'
           : `<div style="display:grid;gap:8px;max-height:280px;overflow-y:auto">
               ${quals.map(q => `
               <div class="report-link-card ${document.getElementById('rwiz-qual-id') && document.getElementById('rwiz-qual-id').value == q.id ? 'selected' : ''}"
@@ -363,14 +363,14 @@ function renderNewReportWizard() {
 
       <div class="report-form-grid" style="grid-template-columns:1fr 1fr;margin-top:16px">
         <div>
-          <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Link URS (optional)</div>
+          <div style="font-size:12px;font-weight:700;color:#66615B;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Link URS (optional)</div>
           <select class="report-filter-select" id="rwiz-urs-id" style="width:100%">
             <option value="">— Select URS —</option>
             ${ursList.map(u => `<option value="${u.id}">${u.urs_number || 'URS-'+u.id} — ${u.title.slice(0,40)}</option>`).join('')}
           </select>
         </div>
         <div>
-          <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Link Risk Assessment (optional)</div>
+          <div style="font-size:12px;font-weight:700;color:#66615B;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Link Risk Assessment (optional)</div>
           <select class="report-filter-select" id="rwiz-risk-id" style="width:100%">
             <option value="">— Select Risk Assessment —</option>
             ${riskList.map(r => `<option value="${r.id}">${r.title.slice(0,40)}</option>`).join('')}
@@ -379,14 +379,14 @@ function renderNewReportWizard() {
       </div>
 
       <div style="margin-top:24px;display:flex;justify-content:flex-end">
-        <button class="report-btn report-btn-primary" onclick="reportWizardStep(2)">Next: Report Details →</button>
+        <button class="report-btn report-btn-primary" onclick="reportWizardStep(2)">Next: Report Details <span class=\'icon\' data-lucide=\'arrow-right\'></span></button>
       </div>
     </div>
 
     <!-- Step 2: Report Details -->
     <div class="report-wizard-panel ${ReportState.wizardStep === 2 ? 'active' : ''}" id="rwiz-2">
-      <h3 style="color:#e2e8f0;margin-bottom:6px">Report Details</h3>
-      <p style="color:#64748b;font-size:13px;margin-bottom:18px">Enter the report metadata. Fields will be pre-filled from the linked qualification.</p>
+      <h3 style="color:#2D2A28;margin-bottom:6px">Report Details</h3>
+      <p style="color:#66615B;font-size:13px;margin-bottom:18px">Enter the report metadata. Fields will be pre-filled from the linked qualification.</p>
 
       <div class="report-form-grid">
         <div class="report-field">
@@ -459,33 +459,33 @@ function renderNewReportWizard() {
       </div>
 
       <div style="margin-top:24px;display:flex;justify-content:space-between">
-        <button class="report-btn report-btn-outline" onclick="reportWizardStep(1)">← Back</button>
-        <button class="report-btn report-btn-primary" onclick="reportWizardStep(3)">Next: Confirm →</button>
+        <button class="report-btn report-btn-outline" onclick="reportWizardStep(1)"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Back</button>
+        <button class="report-btn report-btn-primary" onclick="reportWizardStep(3)">Next: Confirm <span class=\'icon\' data-lucide=\'arrow-right\'></span></button>
       </div>
     </div>
 
     <!-- Step 3: Create -->
     <div class="report-wizard-panel ${ReportState.wizardStep === 3 ? 'active' : ''}" id="rwiz-3">
-      <h3 style="color:#e2e8f0;margin-bottom:6px">Create Report</h3>
-      <p style="color:#64748b;font-size:13px;margin-bottom:20px">Review your selections and create the validation report.</p>
+      <h3 style="color:#2D2A28;margin-bottom:6px">Create Report</h3>
+      <p style="color:#66615B;font-size:13px;margin-bottom:20px">Review your selections and create the validation report.</p>
 
       <div class="report-panel" style="margin-bottom:20px">
         <div class="report-panel-header"><div class="report-panel-title">Summary</div></div>
         <div class="report-panel-body" id="rwiz-summary">Loading...</div>
       </div>
 
-      <div style="background:#080d1a;border:1px solid #1e3a8a;border-radius:10px;padding:16px;margin-bottom:20px">
-        <div style="font-size:12px;font-weight:700;color:#93c5fd;margin-bottom:8px">🤖 AI Generation Options</div>
-        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:#94a3b8">
+      <div style="background:#FFFFFF;border:1px solid #E6DED6;border-radius:10px;padding:16px;margin-bottom:20px">
+        <div style="font-size:12px;font-weight:700;color:#2D2A28;margin-bottom:8px"><span class=\'icon\' data-lucide=\'bot\'></span> AI Generation Options</div>
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:#9A948C">
           <input type="checkbox" id="rwiz-auto-gen" checked style="width:16px;height:16px">
           Automatically generate all report sections with AI after creation
         </label>
       </div>
 
       <div style="margin-top:24px;display:flex;justify-content:space-between;align-items:center">
-        <button class="report-btn report-btn-outline" onclick="reportWizardStep(2)">← Back</button>
+        <button class="report-btn report-btn-outline" onclick="reportWizardStep(2)"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Back</button>
         <button class="report-btn report-btn-success" onclick="createNewReport()" id="btn-create-report">
-          ✓ Create Validation Report
+          <span class=\'icon\' data-lucide=\'check\'></span> Create Validation Report
         </button>
       </div>
     </div>
@@ -519,15 +519,15 @@ function renderWizardSummary() {
 
   el.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">
-      <div><span style="color:#64748b">Report #:</span> <strong style="color:#e2e8f0">${v('rwiz-report-number')}</strong></div>
-      <div><span style="color:#64748b">Type:</span> <strong style="color:#e2e8f0">${v('rwiz-report-type')}</strong></div>
-      <div><span style="color:#64748b">Equipment:</span> <strong style="color:#e2e8f0">${v('rwiz-equipment-name')}</strong></div>
-      <div><span style="color:#64748b">Department:</span> <strong style="color:#e2e8f0">${v('rwiz-department')}</strong></div>
-      <div><span style="color:#64748b">Prepared By:</span> <strong style="color:#e2e8f0">${v('rwiz-prepared-by')}</strong></div>
-      <div><span style="color:#64748b">Validation Type:</span> <strong style="color:#e2e8f0">${v('rwiz-val-type')}</strong></div>
-      <div><span style="color:#64748b">Linked Qual:</span> <strong style="color:#93c5fd">${qual ? qual.title.slice(0,40) : 'None'}</strong></div>
-      <div><span style="color:#64748b">Linked URS:</span> <strong style="color:#93c5fd">${urs ? urs.title.slice(0,40) : 'None'}</strong></div>
-      <div><span style="color:#64748b">Linked Risk:</span> <strong style="color:#93c5fd">${risk ? risk.title.slice(0,40) : 'None'}</strong></div>
+      <div><span style="color:#66615B">Report #:</span> <strong style="color:#2D2A28">${v('rwiz-report-number')}</strong></div>
+      <div><span style="color:#66615B">Type:</span> <strong style="color:#2D2A28">${v('rwiz-report-type')}</strong></div>
+      <div><span style="color:#66615B">Equipment:</span> <strong style="color:#2D2A28">${v('rwiz-equipment-name')}</strong></div>
+      <div><span style="color:#66615B">Department:</span> <strong style="color:#2D2A28">${v('rwiz-department')}</strong></div>
+      <div><span style="color:#66615B">Prepared By:</span> <strong style="color:#2D2A28">${v('rwiz-prepared-by')}</strong></div>
+      <div><span style="color:#66615B">Validation Type:</span> <strong style="color:#2D2A28">${v('rwiz-val-type')}</strong></div>
+      <div><span style="color:#66615B">Linked Qual:</span> <strong style="color:#2D2A28">${qual ? qual.title.slice(0,40) : 'None'}</strong></div>
+      <div><span style="color:#66615B">Linked URS:</span> <strong style="color:#2D2A28">${urs ? urs.title.slice(0,40) : 'None'}</strong></div>
+      <div><span style="color:#66615B">Linked Risk:</span> <strong style="color:#2D2A28">${risk ? risk.title.slice(0,40) : 'None'}</strong></div>
     </div>`;
 }
 
@@ -570,7 +570,7 @@ async function createNewReport() {
   } catch (e) {
     showReportToast('Error: ' + e.message, 'error');
     btn.disabled = false;
-    btn.textContent = '✓ Create Validation Report';
+ btn.textContent = ' Create Validation Report';
   }
 }
 
@@ -611,39 +611,39 @@ function renderReportDetail(report, sections) {
         <div class="report-detail-sub">${report.report_number || ''} ${report.report_number && report.equipment_name ? '·' : ''} ${report.equipment_name || ''} ${report.department ? '· ' + report.department : ''}</div>
         <div class="report-detail-badges">
           <span class="report-badge badge-${report.status}">${report.status.replace('_',' ')}</span>
-          <span class="report-badge" style="background:#1e293b;color:#94a3b8">Rev ${report.revision}</span>
-          <span class="report-badge" style="background:#1e293b;color:#94a3b8">${report.validation_type}</span>
-          ${report.ai_generated ? '<span class="report-badge" style="background:#1e3a8a;color:#93c5fd">🤖 AI Generated</span>' : ''}
+          <span class="report-badge" style="background:#F1ECE6;color:#9A948C">Rev ${report.revision}</span>
+          <span class="report-badge" style="background:#F1ECE6;color:#9A948C">${report.validation_type}</span>
+          ${report.ai_generated ? '<span class="report-badge" style="background:#F1ECE6;color:#2D2A28"><span class=\'icon\' data-lucide=\'bot\'></span> AI Generated</span>' : ''}
         </div>
       </div>
       <div class="report-header-actions" style="flex-shrink:0">
-        <button class="report-btn report-btn-sm report-btn-outline" onclick="reportShowList()">← All Reports</button>
+        <button class="report-btn report-btn-sm report-btn-outline" onclick="reportShowList()"><span class=\'icon\' data-lucide=\'arrow-left\'></span> All Reports</button>
         <button class="report-btn report-btn-sm report-btn-primary" onclick="generateAllSections()" id="btn-gen-all" ${ReportState.generating ? 'disabled' : ''}>
-          🤖 Generate All
+          <span class=\'icon\' data-lucide=\'bot\'></span> Generate All
         </button>
         <button class="report-btn report-btn-sm report-btn-success" onclick="runAIReview()" id="btn-ai-review">
-          🔍 AI Review
+          <span class=\'icon\' data-lucide=\'search\'></span> AI Review
         </button>
         <button class="report-btn report-btn-sm report-btn-outline" onclick="exportReportDocx(${report.id})">
-          ⬇ Export DOCX
+          <span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span> Export DOCX
         </button>
         <button class="report-btn report-btn-sm report-btn-warning" onclick="submitForApproval()">
-          📤 Submit for Review
+          <span class=\'icon\' data-lucide=\'upload\'></span> Submit for Review
         </button>
       </div>
     </div>
 
     <!-- Completion bar -->
-    <div style="padding:12px 28px;border-bottom:1px solid #1e293b;display:flex;align-items:center;gap:16px">
-      <div style="font-size:12px;color:#64748b">Sections: ${generatedCount}/${totalSections}</div>
+    <div style="padding:12px 28px;border-bottom:1px solid #E6DED6;display:flex;align-items:center;gap:16px">
+      <div style="font-size:12px;color:#66615B">Sections: ${generatedCount}/${totalSections}</div>
       <div style="flex:1;max-width:300px">
         <div class="report-score-bar-bg" style="height:8px">
           <div class="report-score-bar-fill" style="width:${completePct}%"></div>
         </div>
       </div>
-      <div style="font-size:12px;color:#3b82f6;font-weight:700">${completePct}% Complete</div>
-      ${report.compliance_score ? `<div style="font-size:12px;color:#4ade80;font-weight:700">Compliance: ${report.compliance_score}%</div>` : ''}
-      ${report.ai_readiness_score ? `<div style="font-size:12px;color:#fbbf24;font-weight:700">Readiness: ${report.ai_readiness_score}%</div>` : ''}
+      <div style="font-size:12px;color:#8A6B52;font-weight:700">${completePct}% Complete</div>
+      ${report.compliance_score ? `<div style="font-size:12px;color:#5F8A61;font-weight:700">Compliance: ${report.compliance_score}%</div>` : ''}
+      ${report.ai_readiness_score ? `<div style="font-size:12px;color:#C59A41;font-weight:700">Readiness: ${report.ai_readiness_score}%</div>` : ''}
     </div>
 
     <!-- Tabs -->
@@ -667,14 +667,14 @@ function renderReportDetail(report, sections) {
     </div>
     <div class="report-tab-panel ${ReportState.currentTab==='traceability'?'active':''}" id="rtab-traceability">
       <div id="trace-content">
-        <div style="text-align:center;padding:40px;color:#475569">
+        <div style="text-align:center;padding:40px;color:#66615B">
           <button class="report-btn report-btn-primary" onclick="loadTraceability()">Load Traceability Matrix</button>
         </div>
       </div>
     </div>
     <div class="report-tab-panel ${ReportState.currentTab==='ai-review'?'active':''}" id="rtab-ai-review">
       <div id="review-content">
-        ${report.compliance_score > 0 ? '' : '<div style="text-align:center;padding:40px;color:#475569"><button class="report-btn report-btn-success" onclick="runAIReview()">🔍 Run AI Review</button></div>'}
+        ${report.compliance_score > 0 ? '' : '<div style="text-align:center;padding:40px;color:#66615B"><button class="report-btn report-btn-success" onclick="runAIReview()"><span class=\'icon\' data-lucide=\'search\'></span> Run AI Review</button></div>'}
       </div>
     </div>
     <div class="report-tab-panel ${ReportState.currentTab==='approval'?'active':''}" id="rtab-approval">
@@ -721,8 +721,8 @@ function renderOverviewTab(report, sections) {
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             ${stats.slice(0,9).map(([k,v]) => `
             <tr>
-              <td style="padding:6px 0;color:#64748b;width:45%">${k}</td>
-              <td style="padding:6px 0;color:#e2e8f0;font-weight:500">${v}</td>
+              <td style="padding:6px 0;color:#66615B;width:45%">${k}</td>
+              <td style="padding:6px 0;color:#2D2A28;font-weight:500">${v}</td>
             </tr>`).join('')}
           </table>
         </div>
@@ -734,8 +734,8 @@ function renderOverviewTab(report, sections) {
             <table style="width:100%;border-collapse:collapse;font-size:13px">
               ${stats.slice(9).map(([k,v]) => `
               <tr>
-                <td style="padding:6px 0;color:#64748b;width:50%">${k}</td>
-                <td style="padding:6px 0;color:#e2e8f0;font-weight:500">${v}</td>
+                <td style="padding:6px 0;color:#66615B;width:50%">${k}</td>
+                <td style="padding:6px 0;color:#2D2A28;font-weight:500">${v}</td>
               </tr>`).join('')}
             </table>
           </div>
@@ -743,11 +743,11 @@ function renderOverviewTab(report, sections) {
         <div class="report-panel">
           <div class="report-panel-header"><div class="report-panel-title">Quick Actions</div></div>
           <div class="report-panel-body" style="display:flex;flex-direction:column;gap:8px">
-            <button class="report-btn report-btn-primary" onclick="switchReportTab('sections');generateAllSections()">🤖 AI Generate All Sections</button>
-            <button class="report-btn report-btn-success" onclick="runAIReview()">🔍 Run AI Review</button>
-            <button class="report-btn report-btn-outline" onclick="switchReportTab('traceability');loadTraceability()">🔗 Build Traceability Matrix</button>
-            <button class="report-btn report-btn-outline" onclick="exportReportDocx(${report.id})">⬇ Export as DOCX</button>
-            <button class="report-btn report-btn-warning" onclick="submitForApproval()">📤 Submit for QA Review</button>
+            <button class="report-btn report-btn-primary" onclick="switchReportTab('sections');generateAllSections()"><span class=\'icon\' data-lucide=\'bot\'></span> AI Generate All Sections</button>
+            <button class="report-btn report-btn-success" onclick="runAIReview()"><span class=\'icon\' data-lucide=\'search\'></span> Run AI Review</button>
+            <button class="report-btn report-btn-outline" onclick="switchReportTab('traceability');loadTraceability()"><span class=\'icon\' data-lucide=\'link-2\'></span> Build Traceability Matrix</button>
+            <button class="report-btn report-btn-outline" onclick="exportReportDocx(${report.id})"><span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span> Export as DOCX</button>
+            <button class="report-btn report-btn-warning" onclick="submitForApproval()"><span class=\'icon\' data-lucide=\'upload\'></span> Submit for QA Review</button>
           </div>
         </div>
       </div>
@@ -768,13 +768,13 @@ function renderSectionsTab(report, sections) {
       <!-- Generation controls -->
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px;flex-wrap:wrap">
         <div style="display:flex;gap:8px">
-          <button class="report-btn report-btn-sm report-btn-primary" onclick="generateAllSections()" id="btn-gen-all-sec">🤖 Generate All Sections</button>
+          <button class="report-btn report-btn-sm report-btn-primary" onclick="generateAllSections()" id="btn-gen-all-sec"><span class=\'icon\' data-lucide=\'bot\'></span> Generate All Sections</button>
           <div class="report-toggle-view" id="section-view-toggle">
-            <button class="${ReportState.sectionMode==='edit'?'active':''}" onclick="setSectionMode('edit')">✏ Edit</button>
-            <button class="${ReportState.sectionMode==='preview'?'active':''}" onclick="setSectionMode('preview')">👁 Preview</button>
+            <button class="${ReportState.sectionMode==='edit'?'active':''}" onclick="setSectionMode('edit')"><span class=\'icon\' data-lucide=\'pencil\'></span> Edit</button>
+            <button class="${ReportState.sectionMode==='preview'?'active':''}" onclick="setSectionMode('preview')"><span class=\'icon\' data-lucide=\'eye\'></span> Preview</button>
           </div>
         </div>
-        <div style="font-size:12px;color:#64748b">
+        <div style="font-size:12px;color:#66615B">
           ${sections.filter(s => s.is_generated).length} / ${sections.length} sections generated
         </div>
       </div>
@@ -802,7 +802,7 @@ function renderSectionsTab(report, sections) {
               <div class="section-status-dot"></div>
               <span class="report-section-nav-number">${i+1}</span>
               <span style="flex:1;font-size:12px">${s.label}</span>
-              ${hasContent ? '<span style="font-size:10px">✓</span>' : ''}
+              ${hasContent ? '<span style="font-size:10px"><span class=\'icon\' data-lucide=\'check\'></span></span>' : ''}
             </div>`;
           }).join('')}
         </div>
@@ -812,8 +812,8 @@ function renderSectionsTab(report, sections) {
           <div class="report-section-editor-header">
             <div class="report-section-editor-title" id="section-editor-title">Select a section</div>
             <div style="display:flex;gap:8px">
-              <button class="report-btn report-btn-sm report-btn-primary" onclick="generateCurrentSection()" id="btn-gen-section">🤖 Generate</button>
-              <button class="report-btn report-btn-sm report-btn-outline" onclick="saveSectionContent()" id="btn-save-section">💾 Save</button>
+              <button class="report-btn report-btn-sm report-btn-primary" onclick="generateCurrentSection()" id="btn-gen-section"><span class=\'icon\' data-lucide=\'bot\'></span> Generate</button>
+              <button class="report-btn report-btn-sm report-btn-outline" onclick="saveSectionContent()" id="btn-save-section"><span class=\'icon\' data-lucide=\'save\'></span> Save</button>
             </div>
           </div>
           <div class="report-section-editor-body">
@@ -905,7 +905,7 @@ window.generateCurrentSection = function () {
     if (data.done || data.error) {
       es.close();
       ReportState.generating = false;
-      if (btn) { btn.disabled = false; btn.textContent = '🤖 Generate'; }
+ if (btn) { btn.disabled = false; btn.textContent = ' Generate'; }
       if (data.error) {
         showReportToast('Generation error: ' + data.error, 'error');
         return;
@@ -927,7 +927,7 @@ window.generateCurrentSection = function () {
   es.onerror = () => {
     es.close();
     ReportState.generating = false;
-    if (btn) { btn.disabled = false; btn.textContent = '🤖 Generate'; }
+ if (btn) { btn.disabled = false; btn.textContent = ' Generate'; }
     showReportToast('Stream error', 'error');
   };
 };
@@ -1020,8 +1020,8 @@ window.generateAllSections = function () {
     if (data.all_done || data.error) {
       es.close();
       ReportState.generating = false;
-      if (btnAll) { btnAll.disabled = false; btnAll.innerHTML = '🤖 Generate All'; }
-      if (btnAllSec) { btnAllSec.disabled = false; btnAllSec.innerHTML = '🤖 Generate All Sections'; }
+      if (btnAll) { btnAll.disabled = false; btnAll.innerHTML = '<span class=\'icon\' data-lucide=\'bot\'></span> Generate All'; }
+      if (btnAllSec) { btnAllSec.disabled = false; btnAllSec.innerHTML = '<span class=\'icon\' data-lucide=\'bot\'></span> Generate All Sections'; }
       if (progressBlock) setTimeout(() => { progressBlock.style.display = 'none'; }, 3000);
 
       if (data.error) {
@@ -1037,7 +1037,7 @@ window.generateAllSections = function () {
   es.onerror = () => {
     es.close();
     ReportState.generating = false;
-    if (btnAll) { btnAll.disabled = false; btnAll.innerHTML = '🤖 Generate All'; }
+    if (btnAll) { btnAll.disabled = false; btnAll.innerHTML = '<span class=\'icon\' data-lucide=\'bot\'></span> Generate All'; }
     showReportToast('Stream connection error', 'error');
   };
 };
@@ -1050,7 +1050,7 @@ window.runAIReview = async function () {
   if (btn) { btn.disabled = true; btn.innerHTML = '<div class="report-spinner"></div> Reviewing...'; }
 
   const content = document.getElementById('review-content');
-  if (content) content.innerHTML = '<div style="text-align:center;padding:60px;color:#475569"><div class="report-spinner"></div><div style="margin-top:12px;font-size:13px">AI is reviewing the validation report for GMP compliance...</div></div>';
+  if (content) content.innerHTML = '<div style="text-align:center;padding:60px;color:#66615B"><div class="report-spinner"></div><div style="margin-top:12px;font-size:13px">AI is reviewing the validation report for GMP compliance...</div></div>';
 
   switchReportTab('ai-review');
 
@@ -1064,10 +1064,10 @@ window.runAIReview = async function () {
     }
     showReportToast('AI review completed', 'success');
   } catch (e) {
-    if (content) content.innerHTML = `<div class="report-empty"><div class="report-empty-icon">⚠️</div><div class="report-empty-title">Review failed</div><div class="report-empty-sub">${e.message}</div></div>`;
+    if (content) content.innerHTML = `<div class="report-empty"><div class="report-empty-icon"><span class=\'icon\' data-lucide=\'alert-triangle\'></span></div><div class="report-empty-title">Review failed</div><div class="report-empty-sub">${e.message}</div></div>`;
     showReportToast('AI review error: ' + e.message, 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = '🔍 AI Review'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<span class=\'icon\' data-lucide=\'search\'></span> AI Review'; }
   }
 };
 
@@ -1082,11 +1082,11 @@ function renderAIReview(r) {
 
   const renderList = (items, cls = '') => items && items.length
     ? `<ul class="report-review-list">${items.map(i => {
-        const text = typeof i === 'string' ? i : `<strong>${i.section}</strong> — ${i.comment} <span style="font-size:10px;color:#64748b">[${i.severity}]</span>`;
+        const text = typeof i === 'string' ? i : `<strong>${i.section}</strong> — ${i.comment} <span style="font-size:10px;color:#66615B">[${i.severity}]</span>`;
         const sev = typeof i === 'object' ? `severity-${(i.severity||'').toLowerCase()}` : '';
         return `<li class="${sev} ${cls}">${text}</li>`;
       }).join('')}</ul>`
-    : '<div style="font-size:13px;color:#475569;padding:8px">None identified</div>';
+    : '<div style="font-size:13px;color:#66615B;padding:8px">None identified</div>';
 
   return `
     <div class="report-review-scores">
@@ -1109,41 +1109,41 @@ function renderAIReview(r) {
     </div>
 
     <div class="report-review-recommendation ${recClass}">
-      <span style="font-size:18px">${r.recommendation === 'READY FOR QA APPROVAL' ? '✅' : r.recommendation === 'MINOR REVISIONS REQUIRED' ? '⚠️' : '❌'}</span>
+      <span style="font-size:18px">${r.recommendation === 'READY FOR QA APPROVAL' ? '<span class=\'icon\' data-lucide=\'check-circle-2\'></span>' : r.recommendation === 'MINOR REVISIONS REQUIRED' ? '<span class=\'icon\' data-lucide=\'alert-triangle\'></span>' : '<span class=\'icon\' data-lucide=\'circle-x\'></span>'}</span>
       ${r.recommendation}
     </div>
 
     ${r.executive_summary ? `<div class="report-panel" style="margin-bottom:20px">
       <div class="report-panel-header"><div class="report-panel-title">Executive Summary</div></div>
-      <div class="report-panel-body" style="font-size:13px;color:#cbd5e1;line-height:1.7">${r.executive_summary}</div>
+      <div class="report-panel-body" style="font-size:13px;color:#2D2A28;line-height:1.7">${r.executive_summary}</div>
     </div>` : ''}
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
       <div>
         <div class="report-review-section">
-          <div class="report-review-section-title">✅ Strengths</div>
+          <div class="report-review-section-title"><span class=\'icon\' data-lucide=\'check-circle-2\'></span> Strengths</div>
           ${renderList(r.strengths, 'strength')}
         </div>
         <div class="report-review-section">
-          <div class="report-review-section-title">📋 Missing Sections</div>
+          <div class="report-review-section-title"><span class=\'icon\' data-lucide=\'clipboard-list\'></span> Missing Sections</div>
           ${renderList(r.missing_sections)}
         </div>
         <div class="report-review-section">
-          <div class="report-review-section-title">🔍 Missing Evidence</div>
+          <div class="report-review-section-title"><span class=\'icon\' data-lucide=\'search\'></span> Missing Evidence</div>
           ${renderList(r.missing_evidence)}
         </div>
       </div>
       <div>
         <div class="report-review-section">
-          <div class="report-review-section-title">⚠️ Regulatory Gaps</div>
+          <div class="report-review-section-title"><span class=\'icon\' data-lucide=\'alert-triangle\'></span> Regulatory Gaps</div>
           ${renderList(r.regulatory_gaps)}
         </div>
         <div class="report-review-section">
-          <div class="report-review-section-title">🔒 Data Integrity Issues</div>
+          <div class="report-review-section-title"><span class=\'icon\' data-lucide=\'lock\'></span> Data Integrity Issues</div>
           ${renderList(r.data_integrity_issues)}
         </div>
         <div class="report-review-section">
-          <div class="report-review-section-title">💡 Improvements</div>
+          <div class="report-review-section-title"><span class=\'icon\' data-lucide=\'lightbulb\'></span> Improvements</div>
           ${renderList(r.improvements)}
         </div>
       </div>
@@ -1151,7 +1151,7 @@ function renderAIReview(r) {
 
     ${r.reviewer_comments && r.reviewer_comments.length ? `
     <div class="report-review-section" style="margin-top:20px">
-      <div class="report-review-section-title">💬 Reviewer Comments</div>
+      <div class="report-review-section-title"><span class=\'icon\' data-lucide=\'message-square\'></span> Reviewer Comments</div>
       ${renderList(r.reviewer_comments)}
     </div>` : ''}`;
 }
@@ -1161,13 +1161,13 @@ function renderAIReview(r) {
 window.loadTraceability = async function () {
   const content = document.getElementById('trace-content');
   if (!content || !ReportState.currentReportId) return;
-  content.innerHTML = '<div style="text-align:center;padding:40px"><div class="report-spinner"></div><div style="margin-top:12px;font-size:13px;color:#475569">Building traceability matrix...</div></div>';
+  content.innerHTML = '<div style="text-align:center;padding:40px"><div class="report-spinner"></div><div style="margin-top:12px;font-size:13px;color:#66615B">Building traceability matrix...</div></div>';
 
   try {
     const matrix = await rApi('/' + ReportState.currentReportId + '/traceability');
     content.innerHTML = renderTraceabilityMatrix(matrix);
   } catch (e) {
-    content.innerHTML = `<div class="report-empty"><div class="report-empty-icon">⚠️</div><div>${e.message}</div></div>`;
+    content.innerHTML = `<div class="report-empty"><div class="report-empty-icon"><span class=\'icon\' data-lucide=\'alert-triangle\'></span></div><div>${e.message}</div></div>`;
   }
 };
 
@@ -1191,7 +1191,7 @@ function renderTraceabilityMatrix(m) {
       </div>
       <div class="report-trace-card">
         <div class="report-trace-card-title">Uncovered Requirements</div>
-        <div class="report-trace-pct" style="color:${m.uncovered_requirements > 0 ? '#f87171' : '#4ade80'}">${m.uncovered_requirements}</div>
+        <div class="report-trace-pct" style="color:${m.uncovered_requirements > 0 ? '#CE7975' : '#5F8A61'}">${m.uncovered_requirements}</div>
         <div class="report-trace-detail">${m.uncovered_requirements > 0 ? 'Need test coverage' : 'Full coverage achieved'}</div>
       </div>
     </div>
@@ -1199,8 +1199,8 @@ function renderTraceabilityMatrix(m) {
     ${m.requirements.length ? `
     <div class="report-panel" style="margin-bottom:20px">
       <div class="report-panel-header">
-        <div class="report-panel-title">URS Requirements → Test Cases</div>
-        <div style="font-size:12px;color:#64748b">${m.covered_requirements}/${m.total_requirements} covered</div>
+        <div class="report-panel-title">URS Requirements <span class=\'icon\' data-lucide=\'arrow-right\'></span> Test Cases</div>
+        <div style="font-size:12px;color:#66615B">${m.covered_requirements}/${m.total_requirements} covered</div>
       </div>
       <div style="overflow-x:auto">
         <table class="report-trace-table">
@@ -1210,16 +1210,16 @@ function renderTraceabilityMatrix(m) {
           <tbody>
             ${m.requirements.map(r => `
             <tr>
-              <td style="color:#93c5fd;font-weight:600">${r.req_id}</td>
+              <td style="color:#2D2A28;font-weight:600">${r.req_id}</td>
               <td style="max-width:300px">${r.requirement}</td>
               <td>${r.priority}</td>
               <td>${r.gmp_criticality}</td>
               <td>
                 <div class="trace-tc-list">
-                  ${r.test_cases.length ? r.test_cases.map(tc => `<span class="trace-tc-chip">${tc}</span>`).join('') : '<span style="color:#475569;font-size:11px">None</span>'}
+                  ${r.test_cases.length ? r.test_cases.map(tc => `<span class="trace-tc-chip">${tc}</span>`).join('') : '<span style="color:#66615B;font-size:11px">None</span>'}
                 </div>
               </td>
-              <td><span class="${r.covered ? 'trace-covered' : 'trace-uncovered'}">${r.covered ? '✓ Covered' : '✗ Gap'}</span></td>
+              <td><span class="${r.covered ? 'trace-covered' : 'trace-uncovered'}">${r.covered ? '<span class=\'icon\' data-lucide=\'check\'></span> Covered' : '<span class=\'icon\' data-lucide=\'x\'></span> Gap'}</span></td>
             </tr>`).join('')}
           </tbody>
         </table>
@@ -1229,8 +1229,8 @@ function renderTraceabilityMatrix(m) {
     ${m.risks.length ? `
     <div class="report-panel">
       <div class="report-panel-header">
-        <div class="report-panel-title">Risk Items → Test Cases</div>
-        <div style="font-size:12px;color:#64748b">${m.covered_risks}/${m.total_risks} covered</div>
+        <div class="report-panel-title">Risk Items <span class=\'icon\' data-lucide=\'arrow-right\'></span> Test Cases</div>
+        <div style="font-size:12px;color:#66615B">${m.covered_risks}/${m.total_risks} covered</div>
       </div>
       <div style="overflow-x:auto">
         <table class="report-trace-table">
@@ -1240,16 +1240,16 @@ function renderTraceabilityMatrix(m) {
           <tbody>
             ${m.risks.map(r => `
             <tr>
-              <td style="color:#fbbf24;font-weight:600">${r.item_id}</td>
+              <td style="color:#C59A41;font-weight:600">${r.item_id}</td>
               <td style="max-width:280px">${r.failure_mode}</td>
               <td>${r.risk_level}</td>
               <td>${r.rpn || '—'}</td>
               <td>
                 <div class="trace-tc-list">
-                  ${r.test_cases.length ? r.test_cases.map(tc => `<span class="trace-tc-chip">${tc}</span>`).join('') : '<span style="color:#475569;font-size:11px">None</span>'}
+                  ${r.test_cases.length ? r.test_cases.map(tc => `<span class="trace-tc-chip">${tc}</span>`).join('') : '<span style="color:#66615B;font-size:11px">None</span>'}
                 </div>
               </td>
-              <td><span class="${r.covered ? 'trace-covered' : 'trace-uncovered'}">${r.covered ? '✓ Covered' : '✗ Gap'}</span></td>
+              <td><span class="${r.covered ? 'trace-covered' : 'trace-uncovered'}">${r.covered ? '<span class=\'icon\' data-lucide=\'check\'></span> Covered' : '<span class=\'icon\' data-lucide=\'x\'></span> Gap'}</span></td>
             </tr>`).join('')}
           </tbody>
         </table>
@@ -1265,7 +1265,7 @@ async function loadApprovalTrail() {
   try {
     const trail = await rApi('/' + ReportState.currentReportId + '/approval');
     el.innerHTML = renderApproval(trail);
-  } catch (e) { el.innerHTML = `<div style="color:#f87171">${e.message}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#CE7975">${e.message}</div>`; }
 }
 
 function renderApproval(trail) {
@@ -1283,10 +1283,10 @@ function renderApproval(trail) {
                 const active = report && report.status === s;
                 const past = report && statusFlow.indexOf(report.status) > statusFlow.indexOf(s);
                 return `<div style="display:flex;align-items:center;gap:12px;padding:8px 0;${!active && !past ? 'opacity:0.4' : ''}">
-                  <div style="width:28px;height:28px;border-radius:50%;background:${active?'#1e40af':past?'#065f46':'#1e293b'};display:flex;align-items:center;justify-content:center;font-size:14px">
-                    ${active ? '●' : past ? '✓' : '○'}
+                  <div style="width:28px;height:28px;border-radius:50%;background:${active?'#9D7B60':past?'#3D6140':'#5B4C43'};display:flex;align-items:center;justify-content:center;font-size:14px">
+                    ${active ? '●' : past ? '<span class=\'icon\' data-lucide=\'check\'></span>' : '○'}
                   </div>
-                  <span style="font-size:13px;color:${active?'#3b82f6':past?'#4ade80':'#64748b'};font-weight:${active?700:400};text-transform:capitalize">
+                  <span style="font-size:13px;color:${active?'#8A6B52':past?'#5F8A61':'#66615B'};font-weight:${active?700:400};text-transform:capitalize">
                     ${s.replace('_',' ')}
                   </span>
                 </div>`;
@@ -1388,28 +1388,28 @@ async function loadVersionHistory() {
   try {
     const versions = await rApi('/' + ReportState.currentReportId + '/versions');
     el.innerHTML = renderVersionHistory(versions);
-  } catch (e) { el.innerHTML = `<div style="color:#f87171">${e.message}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#CE7975">${e.message}</div>`; }
 }
 
 function renderVersionHistory(versions) {
   return `
     <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
-      <button class="report-btn report-btn-outline report-btn-sm" onclick="createVersionSnapshot()">📸 Create Snapshot</button>
+      <button class="report-btn report-btn-outline report-btn-sm" onclick="createVersionSnapshot()"><span class=\'icon\' data-lucide=\'camera\'></span> Create Snapshot</button>
     </div>
     ${versions.length === 0
-      ? '<div class="report-empty" style="padding:30px"><div class="report-empty-icon">📚</div><div class="report-empty-title">No version snapshots yet</div></div>'
+      ? '<div class="report-empty" style="padding:30px"><div class="report-empty-icon"><span class=\'icon\' data-lucide=\'book-open\'></span></div><div class="report-empty-title">No version snapshots yet</div></div>'
       : `<table class="report-list-table">
           <thead><tr><th>Version</th><th>Revision</th><th>Status</th><th>Compliance</th><th>Completeness</th><th>Created By</th><th>Date</th></tr></thead>
           <tbody>
             ${versions.map(v => `
             <tr>
-              <td><strong style="color:#93c5fd">${v.version}</strong></td>
+              <td><strong style="color:#2D2A28">${v.version}</strong></td>
               <td>${v.revision}</td>
               <td><span class="report-badge badge-${v.status}">${v.status}</span></td>
               <td>${v.compliance_score}%</td>
               <td>${v.completeness_score}%</td>
               <td>${v.created_by}</td>
-              <td style="font-size:11px;color:#475569">${(v.created_at||'').slice(0,16)}</td>
+              <td style="font-size:11px;color:#66615B">${(v.created_at||'').slice(0,16)}</td>
             </tr>`).join('')}
           </tbody>
         </table>`

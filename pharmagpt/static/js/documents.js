@@ -10,12 +10,12 @@ const docUploadBtn   = document.getElementById("doc-upload-btn");
 const docUploadStatus = document.getElementById("doc-upload-status");
 
 // ── File type display config ──────────────────────────────────────────────────
-const FILE_ICONS = { pdf: "📄", docx: "📝", xlsx: "📊", txt: "📃" };
+const FILE_ICONS = { pdf: "<span class=\'icon\' data-lucide=\'file-text\'></span>", docx: "<span class=\'icon\' data-lucide=\'pencil-line\'></span>", xlsx: "<span class=\'icon\' data-lucide=\'bar-chart-3\'></span>", txt: "<span class=\'icon\' data-lucide=\'file-text\'></span>" };
 const FILE_COLORS = {
-  pdf:  "#E53935",   // red
-  docx: "#1565C0",   // blue
-  xlsx: "#2E7D32",   // green
-  txt:  "#607080",   // grey
+  pdf:  "#C35F5B",   // red
+  docx: "#8A6B52",   // blue
+  xlsx: "#5F8A61",   // green
+  txt:  "#9A948C",   // grey
 };
 
 // Statuses considered "still working" — the row keeps polling while in one
@@ -50,8 +50,8 @@ function renderDocuments(documents) {
 
   documents.forEach(doc => {
     const ext  = doc.file_type;
-    const icon = FILE_ICONS[ext]  || "📎";
-    const color = FILE_COLORS[ext] || "#607080";
+    const icon = FILE_ICONS[ext]  || "<span class=\'icon\' data-lucide=\'paperclip\'></span>";
+    const color = FILE_COLORS[ext] || "#9A948C";
     const size = formatSize(doc.file_size);
     const date = formatDate(doc.upload_date);
 

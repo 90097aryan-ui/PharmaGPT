@@ -88,7 +88,7 @@ async function qmsDevLoadList(filters = {}) {
     if (!devs.length) {
       container.innerHTML = `
         <div class="qms-empty">
-          <div class="qms-empty-icon">⚡</div>
+          <div class="qms-empty-icon"><span class=\'icon\' data-lucide=\'zap\'></span></div>
           <h3>No deviations yet</h3>
           <p>Initiate your first deviation to get started.</p>
         </div>`;
@@ -360,7 +360,7 @@ async function qmsDevRenderInvestigation(id) {
         Generates a Fishbone (Ishikawa) analysis, 5-Why chain, investigation timeline, and root cause
         determination using the PharmaGPT regulatory persona.
       </p>
-      <button class="btn-primary" id="qms-dev-investigate-btn" onclick="qmsDevRunInvestigation(${id})">✨ Run AI Investigation</button>
+      <button class="btn-primary" id="qms-dev-investigate-btn" onclick="qmsDevRunInvestigation(${id})"><span class=\'icon\' data-lucide=\'sparkles\'></span> Run AI Investigation</button>
     </div>
 
     ${(inv && inv.root_cause_statement) ? `
@@ -418,7 +418,7 @@ async function qmsDevRunInvestigation(id) {
     qmsDevRenderInvestigation(id);
   } catch (e) {
     qmsToast("Investigation failed: " + e.message);
-    if (btn) { btn.disabled = false; btn.textContent = "✨ Run AI Investigation"; }
+ if (btn) { btn.disabled = false; btn.textContent = "Run AI Investigation"; }
   }
 }
 window.qmsDevRunInvestigation = qmsDevRunInvestigation;
@@ -446,7 +446,7 @@ async function qmsDevRenderImpact(id) {
   el.innerHTML = `
     <div class="qms-section-card">
       <h3>AI-Suggested Impact Assessment</h3>
-      <button class="btn-secondary" onclick="qmsDevSuggestImpact(${id})">✨ Suggest Impact Areas with AI</button>
+      <button class="btn-secondary" onclick="qmsDevSuggestImpact(${id})"><span class=\'icon\' data-lucide=\'sparkles\'></span> Suggest Impact Areas with AI</button>
       <div id="qms-dev-impact-suggestions" style="margin-top:12px"></div>
     </div>
     <div class="qms-section-card">
@@ -529,7 +529,7 @@ async function qmsDevRenderCapaLinks(id) {
       <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px">
         Draft problem statement, root cause, and corrective/preventive actions to seed a new CAPA record.
       </p>
-      <button class="btn-secondary" onclick="qmsDevSuggestCapa(${id})">✨ Suggest CAPA Content with AI</button>
+      <button class="btn-secondary" onclick="qmsDevSuggestCapa(${id})"><span class=\'icon\' data-lucide=\'sparkles\'></span> Suggest CAPA Content with AI</button>
       <div id="qms-dev-capa-suggestion" style="margin-top:12px"></div>
     </div>
     <div class="qms-section-card">

@@ -9,12 +9,12 @@
     'Reports', 'Regulations', 'Vendor Documents', 'Others',
   ];
 
-  const FILE_ICONS = { pdf: '📕', docx: '📘', xlsx: '📗', txt: '📄' };
+  const FILE_ICONS = { pdf: '<span class=\'icon\' data-lucide=\'book\'></span>', docx: '<span class=\'icon\' data-lucide=\'book\'></span>', xlsx: '<span class=\'icon\' data-lucide=\'book\'></span>', txt: '<span class=\'icon\' data-lucide=\'file-text\'></span>' };
 
   const FOLDER_ICONS = {
-    SOP: '📋', Validation: '✅', Qualification: '🔬',
-    Protocols: '🧪', Reports: '📊', Regulations: '⚖️',
-    'Vendor Documents': '🏭', Others: '📁',
+    SOP: '<span class=\'icon\' data-lucide=\'clipboard-list\'></span>', Validation: '<span class=\'icon\' data-lucide=\'check-circle-2\'></span>', Qualification: '<span class=\'icon\' data-lucide=\'microscope\'></span>',
+    Protocols: '<span class=\'icon\' data-lucide=\'test-tube-2\'></span>', Reports: '<span class=\'icon\' data-lucide=\'bar-chart-3\'></span>', Regulations: '<span class=\'icon\' data-lucide=\'scale\'></span>',
+    'Vendor Documents': '<span class=\'icon\' data-lucide=\'factory\'></span>', Others: '<span class=\'icon\' data-lucide=\'folder\'></span>',
   };
 
   const state = {
@@ -70,7 +70,7 @@
 
     let html = `
       <div class="kb-folder-item ${isAll ? 'active' : ''}" onclick="kbSetFolder(null)">
-        <span class="kb-folder-icon">📚</span>
+        <span class="kb-folder-icon"><span class=\'icon\' data-lucide=\'book-open\'></span></span>
         <span class="kb-folder-name">All Documents</span>
         <span class="kb-folder-count">${total || ''}</span>
       </div>`;
@@ -80,7 +80,7 @@
       const active = state.activeFolder === folder;
       html += `
         <div class="kb-folder-item ${active ? 'active' : ''}" onclick="kbSetFolder('${folder}')">
-          <span class="kb-folder-icon">${FOLDER_ICONS[folder] || '📁'}</span>
+          <span class="kb-folder-icon">${FOLDER_ICONS[folder] || '<span class=\'icon\' data-lucide=\'folder\'></span>'}</span>
           <span class="kb-folder-name">${folder}</span>
           ${count ? `<span class="kb-folder-count">${count}</span>` : ''}
         </div>`;
@@ -112,22 +112,22 @@
       const selected = state.selectedDoc && state.selectedDoc.id === doc.id;
       return `
         <div class="kb-doc-row ${selected ? 'selected' : ''}" onclick="kbSelectDoc(${doc.id})">
-          <div class="kb-doc-type-icon">${FILE_ICONS[doc.file_type] || '📄'}</div>
+          <div class="kb-doc-type-icon">${FILE_ICONS[doc.file_type] || '<span class=\'icon\' data-lucide=\'file-text\'></span>'}</div>
           <div class="kb-doc-info">
             <div class="kb-doc-name">${escHtml(doc.title)}</div>
             <div class="kb-doc-meta-row">
-              <span class="kb-folder-pill">${FOLDER_ICONS[doc.folder] || '📁'} ${doc.folder}</span>
+              <span class="kb-folder-pill">${FOLDER_ICONS[doc.folder] || '<span class=\'icon\' data-lucide=\'folder\'></span>'} ${doc.folder}</span>
               <span class="kb-version-pill">v${doc.doc_version || '1.0'}</span>
               <span class="kb-type-pill">${doc.file_type.toUpperCase()}</span>
-              ${doc.effective_date ? `<span class="kb-date-pill">📅 Eff: ${doc.effective_date}</span>` : ''}
-              ${doc.review_date ? `<span class="kb-date-pill kb-review-pill">🔄 Rev: ${doc.review_date}</span>` : ''}
+              ${doc.effective_date ? `<span class="kb-date-pill"><span class=\'icon\' data-lucide=\'calendar\'></span> Eff: ${doc.effective_date}</span>` : ''}
+              ${doc.review_date ? `<span class="kb-date-pill kb-review-pill"><span class=\'icon\' data-lucide=\'repeat\'></span> Rev: ${doc.review_date}</span>` : ''}
               ${renderExtractionBadge(doc)}
             </div>
             ${tagsHtml ? `<div class="kb-tags-row">${tagsHtml}</div>` : ''}
           </div>
           <div class="kb-doc-row-actions">
-            <button class="kb-row-btn" onclick="event.stopPropagation();kbViewDoc(${doc.id})" title="View">👁</button>
-            <button class="kb-row-btn kb-row-btn-del" onclick="event.stopPropagation();kbDeleteDoc(${doc.id})" title="Delete">🗑</button>
+ <button class="kb-row-btn"onclick="event.stopPropagation();kbViewDoc(${doc.id})"title="View"></button>
+ <button class="kb-row-btn kb-row-btn-del"onclick="event.stopPropagation();kbDeleteDoc(${doc.id})"title="Delete"></button>
           </div>
         </div>`;
     }).join('');
@@ -218,29 +218,29 @@
     panel.innerHTML = `
       <div class="kb-detail-header">
         <div class="kb-detail-title-wrap">
-          <span class="kb-detail-file-icon">${FILE_ICONS[doc.file_type] || '📄'}</span>
+          <span class="kb-detail-file-icon">${FILE_ICONS[doc.file_type] || '<span class=\'icon\' data-lucide=\'file-text\'></span>'}</span>
           <div>
             <div class="kb-detail-title">${escHtml(doc.title)}</div>
             <div class="kb-detail-fname">${escHtml(doc.original_name)}</div>
           </div>
         </div>
-        <button class="kb-close-detail-btn" onclick="kbCloseDetail()" title="Close">✕</button>
+ <button class="kb-close-detail-btn"onclick="kbCloseDetail()"title="Close"></button>
       </div>
 
       <div class="kb-detail-toolbar">
-        <button class="kb-dtool-btn kb-dtool-view" onclick="kbViewDoc(${doc.id})">👁 View</button>
-        <button class="kb-dtool-btn kb-dtool-dl"   onclick="kbDownloadDoc(${doc.id})">⬇ Download</button>
+        <button class="kb-dtool-btn kb-dtool-view" onclick="kbViewDoc(${doc.id})"><span class=\'icon\' data-lucide=\'eye\'></span> View</button>
+        <button class="kb-dtool-btn kb-dtool-dl"   onclick="kbDownloadDoc(${doc.id})"><span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span> Download</button>
         ${EXTRACTION_FAILED_STATUSES.has(doc.extraction_status)
-          ? `<button class="kb-dtool-btn kb-dtool-retry" onclick="kbRetryExtraction(${doc.id})">🔁 Retry Extraction</button>`
+          ? `<button class="kb-dtool-btn kb-dtool-retry" onclick="kbRetryExtraction(${doc.id})"><span class=\'icon\' data-lucide=\'repeat\'></span> Retry Extraction</button>`
           : ''
         }
         <div class="kb-dtool-sep"></div>
-        <button class="kb-dtool-btn kb-dtool-del"  onclick="kbDeleteDoc(${doc.id})">🗑 Delete</button>
+        <button class="kb-dtool-btn kb-dtool-del"  onclick="kbDeleteDoc(${doc.id})"><span class=\'icon\' data-lucide=\'trash-2\'></span> Delete</button>
       </div>
 
       <div class="kb-meta-section">
         <div class="kb-meta-grid">
-          <div class="kb-meta-row"><span class="kb-meta-label">Folder</span><span class="kb-meta-val">${FOLDER_ICONS[doc.folder] || '📁'} ${doc.folder}</span></div>
+          <div class="kb-meta-row"><span class="kb-meta-label">Folder</span><span class="kb-meta-val">${FOLDER_ICONS[doc.folder] || '<span class=\'icon\' data-lucide=\'folder\'></span>'} ${doc.folder}</span></div>
           <div class="kb-meta-row"><span class="kb-meta-label">Version</span><span class="kb-meta-val">v${doc.doc_version || '1.0'}</span></div>
           <div class="kb-meta-row"><span class="kb-meta-label">File Type</span><span class="kb-meta-val">${doc.file_type.toUpperCase()}</span></div>
           <div class="kb-meta-row"><span class="kb-meta-label">File Size</span><span class="kb-meta-val">${formatBytes(doc.file_size)}</span></div>
@@ -358,7 +358,7 @@
       const resp = await fetch('/kb/documents', { method: 'POST', body: fd });
       const data = await resp.json();
       if (resp.ok) {
-        showUploadStatus('success', `✓ "${data.title}" added — extracting text in the background…`);
+        showUploadStatus('success', `<span class=\'icon\' data-lucide=\'check\'></span> "${data.title}" added — extracting text in the background…`);
         setTimeout(() => { closeKBUploadModal(); loadKBDocuments(); }, 1200);
         kbPollExtraction(data.id);
       } else {

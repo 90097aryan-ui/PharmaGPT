@@ -21,30 +21,30 @@ const RiskState = {
 
 const ASSESSMENT_TYPES = {
   validation: {
-    icon: "🔬", label: "Validation Risk",
+    icon: "<span class=\'icon\' data-lucide=\'microscope\'></span>", label: "Validation Risk",
     subtypes: [
       "Equipment Qualification", "Utility Qualification", "Cleaning Validation",
       "Process Validation", "Computer System Validation (CSV)",
     ],
   },
   manufacturing: {
-    icon: "🏭", label: "Manufacturing Risk",
+    icon: "<span class=\'icon\' data-lucide=\'factory\'></span>", label: "Manufacturing Risk",
     subtypes: ["Process", "Packaging", "Line Clearance", "Material Handling", "Batch Manufacturing"],
   },
   engineering: {
-    icon: "⚙️", label: "Engineering Risk",
+    icon: "<span class=\'icon\' data-lucide=\'settings\'></span>", label: "Engineering Risk",
     subtypes: ["HVAC", "Water System", "Compressed Air", "Steam", "Facility Modification"],
   },
   quality: {
-    icon: "📋", label: "Quality Risk",
+    icon: "<span class=\'icon\' data-lucide=\'clipboard-list\'></span>", label: "Quality Risk",
     subtypes: ["Deviation", "CAPA", "Change Control", "OOS", "OOT", "Complaint Investigation", "Audit Observation"],
   },
   warehouse: {
-    icon: "🏪", label: "Warehouse Risk",
+    icon: "<span class=\'icon\' data-lucide=\'store\'></span>", label: "Warehouse Risk",
     subtypes: ["Storage", "Dispensing", "Sampling", "Distribution"],
   },
   misc: {
-    icon: "📝", label: "Miscellaneous Risk",
+    icon: "<span class=\'icon\' data-lucide=\'pencil-line\'></span>", label: "Miscellaneous Risk",
     subtypes: ["General Activity", "Custom"],
   },
 };
@@ -60,21 +60,21 @@ const METHODOLOGIES = [
 ];
 
 const TEMPLATES = [
-  { id: "eq_autoclave",   icon: "♨️",  name: "Autoclave Qualification",    type: "validation", sub: "Equipment Qualification", method: "FMEA",    dept: "Engineering" },
-  { id: "eq_hvac",        icon: "🌬️", name: "HVAC Risk Assessment",       type: "engineering",sub: "HVAC",                   method: "FMEA",    dept: "Engineering" },
-  { id: "eq_water",       icon: "💧",  name: "Water System Risk",          type: "engineering",sub: "Water System",            method: "FMEA",    dept: "Engineering" },
-  { id: "eq_filling",     icon: "🍶",  name: "Bottle Filling Line",        type: "manufacturing",sub: "Packaging",             method: "HACCP",   dept: "Manufacturing" },
-  { id: "eq_blister",     icon: "💊",  name: "Blister Packing FMEA",      type: "manufacturing",sub: "Packaging",             method: "FMEA",    dept: "Manufacturing" },
-  { id: "eq_compression", icon: "🔩",  name: "Tablet Compression",        type: "manufacturing",sub: "Process",               method: "FMEA",    dept: "Manufacturing" },
-  { id: "eq_coating",     icon: "🎨",  name: "Tablet Coating Process",    type: "manufacturing",sub: "Process",               method: "FMEA",    dept: "Manufacturing" },
-  { id: "csv_risk",       icon: "💻",  name: "CSV Risk Assessment",        type: "validation", sub: "Computer System Validation (CSV)", method: "FMEA", dept: "IT/QA" },
-  { id: "cleaning_val",   icon: "🧼",  name: "Cleaning Validation Risk",  type: "validation", sub: "Cleaning Validation",    method: "FMEA",    dept: "Manufacturing" },
-  { id: "deviation",      icon: "⚡",  name: "Deviation Risk Assessment", type: "quality",    sub: "Deviation",              method: "Risk Matrix", dept: "Quality" },
-  { id: "capa",           icon: "🔄",  name: "CAPA Risk Assessment",      type: "quality",    sub: "CAPA",                   method: "Risk Matrix", dept: "Quality" },
-  { id: "change_ctrl",    icon: "🔀",  name: "Change Control Risk",       type: "quality",    sub: "Change Control",         method: "Risk Matrix", dept: "Quality" },
-  { id: "warehouse",      icon: "📦",  name: "Warehouse Risk Assessment", type: "warehouse",  sub: "Storage",                method: "FMEA",    dept: "Warehouse" },
-  { id: "process_val",    icon: "⚗️",  name: "Process Validation Risk",   type: "validation", sub: "Process Validation",     method: "FMEA",    dept: "Manufacturing" },
-  { id: "general",        icon: "📄",  name: "General Risk Assessment",   type: "misc",       sub: "General Activity",       method: "Custom",  dept: "" },
+  { id: "eq_autoclave",   icon: "<span class=\'icon\' data-lucide=\'flame\'></span>",  name: "Autoclave Qualification",    type: "validation", sub: "Equipment Qualification", method: "FMEA",    dept: "Engineering" },
+  { id: "eq_hvac",        icon: "<span class=\'icon\' data-lucide=\'wind\'></span>", name: "HVAC Risk Assessment",       type: "engineering",sub: "HVAC",                   method: "FMEA",    dept: "Engineering" },
+  { id: "eq_water",       icon: "<span class=\'icon\' data-lucide=\'droplet\'></span>",  name: "Water System Risk",          type: "engineering",sub: "Water System",            method: "FMEA",    dept: "Engineering" },
+  { id: "eq_filling",     icon: "<span class=\"icon\" data-lucide=\"package\"></span>",  name: "Bottle Filling Line",        type: "manufacturing",sub: "Packaging",             method: "HACCP",   dept: "Manufacturing" },
+  { id: "eq_blister",     icon: "<span class=\'icon\' data-lucide=\'pill\'></span>",  name: "Blister Packing FMEA",      type: "manufacturing",sub: "Packaging",             method: "FMEA",    dept: "Manufacturing" },
+  { id: "eq_compression", icon: "<span class=\'icon\' data-lucide=\'wrench\'></span>",  name: "Tablet Compression",        type: "manufacturing",sub: "Process",               method: "FMEA",    dept: "Manufacturing" },
+  { id: "eq_coating",     icon: "<span class=\'icon\' data-lucide=\'palette\'></span>",  name: "Tablet Coating Process",    type: "manufacturing",sub: "Process",               method: "FMEA",    dept: "Manufacturing" },
+  { id: "csv_risk",       icon: "<span class=\'icon\' data-lucide=\'laptop\'></span>",  name: "CSV Risk Assessment",        type: "validation", sub: "Computer System Validation (CSV)", method: "FMEA", dept: "IT/QA" },
+  { id: "cleaning_val",   icon: "<span class=\'icon\' data-lucide=\'droplet\'></span>",  name: "Cleaning Validation Risk",  type: "validation", sub: "Cleaning Validation",    method: "FMEA",    dept: "Manufacturing" },
+  { id: "deviation",      icon: "<span class=\'icon\' data-lucide=\'zap\'></span>",  name: "Deviation Risk Assessment", type: "quality",    sub: "Deviation",              method: "Risk Matrix", dept: "Quality" },
+  { id: "capa",           icon: "<span class=\'icon\' data-lucide=\'repeat\'></span>",  name: "CAPA Risk Assessment",      type: "quality",    sub: "CAPA",                   method: "Risk Matrix", dept: "Quality" },
+  { id: "change_ctrl",    icon: "<span class=\'icon\' data-lucide=\'shuffle\'></span>",  name: "Change Control Risk",       type: "quality",    sub: "Change Control",         method: "Risk Matrix", dept: "Quality" },
+  { id: "warehouse",      icon: "<span class=\'icon\' data-lucide=\'package\'></span>",  name: "Warehouse Risk Assessment", type: "warehouse",  sub: "Storage",                method: "FMEA",    dept: "Warehouse" },
+  { id: "process_val",    icon: "<span class=\'icon\' data-lucide=\'flask-conical\'></span>",  name: "Process Validation Risk",   type: "validation", sub: "Process Validation",     method: "FMEA",    dept: "Manufacturing" },
+  { id: "general",        icon: "<span class=\'icon\' data-lucide=\'file-text\'></span>",  name: "General Risk Assessment",   type: "misc",       sub: "General Activity",       method: "Custom",  dept: "" },
 ];
 
 const LIBRARY_CATEGORIES = [
@@ -134,14 +134,14 @@ function renderDashboard(stats) {
 
   body.innerHTML = `
     <div class="risk-stats-grid">
-      ${statCard("📊", stats.total || 0, "Total Assessments", "info")}
-      ${statCard("📝", stats.draft || 0, "Draft", "info")}
-      ${statCard("🔍", pending_approval, "Pending Approval", "medium")}
-      ${statCard("✅", stats.approved || 0, "Approved", "low")}
-      ${statCard("🔴", stats.critical || 0, "Critical Priority", "critical")}
-      ${statCard("🟠", stats.high || 0, "High Priority", "high")}
-      ${statCard("⚠️", stats.high_rpn || 0, "High RPN Items", "high")}
-      ${statCard("🔧", stats.pending_actions || 0, "Pending Actions", "medium")}
+      ${statCard("<span class=\'icon\' data-lucide=\'bar-chart-3\'></span>", stats.total || 0, "Total Assessments", "info")}
+      ${statCard("<span class=\'icon\' data-lucide=\'pencil-line\'></span>", stats.draft || 0, "Draft", "info")}
+      ${statCard("<span class=\'icon\' data-lucide=\'search\'></span>", pending_approval, "Pending Approval", "medium")}
+      ${statCard("<span class=\'icon\' data-lucide=\'check-circle-2\'></span>", stats.approved || 0, "Approved", "low")}
+      ${statCard("<span class=\'icon\' data-lucide=\'circle\'></span>", stats.critical || 0, "Critical Priority", "critical")}
+      ${statCard("<span class=\'icon\' data-lucide=\'circle\'></span>", stats.high || 0, "High Priority", "high")}
+      ${statCard("<span class=\'icon\' data-lucide=\'alert-triangle\'></span>", stats.high_rpn || 0, "High RPN Items", "high")}
+      ${statCard("<span class=\'icon\' data-lucide=\'wrench\'></span>", stats.pending_actions || 0, "Pending Actions", "medium")}
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px">
@@ -150,10 +150,10 @@ function renderDashboard(stats) {
     </div>
 
     <div class="risk-section-card">
-      <div class="risk-section-title">🕐 Recent Assessments</div>
+      <div class="risk-section-title"><span class=\'icon\' data-lucide=\'clock\'></span> Recent Assessments</div>
       <div class="risk-section-body">
         ${(stats.recent || []).length === 0 ?
-          `<div class="risk-empty"><div class="risk-empty-icon">📋</div><h3>No assessments yet</h3><p>Create your first risk assessment to get started.</p></div>` :
+          `<div class="risk-empty"><div class="risk-empty-icon"><span class=\'icon\' data-lucide=\'clipboard-list\'></span></div><h3>No assessments yet</h3><p>Create your first risk assessment to get started.</p></div>` :
           `<div class="assessment-list">${(stats.recent || []).map(a => assessmentCardHtml(a)).join("")}</div>`
         }
       </div>
@@ -187,15 +187,15 @@ function renderHeatMap() {
     }
   }
   return `<div class="risk-section-card">
-    <div class="risk-section-title">🌡️ Risk Heat Map</div>
+    <div class="risk-section-title"><span class=\'icon\' data-lucide=\'thermometer\'></span> Risk Heat Map</div>
     <div class="risk-section-body">
-      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Probability (→) × Impact (↑)</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Probability (<span class=\'icon\' data-lucide=\'arrow-right\'></span>) × Impact (<span class=\'icon\' data-lucide=\'arrow-up\'></span>)</div>
       <div class="risk-heat-map">${cells.join("")}</div>
       <div style="display:flex;gap:12px;margin-top:10px;font-size:11px;flex-wrap:wrap">
-        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#C8E6C9;display:inline-block"></span>Low (1–4)</span>
-        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#FFF9C4;display:inline-block"></span>Medium (5–9)</span>
-        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#FFE0B2;display:inline-block"></span>High (10–14)</span>
-        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#FFCDD2;display:inline-block"></span>Critical (15–25)</span>
+        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#E8F2EA;display:inline-block"></span>Low (1–4)</span>
+        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#FFF4E5;display:inline-block"></span>Medium (5–9)</span>
+        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#FFF4E5;display:inline-block"></span>High (10–14)</span>
+        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#F2D8D6;display:inline-block"></span>Critical (15–25)</span>
       </div>
     </div>
   </div>`;
@@ -204,11 +204,11 @@ function renderHeatMap() {
 function renderTypeBreakdown(byType) {
   const entries = Object.entries(byType);
   const total = entries.reduce((s, [, c]) => s + c, 0) || 1;
-  const colors = { validation: "#1565C0", manufacturing: "#E65100", engineering: "#6A1B9A",
-                   quality: "#00695C", warehouse: "#1565C0", misc: "#546E7A" };
+  const colors = { validation: "#8A6B52", manufacturing: "#A97D2E", engineering: "#66615B",
+                   quality: "#5F8A61", warehouse: "#8A6B52", misc: "#66615B" };
   const rows = entries.map(([type, count]) => {
     const pct = Math.round((count / total) * 100);
-    const color = colors[type] || "#1565C0";
+    const color = colors[type] || "#8A6B52";
     return `<div style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
         <span style="text-transform:capitalize;font-weight:600">${type}</span>
@@ -220,7 +220,7 @@ function renderTypeBreakdown(byType) {
     </div>`;
   });
   return `<div class="risk-section-card">
-    <div class="risk-section-title">📊 Assessments by Type</div>
+    <div class="risk-section-title"><span class=\'icon\' data-lucide=\'bar-chart-3\'></span> Assessments by Type</div>
     <div class="risk-section-body">
       ${rows.length ? rows.join("") : `<div class="risk-empty"><p>No data yet.</p></div>`}
     </div>
@@ -230,7 +230,7 @@ function renderTypeBreakdown(byType) {
 function assessmentCardHtml(a) {
   const priorityCls = (a.priority || "Medium").toLowerCase();
   const statusCls = (a.status || "Draft").toLowerCase().replace(" ", "-");
-  const typeInfo = ASSESSMENT_TYPES[a.assessment_type] || { icon: "📄" };
+  const typeInfo = ASSESSMENT_TYPES[a.assessment_type] || { icon: "<span class=\'icon\' data-lucide=\'file-text\'></span>" };
   return `<div class="assessment-card" data-aid="${a.id}">
     <div class="assessment-card-icon">${typeInfo.icon}</div>
     <div class="assessment-card-body">
@@ -273,7 +273,7 @@ function renderAssessmentList(assessments) {
   const body = document.getElementById("risk-list-body");
   if (!assessments.length) {
     body.innerHTML = `<div class="risk-empty">
-      <div class="risk-empty-icon">📋</div>
+      <div class="risk-empty-icon"><span class=\'icon\' data-lucide=\'clipboard-list\'></span></div>
       <h3>No assessments found</h3>
       <p>Create your first risk assessment using the wizard.</p>
       <button class="btn-risk-primary" style="margin-top:16px" onclick="startNewWizard()">＋ New Assessment</button>
@@ -318,11 +318,11 @@ function startNewWizard() {
   if (listView) listView.style.display = "none";
   if (wizardView) wizardView.style.display = "block";
 
-  renderWizardStep(1);
+  riskRenderWizardStep(1);
 }
 window.startNewWizard = startNewWizard;
 
-function renderWizardStep(step) {
+function riskRenderWizardStep(step) {
   RiskState.wizardStep = step;
   updateWizardStepIndicators(step);
 
@@ -373,7 +373,7 @@ function renderSubtypeSelector(key) {
     <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.4px">Select Sub-type</div>
     <div style="display:flex;flex-wrap:wrap;gap:8px">
       ${info.subtypes.map(s => `
-        <button class="btn-risk-secondary" style="font-size:12px;padding:6px 14px;${RiskState.selectedSubtype === s ? "border-color:var(--risk-accent);background:#EEF4FD;color:var(--risk-accent)" : ""}"
+        <button class="btn-risk-secondary" style="font-size:12px;padding:6px 14px;${RiskState.selectedSubtype === s ? "border-color:var(--risk-accent);background:#F1ECE6;color:var(--risk-accent)" : ""}"
                 onclick="selectSubtype('${s.replace(/'/g,"\\'")}')">
           ${s}
         </button>
@@ -408,19 +408,19 @@ window.wizardNext = function () {
   const step = RiskState.wizardStep;
   if (step === 1) {
     if (!RiskState.selectedType) { alert("Please select a risk type."); return; }
-    renderWizardStep(2);
+    riskRenderWizardStep(2);
   } else if (step === 2) {
-    renderWizardStep(3);
+    riskRenderWizardStep(3);
   } else if (step === 3) {
     if (!RiskState.selectedMethodology) { alert("Please select a methodology."); return; }
-    renderWizardStep(4);
+    riskRenderWizardStep(4);
   } else if (step === 4) {
-    renderWizardStep(5);
+    riskRenderWizardStep(5);
   }
 };
 
 window.wizardBack = function () {
-  if (RiskState.wizardStep > 1) renderWizardStep(RiskState.wizardStep - 1);
+  if (RiskState.wizardStep > 1) riskRenderWizardStep(RiskState.wizardStep - 1);
 };
 
 window.createAndOpenAssessment = async function () {
@@ -507,7 +507,7 @@ function renderEditor(assessment, items) {
   if (!el) return;
 
   const methodology = assessment.methodology || "FMEA";
-  const typeInfo = ASSESSMENT_TYPES[assessment.assessment_type] || { icon: "📄", label: assessment.assessment_type };
+  const typeInfo = ASSESSMENT_TYPES[assessment.assessment_type] || { icon: "<span class=\'icon\' data-lucide=\'file-text\'></span>", label: assessment.assessment_type };
   const statusCls = (assessment.status || "Draft").toLowerCase().replace(" ", "-");
   const priorityCls = (assessment.priority || "Medium").toLowerCase();
 
@@ -516,40 +516,40 @@ function renderEditor(assessment, items) {
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;gap:16px;flex-wrap:wrap">
       <div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-          <button class="btn-risk-secondary" onclick="backToList()" style="padding:6px 12px;font-size:12px">← Back</button>
+          <button class="btn-risk-secondary" onclick="backToList()" style="padding:6px 12px;font-size:12px"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Back</button>
           <h2 style="font-size:18px;font-weight:800;color:var(--navy)">${typeInfo.icon} ${esc(assessment.title)}</h2>
           <span class="badge badge-${statusCls}">${assessment.status}</span>
           <span class="badge badge-${priorityCls}">${assessment.priority}</span>
         </div>
         <div style="font-size:12px;color:var(--text-muted);display:flex;gap:16px;flex-wrap:wrap">
-          <span>📋 ${esc(methodology)}</span>
-          <span>🏢 ${esc(assessment.department || "—")}</span>
-          <span>⚙️ ${esc(assessment.equipment || "—")}</span>
-          <span>📅 ${esc(assessment.assessment_date || "—")}</span>
-          <span>👤 ${esc(assessment.assessment_owner || "—")}</span>
+          <span><span class=\'icon\' data-lucide=\'clipboard-list\'></span> ${esc(methodology)}</span>
+          <span><span class=\'icon\' data-lucide=\'building-2\'></span> ${esc(assessment.department || "—")}</span>
+          <span><span class=\'icon\' data-lucide=\'settings\'></span> ${esc(assessment.equipment || "—")}</span>
+          <span><span class=\'icon\' data-lucide=\'calendar\'></span> ${esc(assessment.assessment_date || "—")}</span>
+          <span><span class=\'icon\' data-lucide=\'user\'></span> ${esc(assessment.assessment_owner || "—")}</span>
         </div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn-risk-secondary" onclick="openInfoPanel(${assessment.id})">📝 Edit Info</button>
-        <button class="btn-risk-secondary" onclick="openApprovalPanel(${assessment.id})">🔍 Review</button>
-        <button class="btn-risk-secondary" onclick="generateReport(${assessment.id})">📄 Report</button>
-        <button class="btn-risk-secondary" onclick="exportDocx(${assessment.id})">⬇️ DOCX</button>
-        <button class="btn-risk-primary"   onclick="saveItems(${assessment.id})">💾 Save</button>
+        <button class="btn-risk-secondary" onclick="openInfoPanel(${assessment.id})"><span class=\'icon\' data-lucide=\'pencil-line\'></span> Edit Info</button>
+        <button class="btn-risk-secondary" onclick="openApprovalPanel(${assessment.id})"><span class=\'icon\' data-lucide=\'search\'></span> Review</button>
+        <button class="btn-risk-secondary" onclick="generateReport(${assessment.id})"><span class=\'icon\' data-lucide=\'file-text\'></span> Report</button>
+        <button class="btn-risk-secondary" onclick="exportDocx(${assessment.id})"><span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span> DOCX</button>
+        <button class="btn-risk-primary"   onclick="saveItems(${assessment.id})"><span class=\'icon\' data-lucide=\'save\'></span> Save</button>
       </div>
     </div>
 
     <!-- AI Panel -->
     <div class="risk-ai-panel" id="risk-ai-panel-${assessment.id}">
       <div class="risk-ai-panel-header">
-        🤖 AI Risk Assistant
+        <span class=\'icon\' data-lucide=\'bot\'></span> AI Risk Assistant
         <span style="font-size:11px;font-weight:400;color:var(--text-muted)">Powered by Gemini 2.5 Flash</span>
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
         <button class="btn-risk-primary" id="btn-ai-generate-${assessment.id}" onclick="aiGenerateItems(${assessment.id})">
-          ✨ AI Generate Risk Items
+          <span class=\'icon\' data-lucide=\'sparkles\'></span> AI Generate Risk Items
         </button>
         <button class="btn-risk-secondary" onclick="aiReview(${assessment.id})">
-          🔬 AI Quality Review
+          <span class=\'icon\' data-lucide=\'microscope\'></span> AI Quality Review
         </button>
         <button class="btn-risk-secondary" onclick="addBlankRow()">
           ＋ Add Row
@@ -637,7 +637,7 @@ function fmeaRow(item, i) {
         ${["Open","In Progress","Closed"].map(v => `<option${item.status === v ? " selected" : ""}>${v}</option>`).join("")}
       </select>
     </td>
-    <td><button class="btn-risk-icon" onclick="deleteRow(this)" title="Delete row">🗑</button></td>
+ <td><button class="btn-risk-icon"onclick="deleteRow(this)"title="Delete row"></button></td>
   </tr>`;
 }
 
@@ -689,7 +689,7 @@ function haccpRow(item, i) {
         ${["Open","In Progress","Closed"].map(v => `<option${item.status === v ? " selected" : ""}>${v}</option>`).join("")}
       </select>
     </td>
-    <td><button class="btn-risk-icon" onclick="deleteRow(this)" title="Delete">🗑</button></td>
+ <td><button class="btn-risk-icon"onclick="deleteRow(this)"title="Delete"></button></td>
   </tr>`;
 }
 
@@ -764,7 +764,7 @@ function matrixRow(item, i) {
         ${["Open","In Progress","Closed"].map(v => `<option${item.status === v ? " selected" : ""}>${v}</option>`).join("")}
       </select>
     </td>
-    <td><button class="btn-risk-icon" onclick="deleteRow(this)" title="Delete">🗑</button></td>
+ <td><button class="btn-risk-icon"onclick="deleteRow(this)"title="Delete"></button></td>
   </tr>`;
 }
 
@@ -904,7 +904,7 @@ window.saveItems = async function (aid) {
     });
     const saved = await res.json();
     RiskState.currentItems = saved;
-    showToast(`✅ Saved ${saved.length} risk items`);
+ showToast(`Saved ${saved.length} risk items`);
   } catch (e) {
     alert("Error saving: " + e.message);
   }
@@ -956,7 +956,7 @@ window.aiGenerateItems = async function (aid) {
               try {
                 const event = JSON.parse(line.slice(6));
                 if (event.done) {
-                  if (statusEl) statusEl.innerHTML = `<span style="color:var(--risk-low)">✅ Generated ${event.count} risk items</span>`;
+                  if (statusEl) statusEl.innerHTML = `<span style="color:var(--risk-low)"><span class=\'icon\' data-lucide=\'check-circle-2\'></span> Generated ${event.count} risk items</span>`;
                   // Reload items
                   const iRes = await fetch(`/risk/assessments/${aid}/items`);
                   const items = await iRes.json();
@@ -972,7 +972,7 @@ window.aiGenerateItems = async function (aid) {
     } else {
       // Fallback: non-streaming response
       const data = await res.json();
-      if (statusEl) statusEl.innerHTML = `<span style="color:var(--risk-low)">✅ Generation complete</span>`;
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--risk-low)"><span class=\'icon\' data-lucide=\'check-circle-2\'></span> Generation complete</span>`;
       const iRes = await fetch(`/risk/assessments/${aid}/items`);
       const items = await iRes.json();
       RiskState.currentItems = items;
@@ -980,7 +980,7 @@ window.aiGenerateItems = async function (aid) {
       if (container) container.innerHTML = renderRiskTable(a.methodology, items, aid);
     }
   } catch (e) {
-    if (statusEl) statusEl.innerHTML = `<span style="color:var(--risk-critical)">❌ Error: ${e.message}</span>`;
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--risk-critical)"><span class=\'icon\' data-lucide=\'circle-x\'></span> Error: ${e.message}</span>`;
   } finally {
     RiskState.isGenerating = false;
     if (btn) btn.disabled = false;
@@ -1016,7 +1016,7 @@ function renderReviewResults(el, r) {
 
   el.innerHTML = `
     <div class="risk-section-card">
-      <div class="risk-section-title">🤖 AI Quality Review Results
+      <div class="risk-section-title"><span class=\'icon\' data-lucide=\'bot\'></span> AI Quality Review Results
         <span class="badge ${recBadge}" style="margin-left:auto">${r.recommendation || "Revise"}</span>
       </div>
       <div class="risk-section-body">
@@ -1027,17 +1027,17 @@ function renderReviewResults(el, r) {
           ${scoreCard(r.overall_score, "Overall Score")}
         </div>
 
-        ${reviewList("🔴 Critical Findings", r.critical_findings, "#FFEBEE", "var(--risk-critical)")}
-        ${reviewList("⚠️ Missing Risks", r.missing_risks, "#FFF3E0", "var(--risk-high)")}
-        ${reviewList("💡 Suggested Improvements", r.suggested_improvements, "#E8F5E9", "var(--risk-low)")}
+        ${reviewList("<span class='icon' data-lucide='circle'></span> Critical Findings", r.critical_findings, "#F7E8E7", "var(--risk-critical)")}
+        ${reviewList("<span class='icon' data-lucide='alert-triangle'></span> Missing Risks", r.missing_risks, "#FFF4E5", "var(--risk-high)")}
+        ${reviewList("<span class='icon' data-lucide='lightbulb'></span> Suggested Improvements", r.suggested_improvements, "#E8F2EA", "var(--risk-low)")}
 
-        ${r.reviewer_comments ? `<div style="background:#F3F6FB;border-radius:8px;padding:14px;margin-top:12px">
-          <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px">📝 AI Reviewer Comments</div>
+        ${r.reviewer_comments ? `<div style="background:#F1ECE6;border-radius:8px;padding:14px;margin-top:12px">
+          <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px"><span class=\'icon\' data-lucide=\'pencil-line\'></span> AI Reviewer Comments</div>
           <p style="font-size:13px;line-height:1.6;color:var(--text)">${esc(r.reviewer_comments)}</p>
         </div>` : ""}
 
-        ${r.final_summary ? `<div style="background:#EEF4FD;border-radius:8px;padding:14px;margin-top:12px;border-left:4px solid var(--risk-accent)">
-          <div style="font-size:12px;font-weight:700;color:var(--risk-accent);margin-bottom:6px">📋 Final Summary</div>
+        ${r.final_summary ? `<div style="background:#F1ECE6;border-radius:8px;padding:14px;margin-top:12px;border-left:4px solid var(--risk-accent)">
+          <div style="font-size:12px;font-weight:700;color:var(--risk-accent);margin-bottom:6px"><span class=\'icon\' data-lucide=\'clipboard-list\'></span> Final Summary</div>
           <p style="font-size:13px;line-height:1.6;color:var(--text)">${esc(r.final_summary)}</p>
         </div>` : ""}
       </div>
@@ -1078,10 +1078,10 @@ window.generateReport = async function (aid) {
     const data = await res.json();
     body.innerHTML = `
       <div style="display:flex;gap:12px;margin-bottom:16px">
-        <button class="btn-risk-primary" onclick="exportDocx(${aid})">⬇️ Export DOCX</button>
-        <button class="btn-risk-secondary" onclick="printReport()">🖨️ Print</button>
+        <button class="btn-risk-primary" onclick="exportDocx(${aid})"><span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span> Export DOCX</button>
+        <button class="btn-risk-secondary" onclick="printReport()"><span class=\'icon\' data-lucide=\'printer\'></span> Print</button>
       </div>
-      <div style="background:#fff;border-radius:12px;border:1px solid var(--risk-border);padding:32px;max-width:1000px;box-shadow:var(--shadow)" id="report-content">
+      <div style="background:#FFF;border-radius:12px;border:1px solid var(--risk-border);padding:32px;max-width:1000px;box-shadow:var(--shadow)" id="report-content">
         ${marked.parse ? marked.parse(data.markdown) : data.markdown}
       </div>`;
   } catch (e) {
@@ -1111,8 +1111,8 @@ window.printReport = function () {
   const win = window.open("", "_blank");
   win.document.write(`<html><head><title>Risk Assessment Report</title>
     <style>body{font-family:serif;padding:40px;max-width:900px;margin:0 auto}
-    table{border-collapse:collapse;width:100%} th,td{border:1px solid #ccc;padding:6px;font-size:11px}
-    th{background:#0A2342;color:#fff} h1,h2,h3{color:#0A2342}</style>
+    table{border-collapse:collapse;width:100%} th,td{border:1px solid #E6DED6;padding:6px;font-size:11px}
+    th{background:#5B4C43;color:#FFF} h1,h2,h3{color:#5B4C43}</style>
     </head><body>${content.innerHTML}</body></html>`);
   win.document.close();
   win.print();
@@ -1134,18 +1134,18 @@ window.openApprovalPanel = async function (aid) {
     ]);
     const assessment = await aRes.json();
     const trail = await trailRes.json();
-    renderApprovalPanel(body, assessment, trail);
+    riskRenderApprovalPanel(body, assessment, trail);
   } catch (e) {
     body.innerHTML = `<div class="risk-empty"><p>Error: ${e.message}</p></div>`;
   }
 };
 
-function renderApprovalPanel(body, a, trail) {
+function riskRenderApprovalPanel(body, a, trail) {
   const statusCls = (a.status || "Draft").toLowerCase().replace(" ", "-");
   body.innerHTML = `
     <div style="max-width:800px">
       <div class="risk-section-card" style="margin-bottom:20px">
-        <div class="risk-section-title">📋 Assessment Details</div>
+        <div class="risk-section-title"><span class=\'icon\' data-lucide=\'clipboard-list\'></span> Assessment Details</div>
         <div class="risk-section-body" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px">
           <div><strong>Title:</strong> ${esc(a.title)}</div>
           <div><strong>Status:</strong> <span class="badge badge-${statusCls}">${a.status}</span></div>
@@ -1159,7 +1159,7 @@ function renderApprovalPanel(body, a, trail) {
       </div>
 
       <div class="risk-section-card" style="margin-bottom:20px">
-        <div class="risk-section-title">🔄 Workflow Actions</div>
+        <div class="risk-section-title"><span class=\'icon\' data-lucide=\'repeat\'></span> Workflow Actions</div>
         <div class="risk-section-body">
           <div class="form-grid" style="margin-bottom:16px">
             <div class="form-field">
@@ -1194,7 +1194,7 @@ function renderApprovalPanel(body, a, trail) {
       </div>
 
       <div class="risk-section-card">
-        <div class="risk-section-title">📜 Approval Trail</div>
+        <div class="risk-section-title"><span class=\'icon\' data-lucide=\'scroll-text\'></span> Approval Trail</div>
         <div class="risk-section-body">
           ${trail.length ? `<div class="approval-timeline">${trail.map(e => approvalEntryHtml(e)).join("")}</div>` :
             `<div class="risk-empty"><p>No approval entries yet.</p></div>`}
@@ -1227,7 +1227,7 @@ window.submitApproval = async function (aid) {
       body: JSON.stringify({ action, performed_by: by, role, comments }),
     });
     if (!res.ok) throw new Error((await res.json()).error);
-    showToast(`✅ ${action} recorded`);
+ showToast(`${action} recorded`);
     openApprovalPanel(aid);
   } catch (e) {
     alert("Error: " + e.message);
@@ -1257,7 +1257,7 @@ function renderLibrary(entries) {
   const body = document.getElementById("risk-library-body");
   if (!entries.length) {
     body.innerHTML = `<div class="risk-empty">
-      <div class="risk-empty-icon">📚</div>
+      <div class="risk-empty-icon"><span class=\'icon\' data-lucide=\'book-open\'></span></div>
       <h3>Library is empty</h3>
       <p>Approve assessments to automatically populate the risk library.</p>
     </div>`;
@@ -1362,7 +1362,7 @@ window.useTemplate = async function (t) {
     const assessment = await res.json();
     RiskState.currentAssessment = assessment;
     openAssessmentEditor(assessment, []);
-    showToast(`✅ Assessment created from template: ${t.name}`);
+ showToast(`Assessment created from template: ${t.name}`);
   } catch (e) {
     alert("Error: " + e.message);
   }
@@ -1377,7 +1377,7 @@ function loadAIAssistant() {
   if (!body) return;
   body.innerHTML = `
     <div class="risk-ai-panel" style="max-width:800px">
-      <div class="risk-ai-panel-header">🤖 AI Risk Assistant</div>
+      <div class="risk-ai-panel-header"><span class=\'icon\' data-lucide=\'bot\'></span> AI Risk Assistant</div>
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
         Ask the AI Risk Assistant any question about pharmaceutical risk management,
         ICH Q9 methodology, FMEA scoring, HACCP principles, or regulatory requirements.
@@ -1413,12 +1413,12 @@ window.sendAIQuestion = async function () {
   input.value = "";
 
   msgs.insertAdjacentHTML("beforeend", `
-    <div style="background:#EEF4FD;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px">
+    <div style="background:#F1ECE6;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px">
       <strong>You:</strong> ${esc(q)}
     </div>`);
 
   const aiEl = document.createElement("div");
-  aiEl.style.cssText = "background:#F8FAFB;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px;border-left:3px solid var(--risk-accent)";
+  aiEl.style.cssText = "background:#F1ECE6;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px;border-left:3px solid var(--risk-accent)";
   aiEl.innerHTML = `<strong>AI:</strong> <span class="risk-ai-generating"><span class="spinner" style="width:14px;height:14px;border-width:1px"></span></span>`;
   msgs.appendChild(aiEl);
   msgs.scrollTop = msgs.scrollHeight;
@@ -1510,9 +1510,9 @@ function getRatingClass(rating) {
 
 function showToast(msg) {
   const toast = document.createElement("div");
-  toast.style.cssText = `position:fixed;bottom:24px;right:24px;background:var(--navy);color:#fff;
+  toast.style.cssText = `position:fixed;bottom:24px;right:24px;background:var(--navy);color:#FFF;
     padding:12px 20px;border-radius:10px;font-size:13px;z-index:9999;
-    box-shadow:0 4px 20px rgba(10,35,66,0.3);animation:fadeInUp 0.3s ease`;
+    box-shadow:0 4px 20px rgba(63,58,54,0.3);animation:fadeInUp 0.3s ease`;
   toast.textContent = msg;
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 3000);

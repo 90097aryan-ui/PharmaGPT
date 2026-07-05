@@ -11,7 +11,7 @@ async function loadInsights() {
   if (!window.activeProject) {
     panel.innerHTML = `
       <div class="insights-empty">
-        <div class="insights-empty-icon">📊</div>
+        <div class="insights-empty-icon"><span class=\'icon\' data-lucide=\'bar-chart-3\'></span></div>
         <p>Select a project to view its Document Insights.</p>
       </div>`;
     return;
@@ -38,11 +38,11 @@ function renderInsights(panel, data) {
 
   // File type breakdown badges
   const typeLabels = { pdf: "PDF", docx: "DOCX", xlsx: "XLSX", txt: "TXT" };
-  const typeColors = { pdf: "#E53935", docx: "#1565C0", xlsx: "#2E7D32", txt: "#757575" };
+  const typeColors = { pdf: "#C35F5B", docx: "#8A6B52", xlsx: "#5F8A61", txt: "#66615B" };
 
   const typeBadges = Object.entries(data.file_types || {})
     .map(([ext, cnt]) => `
-      <span class="type-badge" style="background:${typeColors[ext] || "#546E7A"}">
+      <span class="type-badge" style="background:${typeColors[ext] || "#66615B"}">
         ${typeLabels[ext] || ext.toUpperCase()} × ${cnt}
       </span>`)
     .join("");
@@ -53,7 +53,7 @@ function renderInsights(panel, data) {
 
   panel.innerHTML = `
     <div class="insights-header">
-      <h2>📊 Document Insights</h2>
+      <h2><span class=\'icon\' data-lucide=\'bar-chart-3\'></span> Document Insights</h2>
       <p class="insights-project-name">${window.activeProject.name}</p>
     </div>
 
@@ -97,7 +97,7 @@ function renderInsights(panel, data) {
     </div>
 
     <div class="insights-section">
-      <button class="btn-refresh-insights" onclick="loadInsights()">↻ Refresh</button>
+      <button class="btn-refresh-insights" onclick="loadInsights()"><span class=\'icon\' data-lucide=\'refresh-cw\'></span> Refresh</button>
     </div>
   `;
 }

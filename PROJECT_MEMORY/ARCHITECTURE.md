@@ -83,9 +83,11 @@ D:\PharmaAgent\
 │   ├── equipment/profiles/        Equipment-type reference libraries (analytical, manufacturing,
 │   │                              packaging, processing, quality_control, sterilization, testing)
 │   ├── prompts/                   Per-domain Gemini prompt templates (17 files)
-│   ├── static/css/                style.css (core, ~3,300 lines) + one CSS file per suite
+│   ├── static/css/                style.css (core, ~3,300 lines) + workspace.css (reusable
+│   │                              Enterprise Workspace shell, see §7) + one CSS file per suite
 │   │                              (risk.css, urs.css, qual.css, report.css, qms.css)
-│   ├── static/js/                 One IIFE module per feature area (18 files, see §7)
+│   ├── static/js/                 One IIFE module per feature area (19 files, see §7), plus
+│   │                              workspace.js (shared Enterprise Workspace shell helper)
 │   ├── templates/index.html       Single SPA shell — all views are JS-toggled divs
 │   └── uploads/                   {project_id}/ per-project files, kb/ Knowledge Base files
 │
@@ -206,10 +208,42 @@ both chat (`/stream`) and AI generation endpoints, with a critical implementatio
 request context is not available inside a generator function** — all `request.*` data must be
 captured in the outer function scope before `generate()` is defined.
 
-18 JS modules: `dashboard.js`, `projects.js`, `chat.js`, `documents.js`, `insights.js`,
+19 JS modules: `workspace.js` *(new, 2026-07-04 — shared Enterprise Workspace shell, see below)*,
+`dashboard.js`, `projects.js`, `chat.js`, `documents.js`, `insights.js`,
 `validation.js`, `validation_config.js`, `val_workspace.js`, `knowledge_base.js`,
 `gen_document.js`, `risk.js`, `urs.js`, `qual.js`, `report.js`, and *(uncommitted)* `qms_common.js`,
 `qms_documents.js`, `qms_deviations.js`, `qms_capa.js`.
+
+**Enterprise Workspace layout (`workspace.css` + `workspace.js`, 2026-07-04).** A reusable
+full-screen "workspace" shell for any module that walks a user through a stateful, multi-step or
+multi-tab flow — introduced during the Validation & Usability Testing Sprint and first applied to
+Generate Document (`view-gen-doc` / `gen_document.js`). The pattern:
+
+```
+<main class="ent-workspace">        (fills .app-body; replaces the Dashboard entirely, not layered on top of it)
+  .ent-ws-header                    dark bar: icon, title, "current project" / "current document" tags
+  .ent-ws-toolbar                   breadcrumb (Dashboard > Project > Module > Step) + Back to
+                                     Project / Save Draft / Cancel buttons
+  .ent-ws-progress                  optional step-progress dots
+  ...module-owned scrollable content (e.g. Generate Document's existing .gd-panel / .gd-step-content)...
+```
+
+`window.Workspace` (`workspace.js`) provides `enter()`/`exit()` (toggles `body.ent-ws-active`,
+which hides the global top `<header>` so only the sidebar remains while a workspace is open),
+`renderBreadcrumb()`, `renderProgress()`, and `confirmDialog()` (a styled Yes/No modal reusing the
+existing `.modal`/`.btn-primary`/`.btn-secondary`/`.btn-danger` tokens instead of a native
+`confirm()`). See [DECISIONS.md](DECISIONS.md) DEC-017 for the full root-cause writeup — the
+motivating bug was a misplaced `.app-body` closing `</div>` that had, since the 2026-06-30 Risk/
+URS/Qual/Report commit, put every view after the old Validation Document Generator view outside
+the sidebar-flex layout entirely (fixed as part of the same change).
+
+**Adoption contract for future modules:** wrap the module's view in `<main class="ent-workspace">`
+with `.ent-ws-header`/`.ent-ws-toolbar`/`.ent-ws-progress` rows, call `Workspace.enter()` when the
+view opens and `Workspace.exit()` when leaving it, and use `Workspace.confirmDialog()` for any
+"unsaved changes" / "discard changes" prompts rather than inventing a new header or modal. Risk,
+URS, Qualification, Validation Report, and future QMS Phase 2/3 modules (Change Control,
+Non-Conformance, OOS/OOT, Audit, Supplier Quality, Training, Complaint Management) are expected to
+adopt this same shell once their sidebar navigation is wired up, instead of each building its own.
 
 ---
 

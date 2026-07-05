@@ -1,0 +1,143 @@
+/* ══════════════════════════════════════════════════════════════════════════════
+   ENTERPRISE WORKSPACE — reusable layout shell
+   ──────────────────────────────────────────────────────────────────────────────
+   Standard full-screen "workspace" template for any module that walks a user
+   through a stateful, multi-step flow. Generate Document is the first
+   implementation; Risk / URS / Qualification / Validation Report / QMS Change
+   Control / CAPA / Deviation / NCR / OOS-OOT are expected to reuse it rather
+   than inventing their own header/toolbar/progress markup.
+
+   A workspace is a `<main class="ent-workspace">` view (same sibling-of-
+   `.sidebar` pattern as every other view inside `.app-body`) built from three
+   stacked shell rows plus a module-owned scrollable body:
+
+     .ent-workspace
+       .ent-ws-header     dark bar: icon, title, current-project/-document tags
+       .ent-ws-toolbar    breadcrumb + Back to Project / Save Draft / Cancel
+       .ent-ws-progress   step dots (optional — omit for non-wizard modules)
+       ...module-owned scrollable content (e.g. .gd-panel / .gd-step-content)...
+
+   While a workspace is active, `body.ent-ws-active` hides the global top
+   header (brand bar + Clear Chat) so the workspace reads as its own screen
+   instead of a panel floating inside the Dashboard — only the sidebar stays
+   for navigation. See workspace.js for the JS half of this contract
+   (Workspace.enter/exit, renderBreadcrumb, renderProgress, confirmDialog).
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+body.ent-ws-active > header { display: none; }
+
+.ent-workspace {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* ── Header row: icon + title + current project/document tags ──────────────── */
+.ent-ws-header {
+  background: var(--sidebar-bg);
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  gap: 16px;
+}
+.ent-ws-header-left { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.ent-ws-icon         { width: 24px; height: 24px; color: rgba(255,255,255,0.9); flex-shrink: 0; }
+.ent-ws-actions .icon { width: 14px; height: 14px; }
+.ent-ws-title        { font-size: 18px; font-weight: 700; color: #FFF; margin: 0; }
+.ent-ws-sub          { font-size: 12px; color: rgba(255,255,255,0.65); margin: 2px 0 0; }
+
+.ent-ws-tags {
+  display: flex; align-items: center; gap: 8px;
+  flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end;
+}
+.ent-ws-tag {
+  font-size: 11px; font-weight: 600; padding: 5px 12px;
+  background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.85);
+  border-radius: 20px; border: 1px solid rgba(255,255,255,0.18);
+  white-space: nowrap;
+}
+.ent-ws-tag.is-empty {
+  background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.45);
+  border-color: rgba(255,255,255,0.08);
+}
+
+/* ── Toolbar row: breadcrumb + Back to Project / Save Draft / Cancel ───────── */
+.ent-ws-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 24px; background: #FFF; border-bottom: 1px solid var(--border);
+  flex-shrink: 0; gap: 12px; flex-wrap: wrap;
+}
+.ent-ws-breadcrumb {
+  font-size: 11.5px; color: var(--text-muted); font-weight: 500;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.ent-ws-crumb-sep     { color: var(--border); }
+.ent-ws-crumb-current { color: var(--navy); font-weight: 700; }
+
+.ent-ws-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.ent-ws-btn {
+  background: #FFF; color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 14px;
+  font-size: 11.5px; font-weight: 500; cursor: pointer; transition: background 0.12s;
+  font-family: inherit; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.ent-ws-btn:hover { background: var(--bg); }
+.ent-ws-btn.ent-ws-btn-danger { color: #A8544F; border-color: rgba(168,69,63,0.25); }
+.ent-ws-btn.ent-ws-btn-danger:hover { background: rgba(168,69,63,0.06); }
+
+/* ── Progress row: reusable step dots (optional per module) ────────────────── */
+.ent-ws-progress {
+  display: flex; align-items: center; padding: 14px 32px;
+  background: #FFF; border-bottom: 1.5px solid var(--border);
+  flex-shrink: 0; gap: 4px;
+}
+.ent-ws-step-dot {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--border); border: 2.5px solid var(--border);
+  flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: #FFF;
+  transition: background 0.25s, border-color 0.25s;
+}
+.ent-ws-step-dot.active { background: var(--blue); border-color: var(--blue); }
+.ent-ws-step-dot.done   { background: var(--success); border-color: var(--success); font-size: 13px; }
+.ent-ws-step-line {
+  flex: 1; height: 2.5px; background: var(--border);
+  min-width: 12px; transition: background 0.25s;
+}
+.ent-ws-step-line.done { background: var(--success); }
+.ent-ws-step-label {
+  font-size: 10px; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.3px;
+  white-space: nowrap; margin: 0 4px;
+}
+.ent-ws-step-label.active { color: var(--blue); }
+.ent-ws-step-label.done   { color: var(--success); }
+
+/* ── Scrollable body + centered content column (for non-wizard modules) ────── */
+.ent-ws-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.ent-ws-content {
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+@media (max-width: 900px) {
+  .ent-ws-header  { flex-wrap: wrap; }
+  .ent-ws-toolbar { flex-direction: column; align-items: flex-start; }
+  .ent-ws-actions { width: 100%; justify-content: flex-end; }
+}

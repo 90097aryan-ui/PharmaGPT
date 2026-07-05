@@ -6,6 +6,350 @@
 
 ---
 
+## [Unreleased] — Pre-Deployment UI Audit
+
+**Sprint Name:** Pre-Deployment UI Audit
+**Status:** Complete in the working tree, browser-verified, **not yet committed to git**.
+
+**Summary:** Full navigation audit of every accessible module, wizard, dialog, modal, dashboard,
+and workspace to verify deployment-readiness of the v3.0 design system refinement. Completed the
+icon sweep DEC-019 left unfinished and found/fixed four genuine pre-existing/in-progress defects
+that a hex/emoji-literal audit alone could not have caught. See [DECISIONS.md](DECISIONS.md)
+DEC-020 for full detail. No backend, API, database, route, or business-logic changes.
+
+**Modules Touched**
+- `pharmagpt/static/js/risk.js`, `urs.js`, `qual.js`, `report.js`, `knowledge_base.js`,
+  `gen_document.js`, `validation.js`, `validation_config.js`, `val_workspace.js`, `documents.js`,
+  `qms_deviations.js`, `qms_capa.js`, `qms_documents.js`, `qms_common.js`, `workspace.js`,
+  `projects.js` — completed the Lucide icon sweep (484 emoji → icons or removed from plain-text
+  contexts).
+- `pharmagpt/templates/index.html` — remaining Risk/URS/Qualification/Validation Report view-header
+  emoji converted; send-button and sidebar-collapse-chevron Unicode glyphs converted to Lucide;
+  fixed an HTML-vs-JS quote-escaping regression introduced mid-sweep (see Bug Fixes).
+- `pharmagpt/static/js/risk.js` — renamed `renderWizardStep`→`riskRenderWizardStep` and
+  `renderApprovalPanel`→`riskRenderApprovalPanel` (7 + 2 call sites) to resolve a global-scope
+  name collision with `urs.js`.
+- `pharmagpt/static/css/urs.css` — added missing `flex-direction: column; align-items: center` to
+  `.urs-empty`.
+- `pharmagpt/static/css/report.css` — property-aware light-theme conversion of the entire content
+  area (~45+ declarations: stat cards, panels, tables, badges, forms, section editor, AI review,
+  traceability matrix, approval timeline, toasts); added `flex: 1; width: 100%` to
+  `.report-container`; fixed `background: var(--bg-primary)` (an undefined CSS variable) to
+  `var(--bg)`.
+- `pharmagpt/static/js/report.js` — same light-theme conversion applied to 28 matching inline
+  `style="..."` occurrences.
+- `pharmagpt/static/js/risk.js`, `validation.js` — fixed one `th{background:...;color:#FFF}` each
+  in their print/export `<style>` templates (`window.printReport`, PDF export) where the automated
+  sweep had wrongly lightened a header background that's supposed to stay dark (white text needs a
+  dark fill) — restored to a solid dark header, consistent with the print-document convention.
+- `pharmagpt/templates/index.html` — three inline hex colours (`#475569`/`#64748b`/`#f1f5f9`) in
+  the Validation Report Suite's static markup, left over from before any redesign pass, replaced
+  with the appropriate `var(--text-muted)`/`var(--navy)` tokens.
+
+**Bug Fixes**
+- **Risk Management Suite's "New Assessment" wizard and Approval panel were silently non-functional**
+  — global function-name collision between `risk.js` and `urs.js` (`renderWizardStep`/
+  `renderApprovalPanel`); URS's versions silently won since it loads second. Pre-existing, not
+  introduced by DEC-018/DEC-019; never caught because Risk's sidebar nav is unwired.
+- **URS empty-state layout** — `.urs-empty` rendered its icon/title/subtitle/button in a row instead
+  of stacked and centered, because `urs.js` sets `display: flex` via inline style and the CSS class
+  never declared `flex-direction: column`.
+- **Validation Report Management Suite rendered in a pre-DEC-018 dark theme at ~70% of the intended
+  width** — its entire content-area component set had never actually been visually verified through
+  two prior colour-sweep passes (both correctly translated hex *values* without detecting the
+  underlying dark-card *role* was wrong for a light theme), compounded by a missing `flex: 1` on
+  `.report-container`.
+- **Self-inflicted-and-self-caught regression: `MutationObserver` infinite loop.** During the icon
+  sweep's JS-string-escaping fix, an earlier attempt used backslash-escaped single quotes
+  (`\'icon\'`) inside `templates/index.html`'s *plain HTML* (not JavaScript), where `\'` is not a
+  recognized escape and corrupts the `class`/`data-lucide` attribute values into literal garbage
+  text. Caught via live DOM inspection before being considered part of this pass's final state;
+  fixed by stripping the erroneous backslashes (396 occurrences) since that file's icon insertions
+  are all in plain HTML, not JS strings.
+- **Self-inflicted-and-self-caught regression: JS syntax errors from quote conflicts.** The initial
+  icon-conversion script inserted double-quoted HTML attributes into JS strings that were themselves
+  double-quoted (e.g. `icon: "<span class="icon"...`), a syntax error. Caught via `node --check` on
+  every touched `.js` file (and every inline `<script>` block extracted from `index.html`); fixed
+  with backslash-escaped single quotes, which are valid inside single-quoted, double-quoted, and
+  template-literal JS strings alike.
+
+**Database Changes**
+- None.
+
+**API Changes**
+- None.
+
+**UI Changes**
+- See Modules Touched and Bug Fixes above.
+
+**Regression Results**
+- Manually navigated and screenshotted every accessible view in a live browser (1440×900 desktop):
+  Dashboard, Knowledge Base, AI Assistant/Chat, Generate Document (all 5 pre-generation wizard
+  steps), Documents, Insights, Validation Workspace (dashboard + New Validation Project modal),
+  single-shot Validation Generator, Risk Management Suite (Dashboard, New Assessment wizard step 1,
+  Library, Templates, Reports, Approval, AI Assistant), URS Management Suite (Dashboard, List, New
+  wizard step 1), Qualification Suite (Dashboard, New Qualification form), Validation Report Suite
+  (Dashboard, List, New Report wizard all 3 steps), QMS (Dashboard, Documents list + a real
+  document's detail view across 2 tabs, Deviations list + a real deviation's Overview and AI
+  Investigation tabs, CAPA list), and all 3 modals (New Project, New Validation Project, Add to
+  Knowledge Base). Zero console errors after fixes. Confirmed via `preview_inspect` that computed
+  colours/widths match the intended design system values. Tablet breakpoint (768px) checked and
+  confirmed to behave per documented pre-existing limitation (sidebar hides, no replacement nav —
+  out of scope to build).
+- Codebase-wide automated scans confirm: 0 emoji remaining (was 484), 0 hex literals outside the
+  v3.0 palette, 0 undefined CSS custom properties, 0 Bootstrap/FontAwesome references, all `.js`
+  files pass `node --check`.
+
+**Known Issues**
+- Risk/URS/Qualification/Validation Report sidebar navigation remains unwired (pre-existing,
+  unrelated to this audit).
+- Exported-DOCX styling still uses pre-redesign navy (pre-existing, DEC-018).
+- Mobile/tablet navigation (hamburger menu or equivalent) still does not exist — deliberately out
+  of scope for this audit (would be a new feature, not a fix).
+- This codebase's suite `.js` files are not IIFE-wrapped or namespaced, so the same class of
+  global-function-collision bug fixed here (`risk.js`/`urs.js`) could recur between any two suites
+  that happen to choose the same generic function name (`render*`/`show*`/`init*` are the
+  highest-risk patterns already seen colliding, including one still-open instance between the
+  global `showView()` and `val_workspace.js`'s own — see PROJECT_STATUS.md Known Issues).
+
+**Next Sprint**
+- Commit this audit alongside the still-uncommitted "Executive Office"/v3.0 redesign work already
+  sitting in the working tree. No further design work planned unless new issues are reported.
+
+---
+
+## [Unreleased] — "Premium Enterprise" Design System Refinement v3.0
+
+**Sprint Name:** Design System Refinement v3.0 (UI-only)
+**Status:** Complete in the working tree, browser-verified, **not yet committed to git**.
+
+**Summary:** Second-pass UI-only refinement on top of the "Executive Office" redesign below — an
+exact business-attire hex palette, removal of the sidebar's Regulatory Scope badge section, and a
+switch from Unicode-emoji iconography to a single consistent icon library (Lucide). No backend,
+API, database, route, or business-logic changes. See [DECISIONS.md](DECISIONS.md) DEC-019.
+
+**Modules Touched**
+- `pharmagpt/static/css/style.css` — `:root` tokens repointed to the exact new palette (see
+  PROJECT_STATUS.md → Current UI Theme); new `--soft-blue`/`--soft-green`/`--soft-amber`/
+  `--content-max` tokens; new global Lucide-icon sizing rules (`svg.lucide`, per-component
+  overrides); KPI card subtitle styling (`.dash-stat-sub`).
+- `pharmagpt/static/css/workspace.css`, `risk.css`, `urs.css`, `qual.css`, `report.css`, `qms.css`
+  — every hardcoded hex literal from the DEC-018 palette swept to the new v3.0 equivalents (873 +
+  19 replacements via a throwaway Python script, two passes) — zero DEC-018-era hex literals remain.
+- `pharmagpt/templates/index.html` — Regulatory Scope sidebar section deleted; sidebar/QMS-nav/
+  Dashboard/modal-close/Generate-Document-workspace/Knowledge-Base/Validation-Workspace emoji
+  replaced with `<span data-lucide="...">` placeholders; stale IBM Plex Sans `<link>` replaced with
+  Inter (style.css already used Inter — this was a leftover oversight from DEC-018); Lucide CDN
+  script + global `refreshIcons()`/`MutationObserver` auto-conversion mechanism added at the end of
+  `<body>`; Dashboard KPI cards gained descriptive subtitles.
+- `pharmagpt/static/js/dashboard.js` — KPI subtitle population (CAPA/Deviation "Needs attention" vs
+  "All caught up", derived from existing `/dashboard/stats` counts, not fabricated); folder icon in
+  Recent Projects swapped to Lucide.
+- `pharmagpt/static/js/projects.js` — sidebar project-list folder icon and delete button swapped to
+  Lucide.
+- `pharmagpt/static/js/qms_common.js` — QMS unified dashboard's three section headers (Document
+  Control/Deviation Management/CAPA) swapped to Lucide; `toggleQMSSection()` updated to swap the
+  chevron icon's `data-lucide` value instead of overwriting `textContent`.
+
+**Bug Fixes**
+- Found and fixed during browser verification (not present before this sprint, introduced and
+  fixed within the same session): the initial `MutationObserver`-based icon-conversion
+  implementation re-triggered on the DOM mutations `lucide.createIcons()` itself produces (the
+  replacement `<svg>` retains the `data-lucide` attribute), causing a genuine infinite loop that
+  hung the browser tab with no console output. Fixed by disconnecting the observer for the duration
+  of each `createIcons()` call.
+- Removed a stale IBM Plex Sans Google Fonts `<link>` in `index.html` left over from DEC-018's
+  Inter migration (style.css already loaded Inter via `@import`; the head `<link>` was dead weight
+  pointing at the old font).
+
+**Database Changes**
+- None.
+
+**API Changes**
+- None.
+
+**UI Changes**
+- See Modules Touched above.
+
+**Regression Results**
+- Manually walked (browser, 1440×900 desktop viewport, via the project's `.claude/launch.json`
+  local Flask server): Dashboard (KPI cards with new subtitles, Refresh button) → Knowledge Base →
+  Generate Document (Enterprise Workspace shell, step 1 project selection) → QMS Dashboard (all
+  three section headers with new icons). Confirmed via `preview_inspect` that sidebar background,
+  KPI card border-top colour, and icon SVG stroke/size all resolve to the exact new palette values.
+  No console errors after the MutationObserver fix.
+
+**Known Issues**
+- Risk/URS/Qualification/Validation Report suite-internal emoji (inside their JS modules and
+  `templates/index.html` view headers) and the three QMS sub-views (Document Control/Deviation/CAPA
+  detail screens) were not swept to Lucide — same spot-check limitation DEC-018 hit, since those
+  suites' sidebar navigation is still unwired. See [DECISIONS.md](DECISIONS.md) DEC-019 Future
+  Review.
+- `docx_generator.py`/`doc_exporter.py`'s exported-DOCX styling still uses pre-redesign navy —
+  unchanged by this pass, still an open follow-up from DEC-018.
+
+**Next Sprint**
+- Commit and version this refinement alongside the still-uncommitted "Executive Office" redesign,
+  Enterprise Workspace layout, and QMS Phase 1 work already sitting in the working tree. Consider
+  the Lucide icon sweep and exported-DOCX styling follow-ups noted above.
+
+---
+
+## [Unreleased] — "Executive Office" Design System Redesign
+
+**Sprint Name:** Design System Redesign (UI-only)
+**Status:** Complete in the working tree, browser-verified, **not yet committed to git**.
+
+**Summary:** Complete visual redesign of PharmaGPT's UI from the earlier navy/blue enterprise
+theme to a warm, premium "business-attire" palette (Soft White, Warm Ivory, Stone, Sand, Beige,
+Taupe, Walnut Brown, Charcoal, Soft Olive/Sage accents), per an explicit UI-only mandate: no
+backend, API, database, route, or business-logic changes. See
+[DECISIONS.md](DECISIONS.md) DEC-018 for the full approach and rationale, and
+`docs/DESIGN_SYSTEM.md` (rewritten to v2.0) for the new token/component reference.
+
+**Modules Touched**
+- `pharmagpt/static/css/style.css` — `:root` tokens redefined (Warm Charcoal sidebar, Walnut Brown
+  primary/buttons, Muted Sage accent, warm neutral backgrounds/borders/text tiers, new
+  `--bg-secondary`/`--radius-lg`/`--radius-input` tokens); header/top-bar rebuilt white+minimal
+  with a pill-shaped Gemini status badge and a secondary-styled Clear Chat button; sidebar active
+  state gained a white left-indicator bar; dashboard KPI cards and other card components (
+  `.dash-card`, `.insights-stat-card`, `.vw-project-card`, `.val-summary-card`,
+  `.vw-overview-card`) bumped to 14px radius with softer borders/shadows; tables given distinct
+  zebra vs. hover tints and a rounded header; Google Fonts `@import` switched from IBM Plex Sans to
+  Inter.
+- `pharmagpt/static/css/workspace.css`, `risk.css`, `urs.css`, `qual.css`, `report.css`, `qms.css`
+  — every hardcoded hex/`rgb()`/`rgba()` colour literal that bypassed the shared `:root` tokens
+  was swept to the new warm palette (883 hex + 80 rgb replacements across all 7 files combined).
+  `risk.css`'s own small `--risk-*` severity token block repainted to the new palette.
+  `.btn-urs-primary` and `.btn-qual-primary` (previously sharing the same literal hex as the
+  general accent colour) were repointed to `var(--blue-light)` (Walnut Brown) so every suite's
+  primary button now matches, after the shared `--accent` token was deliberately repointed to
+  Muted Sage (a distinct accent, not a primary-button colour).
+- `pharmagpt/static/js/*.js` (`dashboard.js`, `documents.js`, `gen_document.js`, `insights.js`,
+  `qms_common.js`, `qual.js`, `report.js`, `risk.js`, `urs.js`, `validation.js`,
+  `validation_config.js`) — inline-style hex colours (badges, status pills, doc-type accent
+  colours) swept with the same translation table for full consistency between CSS and
+  JS-rendered elements.
+
+**Bug Fixes**
+- None (this was a colour/typography/radius redesign, not a functional bug-fix sprint).
+
+**Database Changes**
+- None.
+
+**API Changes**
+- None.
+
+**UI Changes**
+- See Modules Touched above. Full before/after token reference in `docs/DESIGN_SYSTEM.md`.
+
+**Regression Results**
+- Manually walked (browser, 1440×900 desktop viewport): Dashboard (KPI cards, recent activity,
+  system health) → Knowledge Base → AI Assistant chat → New Project modal → Generate Document
+  (Enterprise Workspace shell, step progress) → Validation Workspace → QMS Dashboard → QMS Document
+  Control → QMS Deviation Management → QMS CAPA. Risk Management, URS Management, Qualification,
+  and Validation Report suites were spot-checked by temporarily forcing their views visible
+  (their sidebar navigation remains unwired — a pre-existing gap, see Known Issues below, not
+  introduced or fixed by this sprint) and confirmed to render consistently with the new palette.
+  No console errors observed at any point.
+
+**Known Issues**
+- `docx_generator.py`/`doc_exporter.py`'s exported-DOCX styling (navy headings/table headers) was
+  intentionally left unchanged — out of scope for a UI-only redesign. The on-screen document
+  viewer and the exported `.docx` file will look slightly different until a follow-up repaints the
+  Python-generated document styling to match.
+- Risk/URS/Qualification/Validation Report sidebar navigation remains unwired (pre-existing gap,
+  unrelated to this sprint — see [PROJECT_STATUS.md](PROJECT_STATUS.md) → Known Issues).
+
+**Next Sprint**
+- Commit and version this redesign alongside the still-uncommitted Quality Management Suite Phase
+  1 and Enterprise Workspace Layout work already sitting in the working tree (see Current Sprint in
+  [PROJECT_STATUS.md](PROJECT_STATUS.md)). Consider the exported-DOCX styling follow-up noted
+  above.
+
+---
+
+## [Unreleased] — Enterprise Workspace Layout (Generate Document Redesign)
+
+**Sprint Name:** Validation & Usability Testing Sprint
+**Status:** Complete in the working tree, tested, **not yet committed to git**.
+
+**Summary:** Redesigned the Generate Document module into a full-screen "Enterprise Workspace"
+that no longer renders behind/inside the Dashboard. In the course of root-causing the reported
+symptoms (Dashboard visible above the wizard, large blank white area, no professional way back to
+the project), found and fixed a pre-existing HTML structural bug: `templates/index.html`'s
+`.app-body` flex container was closed one `<main>` block too early (right after the old Validation
+Document Generator view), so every view defined after that point — Generate Document, all Risk
+Management views, all URS views, Qualification, Validation Report, and all QMS views — rendered
+outside the sidebar layout entirely. This is the actual root cause of the reported blank-space /
+missing-sidebar symptoms, and it affected more than just Generate Document (verified live on the
+QMS Dashboard). No AI generation logic, APIs, or database schema were touched.
+
+**Root Cause**
+- `templates/index.html`: stray `</div>` closed `.app-body` immediately after `view-validation`
+  instead of after the last view (`view-qms-capa`). Moved the closing tag to the correct location.
+
+**Modules Added**
+- `pharmagpt/static/css/workspace.css` — reusable Enterprise Workspace shell (`.ent-workspace`,
+  `.ent-ws-header`, `.ent-ws-toolbar`, `.ent-ws-breadcrumb`, `.ent-ws-progress`, `.ent-ws-body`).
+- `pharmagpt/static/js/workspace.js` — `window.Workspace` helper: `enter()`/`exit()` (hides the
+  global top header while a workspace is open), `renderBreadcrumb()`, `renderProgress()`,
+  `confirmDialog()` (styled Yes/No modal reusing existing `.modal`/`.btn-*` tokens).
+
+**Enhancements**
+- Generate Document (`view-gen-doc` / `gen_document.js`) is the first module to adopt the shell:
+  dark header with current-project and current-document-type tags, breadcrumb (Dashboard > Project
+  > Generate Document > Step), toolbar (Back to Project / Save Draft / Cancel), 6-step progress
+  bar — all now backed by the reusable `Workspace` helper instead of Generate-Document-specific
+  markup manipulation.
+- "Back to Project" and "Cancel" now show a styled confirmation dialog ("Leave Generate Document?"
+  / "Discard changes?") instead of a native browser `confirm()`, and the same guard now also fires
+  when the user navigates away via a direct sidebar click mid-wizard (previously only the wizard's
+  own buttons were guarded).
+- Global top header (brand bar, Gemini status badge, Clear Chat) is hidden while any Enterprise
+  Workspace is open (`body.ent-ws-active`), so only the sidebar remains — eliminating the
+  double-header look and reclaiming the vertical space it used.
+
+**Bug Fixes**
+- Fixed the `.app-body` HTML nesting bug described above (affects Generate Document, Risk, URS,
+  Qualification, Validation Report, and QMS views).
+
+**Database Changes**
+- None.
+
+**API Changes**
+- None. `Save Draft` still posts to the existing `POST /validation/save` endpoint unchanged.
+
+**UI Changes**
+- See Enhancements above. `style.css`'s Generate Document section was trimmed to wizard-body-only
+  rules (`.gd-panel`, `.gd-step-content`, step buttons); the shell chrome rules moved to
+  `workspace.css`.
+
+**Regression Results**
+- Manually walked: Dashboard → Generate Document → project selection → doc type selection →
+  Next/Back through all 6 steps → Save Draft (confirmed `POST /validation/save` → 201) → sidebar-
+  click-away guard (styled dialog, Stay/Leave both verified) → Cancel (styled "Discard changes?"
+  dialog) → Back to Project (restores project + Chat view) → re-opened Generate Document (active
+  project pre-selected, as before) → QMS Dashboard (confirmed same root-cause fix resolved its
+  identical layout bug, no regressions) → tablet/mobile viewport resize (chrome wraps without
+  breaking, consistent with the project's existing desktop-first stance). No console errors
+  observed at any point.
+
+**Known Issues**
+- Generate Document (v0.9) still has no "resume a saved draft into the wizard" feature — Save
+  Draft persists a structured-JSON snapshot to `generated_documents`, but there is no load-back-
+  into-wizard flow. Pre-existing gap, not introduced or fixed by this sprint (out of scope: no
+  business-logic changes were made).
+- The Validation Workspace's own `.vw-ws-topbar` back-button pattern was not unified with the new
+  `.ent-workspace` shell in this sprint, to keep the change scoped to Generate Document as
+  instructed; see [DECISIONS.md](DECISIONS.md) DEC-017 Future Review.
+
+**Next Sprint**
+- Apply the Enterprise Workspace shell to Risk/URS/Qualification/Validation Report once their
+  sidebar navigation is wired, and to QMS Phase 2/3 modules as they're built.
+
+---
+
 ## [Unreleased] — Quality Management Suite (Phase 1)
 
 **Sprint Name:** QMS Phase 1

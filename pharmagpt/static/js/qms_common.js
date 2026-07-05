@@ -49,7 +49,11 @@ function toggleQMSSection() {
   const btn = document.getElementById("qms-collapse-btn");
   qmsSectionOpen = !qmsSectionOpen;
   items.style.display = qmsSectionOpen ? "block" : "none";
-  if (btn) btn.textContent = qmsSectionOpen ? "▲" : "▼";
+  const icon = btn ? btn.querySelector(".icon") : null;
+  if (icon) {
+    icon.setAttribute("data-lucide", qmsSectionOpen ? "chevron-up" : "chevron-down");
+    if (window.lucide) window.lucide.createIcons();
+  }
 }
 window.toggleQMSSection = toggleQMSSection;
 
@@ -151,7 +155,7 @@ async function qmsRenderAttachments(containerId, recordType, recordId) {
           </div>
           <div>
             <a href="/qms/attachments/${a.id}/download" style="font-size:11px;margin-right:10px">Download</a>
-            <a href="#" style="font-size:11px;color:#C62828" onclick="qmsDeleteAttachment('${recordType}',${recordId},${a.id});return false;">Delete</a>
+            <a href="#" style="font-size:11px;color:#C35F5B" onclick="qmsDeleteAttachment('${recordType}',${recordId},${a.id});return false;">Delete</a>
           </div>
         </div>`).join("") : `<div class="qms-panel-item-meta">No attachments yet.</div>`}
     `;
@@ -346,7 +350,7 @@ async function initQMSDashboard() {
         </div>
 
         <div class="qms-section-card">
-          <h3>📄 Document Control</h3>
+          <h3><span class=\'icon\' data-lucide=\'file-text\'></span> Document Control</h3>
           <p style="font-size:12.5px;color:var(--text-muted)">
             Draft: ${stats.documents.draft} · Under Review: ${stats.documents.under_review} ·
             Pending Approval: ${stats.documents.pending_approval} · Effective: ${stats.documents.effective} ·
@@ -356,7 +360,7 @@ async function initQMSDashboard() {
         </div>
 
         <div class="qms-section-card">
-          <h3>⚡ Deviation Management</h3>
+          <h3><span class=\'icon\' data-lucide=\'alert-triangle\'></span> Deviation Management</h3>
           <p style="font-size:12.5px;color:var(--text-muted)">
             Open: ${stats.deviations.open} · Closed: ${stats.deviations.closed} · Total: ${stats.deviations.total}
           </p>
@@ -364,7 +368,7 @@ async function initQMSDashboard() {
         </div>
 
         <div class="qms-section-card">
-          <h3>🔄 CAPA</h3>
+          <h3><span class=\'icon\' data-lucide=\'repeat\'></span> CAPA</h3>
           <p style="font-size:12.5px;color:var(--text-muted)">
             Open: ${stats.capa.open} · Closed: ${stats.capa.closed} · Overdue: ${stats.capa.overdue} ·
             Escalated Actions: ${stats.capa.escalated_actions || 0}

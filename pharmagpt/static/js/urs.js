@@ -25,7 +25,7 @@ const URS_CATEGORIES = [
   {
     key: "manufacturing",
     name: "Manufacturing Equipment",
-    icon: "⚙️",
+    icon: "<span class=\'icon\' data-lucide=\'settings\'></span>",
     sub: "Compression, Coating, Granulation…",
     types: [
       ["tablet_compression",  "Tablet Compression Machine"],
@@ -43,7 +43,7 @@ const URS_CATEGORIES = [
   {
     key: "packaging",
     name: "Packaging Equipment",
-    icon: "📦",
+    icon: "<span class=\'icon\' data-lucide=\'package\'></span>",
     sub: "Blister, Filling, Labeling…",
     types: [
       ["blister_machine",       "Blister Machine"],
@@ -64,7 +64,7 @@ const URS_CATEGORIES = [
   {
     key: "laboratory",
     name: "Laboratory Equipment",
-    icon: "🔬",
+    icon: "<span class=\'icon\' data-lucide=\'microscope\'></span>",
     sub: "HPLC, GC, Dissolution…",
     types: [
       ["hplc",              "HPLC System"],
@@ -83,7 +83,7 @@ const URS_CATEGORIES = [
   {
     key: "utilities",
     name: "Utilities",
-    icon: "💧",
+    icon: "<span class=\'icon\' data-lucide=\'droplet\'></span>",
     sub: "Water, Air, Steam…",
     types: [
       ["purified_water",  "Purified Water (PW) System"],
@@ -99,7 +99,7 @@ const URS_CATEGORIES = [
   {
     key: "hvac",
     name: "HVAC Systems",
-    icon: "🌬️",
+    icon: "<span class=\'icon\' data-lucide=\'wind\'></span>",
     sub: "AHU, BMS, Environmental…",
     types: [
       ["hvac_ahu",        "Air Handling Unit (AHU)"],
@@ -114,7 +114,7 @@ const URS_CATEGORIES = [
   {
     key: "computerized",
     name: "Computerized Systems",
-    icon: "💻",
+    icon: "<span class=\'icon\' data-lucide=\'laptop\'></span>",
     sub: "SCADA, MES, LIMS, ERP…",
     types: [
       ["scada",                "SCADA System"],
@@ -138,7 +138,7 @@ const URS_CATEGORIES = [
   {
     key: "warehouse",
     name: "Warehouse / Storage",
-    icon: "🏭",
+    icon: "<span class=\'icon\' data-lucide=\'factory\'></span>",
     sub: "Cold Room, Racking, RFID…",
     types: [
       ["cold_room",          "Cold Room / Cold Storage"],
@@ -152,7 +152,7 @@ const URS_CATEGORIES = [
   {
     key: "miscellaneous",
     name: "Miscellaneous",
-    icon: "🔧",
+    icon: "<span class=\'icon\' data-lucide=\'wrench\'></span>",
     sub: "Custom equipment or system",
     types: [
       ["custom", "Custom Equipment / System"],
@@ -238,9 +238,9 @@ window.loadURSDashboard = async function () {
 
 function buildDashboardHTML(stats, allURS) {
   const categoryColors = {
-    manufacturing: "#1565C0", packaging: "#00ACC1", laboratory: "#8E24AA",
-    utilities: "#2E7D32", hvac: "#EF6C00", computerized: "#D32F2F",
-    warehouse: "#795548", miscellaneous: "#546E7A",
+    manufacturing: "#8A6B52", packaging: "#5F8A61", laboratory: "#8A6B52",
+    utilities: "#5F8A61", hvac: "#A97D2E", computerized: "#A8544F",
+    warehouse: "#8A6B52", miscellaneous: "#66615B",
   };
 
   let html = `
@@ -280,9 +280,9 @@ function buildDashboardHTML(stats, allURS) {
 
   if (!allURS.length) {
     html += `<div class="urs-empty" style="padding:30px">
-      <div class="urs-empty-icon">📋</div>
+      <div class="urs-empty-icon"><span class=\'icon\' data-lucide=\'clipboard-list\'></span></div>
       <p>No URS documents yet.</p>
-      <button class="btn-urs-primary" style="margin-top:12px" onclick="startNewURS()">➕ Create First URS</button>
+      <button class="btn-urs-primary" style="margin-top:12px" onclick="startNewURS()"><span class=\'icon\' data-lucide=\'plus\'></span> Create First URS</button>
     </div>`;
   } else {
     allURS.slice(0, 6).forEach(u => {
@@ -312,7 +312,7 @@ function buildDashboardHTML(stats, allURS) {
   const byCategory = stats.by_category || {};
   if (Object.keys(byCategory).length) {
     Object.entries(byCategory).forEach(([cat, count]) => {
-      const color = categoryColors[cat] || "#607080";
+      const color = categoryColors[cat] || "#9A948C";
       html += `<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
         <div style="width:12px;height:12px;border-radius:50%;background:${color};flex-shrink:0"></div>
         <div style="flex:1;font-size:13px;color:var(--text)">${cat.replace(/_/g,' ')}</div>
@@ -332,9 +332,9 @@ function buildDashboardHTML(stats, allURS) {
         <span class="urs-dash-card-title">Quick Actions</span>
       </div>
       <div class="urs-dash-card-body" style="display:flex;gap:12px;flex-wrap:wrap">
-        <button class="btn-urs-primary" onclick="startNewURS()">➕ New URS</button>
-        <button class="btn-urs-outline" onclick="loadURSList()">📋 All URS Documents</button>
-        <button class="btn-urs-outline" onclick="showURSApprovalQueue()">✅ Approval Queue</button>
+        <button class="btn-urs-primary" onclick="startNewURS()"><span class=\'icon\' data-lucide=\'plus\'></span> New URS</button>
+        <button class="btn-urs-outline" onclick="loadURSList()"><span class=\'icon\' data-lucide=\'clipboard-list\'></span> All URS Documents</button>
+        <button class="btn-urs-outline" onclick="showURSApprovalQueue()"><span class=\'icon\' data-lucide=\'check-circle-2\'></span> Approval Queue</button>
       </div>
     </div>
   </div>`;
@@ -370,20 +370,20 @@ async function fetchAndRenderURSList(filters = {}) {
       card.innerHTML = `
         <div class="urs-card-number">${escHtml(u.urs_number || "—")}</div>
         <div class="urs-card-title">${escHtml(u.title)}</div>
-        <div class="urs-card-equipment">📦 ${escHtml(u.equipment_name || "Not specified")}</div>
+        <div class="urs-card-equipment"><span class=\'icon\' data-lucide=\'package\'></span> ${escHtml(u.equipment_name || "Not specified")}</div>
         <div class="urs-card-tags">
           <span class="urs-tag urs-tag-status ${u.status}">${formatStatus(u.status)}</span>
           ${u.category ? `<span class="urs-tag urs-tag-category">${u.category}</span>` : ""}
-          ${u.revision ? `<span class="urs-tag" style="background:#F5F5F5;color:#616161">Rev ${u.revision}</span>` : ""}
+          ${u.revision ? `<span class="urs-tag" style="background:#F1ECE6;color:#66615B">Rev ${u.revision}</span>` : ""}
         </div>
         <div class="urs-card-meta">
-          <span>👤 ${escHtml(u.prepared_by || "—")}</span>
-          <span>📅 ${formatDate(u.created_at)}</span>
+          <span><span class=\'icon\' data-lucide=\'user\'></span> ${escHtml(u.prepared_by || "—")}</span>
+          <span><span class=\'icon\' data-lucide=\'calendar\'></span> ${formatDate(u.created_at)}</span>
         </div>
         <div class="urs-card-actions">
-          <button class="btn-urs-outline" onclick="event.stopPropagation();openURS(${u.id})">📂 Open</button>
-          <button class="btn-urs-outline" onclick="event.stopPropagation();exportURSDocx(${u.id}, '${escHtml(u.urs_number || 'URS')}')">⬇ DOCX</button>
-          <button class="btn-urs-danger" onclick="event.stopPropagation();deleteURS(${u.id})">🗑</button>
+          <button class="btn-urs-outline" onclick="event.stopPropagation();openURS(${u.id})"><span class=\'icon\' data-lucide=\'folder-open\'></span> Open</button>
+          <button class="btn-urs-outline" onclick="event.stopPropagation();exportURSDocx(${u.id}, '${escHtml(u.urs_number || 'URS')}')"><span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span> DOCX</button>
+          <button class="btn-urs-danger" onclick="event.stopPropagation();deleteURS(${u.id})"><span class=\'icon\' data-lucide=\'trash-2\'></span></button>
         </div>`;
       card.addEventListener("click", () => openURS(u.id));
       grid.appendChild(card);
@@ -446,7 +446,7 @@ function updateWizardStepUI(step) {
 
 /* ── Step 1: Category & Equipment ─────────────────────────────────────────── */
 function renderStep1(body) {
-  let html = `<div class="urs-section-header"><div class="section-icon">📋</div>Select Equipment / System Category</div>
+  let html = `<div class="urs-section-header"><div class="section-icon"><span class=\'icon\' data-lucide=\'clipboard-list\'></span></div>Select Equipment / System Category</div>
   <div class="urs-category-grid">`;
   URS_CATEGORIES.forEach(cat => {
     const sel = ursState.selectedCategory === cat.key ? "selected" : "";
@@ -458,12 +458,12 @@ function renderStep1(body) {
   });
   html += `</div>
   <div id="urs-equip-section" style="display:${ursState.selectedCategory ? 'block' : 'none'}">
-    <div class="urs-section-header" style="margin-top:24px"><div class="section-icon">🔧</div>Select Equipment Type</div>
+    <div class="urs-section-header" style="margin-top:24px"><div class="section-icon"><span class=\'icon\' data-lucide=\'wrench\'></span></div>Select Equipment Type</div>
     <div class="urs-equip-list" id="urs-equip-list"></div>
   </div>
   <div style="display:flex;justify-content:flex-end;margin-top:24px">
     <button class="btn-urs-primary" onclick="wizardNext()" id="step1-next-btn" ${ursState.selectedEquipmentType ? "" : "disabled"}>
-      Next: Project Information →
+      Next: Project Information <span class=\'icon\' data-lucide=\'arrow-right\'></span>
     </button>
   </div>`;
   body.innerHTML = html;
@@ -510,7 +510,7 @@ function renderStep2(body) {
   const d = ursState.wizardData;
   const today = new Date().toISOString().split("T")[0];
   body.innerHTML = `
-  <div class="urs-section-header"><div class="section-icon">📝</div>Project Information</div>
+  <div class="urs-section-header"><div class="section-icon"><span class=\'icon\' data-lucide=\'pencil-line\'></span></div>Project Information</div>
   <div class="urs-form-grid">
     <div class="urs-field">
       <label class="urs-label">URS Number <span class="req-star">*</span></label>
@@ -603,8 +603,8 @@ function renderStep2(body) {
     </div>
   </div>
   <div style="display:flex;justify-content:space-between;margin-top:8px">
-    <button class="btn-urs-secondary" style="background:rgba(0,0,0,.06);color:var(--navy);border-color:var(--border)" onclick="wizardBack()">← Back</button>
-    <button class="btn-urs-primary" onclick="wizardNext()">Next: Generate Requirements →</button>
+    <button class="btn-urs-secondary" style="background:rgba(61,47,33,.06);color:var(--navy);border-color:var(--border)" onclick="wizardBack()"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Back</button>
+    <button class="btn-urs-primary" onclick="wizardNext()">Next: Generate Requirements <span class=\'icon\' data-lucide=\'arrow-right\'></span></button>
   </div>`;
 }
 
@@ -654,10 +654,10 @@ function renderStep3(body) {
     </label>`).join("");
 
   body.innerHTML = `
-  <div class="urs-section-header"><div class="section-icon">🤖</div>AI Requirement Generation</div>
+  <div class="urs-section-header"><div class="section-icon"><span class=\'icon\' data-lucide=\'bot\'></span></div>AI Requirement Generation</div>
   <div class="urs-ai-panel">
     <div class="urs-ai-panel-header">
-      <div class="urs-ai-icon">✨</div>
+      <div class="urs-ai-icon"><span class=\'icon\' data-lucide=\'sparkles\'></span></div>
       <div>
         <div class="urs-ai-panel-title">AI-Powered Requirement Generation</div>
         <div class="urs-ai-panel-sub">Gemini 2.5 Flash will generate pharmaceutical-grade requirements for: <strong>${escHtml(ursState.wizardData.equipment_name || "the equipment")}</strong></div>
@@ -668,21 +668,21 @@ function renderStep3(body) {
       <div class="urs-section-checkboxes">${sectionsHtml}</div>
     </div>
     <div style="display:flex;gap:10px;align-items:center">
-      <button class="btn-urs-primary" onclick="selectAllSections(true)">☑ Select All</button>
-      <button class="btn-urs-outline" onclick="selectAllSections(false)">☐ Deselect All</button>
+      <button class="btn-urs-primary" onclick="selectAllSections(true)"><span class=\'icon\' data-lucide=\'square-check\'></span> Select All</button>
+      <button class="btn-urs-outline" onclick="selectAllSections(false)"><span class=\'icon\' data-lucide=\'square\'></span> Deselect All</button>
     </div>
   </div>
 
-  <div class="urs-ai-panel" style="background:linear-gradient(135deg,#E8F5E9,#F1F8E9);border-color:#A5D6A7">
+  <div class="urs-ai-panel" style="background:linear-gradient(135deg,#E8F2EA,#E8F2EA);border-color:#E8F2EA">
     <div class="urs-ai-panel-header">
-      <div class="urs-ai-icon" style="background:linear-gradient(135deg,#2E7D32,#388E3C)">📚</div>
+      <div class="urs-ai-icon" style="background:linear-gradient(135deg,#5F8A61,#5F8A61)"><span class=\'icon\' data-lucide=\'book-open\'></span></div>
       <div>
         <div class="urs-ai-panel-title">Requirement Library</div>
         <div class="urs-ai-panel-sub">Load pre-built GMP requirements from the equipment library (instant, no AI needed)</div>
       </div>
     </div>
-    <button class="btn-urs-outline" style="border-color:#2E7D32;color:#2E7D32" onclick="loadLibraryRequirements()">
-      📚 Load Library Requirements for ${escHtml(ursState.wizardData.equipment_name || "this equipment")}
+    <button class="btn-urs-outline" style="border-color:#5F8A61;color:#5F8A61" onclick="loadLibraryRequirements()">
+      <span class=\'icon\' data-lucide=\'book-open\'></span> Load Library Requirements for ${escHtml(ursState.wizardData.equipment_name || "this equipment")}
     </button>
   </div>
 
@@ -693,10 +693,10 @@ function renderStep3(body) {
   </div>
 
   <div style="display:flex;justify-content:space-between;margin-top:24px">
-    <button class="btn-urs-secondary" style="background:rgba(0,0,0,.06);color:var(--navy);border-color:var(--border)" onclick="wizardBack()">← Back</button>
+    <button class="btn-urs-secondary" style="background:rgba(61,47,33,.06);color:var(--navy);border-color:var(--border)" onclick="wizardBack()"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Back</button>
     <div style="display:flex;gap:10px">
-      <button class="btn-urs-outline" onclick="skipGeneration()">Skip → Review Requirements</button>
-      <button class="btn-urs-primary" id="generate-btn" onclick="runAIGeneration()">✨ Generate with AI →</button>
+      <button class="btn-urs-outline" onclick="skipGeneration()">Skip <span class=\'icon\' data-lucide=\'arrow-right\'></span> Review Requirements</button>
+      <button class="btn-urs-primary" id="generate-btn" onclick="runAIGeneration()"><span class=\'icon\' data-lucide=\'sparkles\'></span> Generate with AI <span class=\'icon\' data-lucide=\'arrow-right\'></span></button>
     </div>
   </div>`;
 }
@@ -720,12 +720,12 @@ window.loadLibraryRequirements = async function () {
       body: JSON.stringify({ equipment_type: ursState.selectedEquipmentType }),
     }).then(r => r.json());
     ursState.requirements = res.requirements || [];
-    ursToast(`✅ ${res.loaded} library requirements loaded`, "success");
-    btn.textContent = `✅ ${res.loaded} requirements loaded`;
+ ursToast(`${res.loaded} library requirements loaded`, "success");
+ btn.textContent = `${res.loaded} requirements loaded`;
   } catch (e) {
     ursToast(`Error: ${e.message}`, "error");
     btn.disabled = false;
-    btn.textContent = "📚 Load Library Requirements";
+ btn.textContent = "Load Library Requirements";
   }
 };
 
@@ -791,7 +791,7 @@ window.runAIGeneration = async function () {
     }
 
     ursState.requirements = await fetch(`/urs/${ursState.currentURS.id}/requirements`).then(r => r.json());
-    ursToast(`✅ ${reqCount} requirements generated`, "success");
+ ursToast(`${reqCount} requirements generated`, "success");
     setTimeout(() => wizardGoTo(4), 800);
   } catch (e) {
     genText.textContent = `Error: ${e.message}`;
@@ -817,7 +817,7 @@ async function createURSRecord() {
 function renderStep4(body) {
   const reqs = ursState.requirements;
   body.innerHTML = `
-  <div class="urs-section-header"><div class="section-icon">📋</div>Review & Edit Requirements</div>
+  <div class="urs-section-header"><div class="section-icon"><span class=\'icon\' data-lucide=\'clipboard-list\'></span></div>Review & Edit Requirements</div>
 
   <div class="urs-req-toolbar">
     <div class="urs-req-toolbar-left">
@@ -832,8 +832,8 @@ function renderStep4(body) {
       </select>
     </div>
     <div style="display:flex;gap:8px">
-      <button class="btn-urs-outline" onclick="addNewRow()">➕ Add Row</button>
-      <button class="btn-urs-outline" onclick="saveAllRequirements()">💾 Save</button>
+      <button class="btn-urs-outline" onclick="addNewRow()"><span class=\'icon\' data-lucide=\'plus\'></span> Add Row</button>
+      <button class="btn-urs-outline" onclick="saveAllRequirements()"><span class=\'icon\' data-lucide=\'save\'></span> Save</button>
     </div>
   </div>
 
@@ -858,10 +858,10 @@ function renderStep4(body) {
   </div>
 
   <div style="display:flex;justify-content:space-between;margin-top:20px">
-    <button class="btn-urs-secondary" style="background:rgba(0,0,0,.06);color:var(--navy);border-color:var(--border)" onclick="wizardBack()">← Back</button>
+    <button class="btn-urs-secondary" style="background:rgba(61,47,33,.06);color:var(--navy);border-color:var(--border)" onclick="wizardBack()"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Back</button>
     <div style="display:flex;gap:10px">
-      <button class="btn-urs-outline" onclick="saveAllRequirements()">💾 Save Requirements</button>
-      <button class="btn-urs-primary" onclick="wizardNext()">Next: Submit URS →</button>
+      <button class="btn-urs-outline" onclick="saveAllRequirements()"><span class=\'icon\' data-lucide=\'save\'></span> Save Requirements</button>
+      <button class="btn-urs-primary" onclick="wizardNext()">Next: Submit URS <span class=\'icon\' data-lucide=\'arrow-right\'></span></button>
     </div>
   </div>`;
 }
@@ -890,7 +890,7 @@ function buildReqRow(req, idx) {
     <td><span contenteditable="true" class="editable" data-field="verification_method" style="font-size:12px">${escHtml(req.verification_method || '')}</span></td>
     <td><span contenteditable="true" class="editable" data-field="acceptance_criteria" style="font-size:12px">${escHtml(req.acceptance_criteria || '')}</span></td>
     <td><div class="req-row-actions">
-      <button class="req-action-btn delete" title="Delete" onclick="deleteRow(this)">🗑</button>
+ <button class="req-action-btn delete"title="Delete"onclick="deleteRow(this)"></button>
     </div></td>
   </tr>`;
 }
@@ -960,7 +960,7 @@ window.saveAllRequirements = async function () {
       body: JSON.stringify(reqs),
     }).then(r => r.json());
     ursState.requirements = saved;
-    ursToast(`✅ ${saved.length} requirements saved`, "success");
+ ursToast(`${saved.length} requirements saved`, "success");
   } catch (e) {
     ursToast(`Save error: ${e.message}`, "error");
   }
@@ -971,12 +971,12 @@ function renderStep5(body) {
   const urs = ursState.currentURS || {};
   const reqCount = ursState.requirements.length;
   body.innerHTML = `
-  <div class="urs-section-header"><div class="section-icon">✅</div>URS Ready for Submission</div>
+  <div class="urs-section-header"><div class="section-icon"><span class=\'icon\' data-lucide=\'check-circle-2\'></span></div>URS Ready for Submission</div>
 
-  <div style="background:linear-gradient(135deg,#E8F5E9,#F1F8E9);border:1px solid #A5D6A7;border-radius:12px;padding:24px;margin-bottom:24px;text-align:center">
-    <div style="font-size:48px;margin-bottom:12px">🎉</div>
-    <div style="font-size:20px;font-weight:700;color:#2E7D32;margin-bottom:8px">URS Successfully Created!</div>
-    <div style="font-size:14px;color:#388E3C">${reqCount} requirements captured for <strong>${escHtml(urs.equipment_name || ursState.wizardData.equipment_name || "")}</strong></div>
+  <div style="background:linear-gradient(135deg,#E8F2EA,#E8F2EA);border:1px solid #E8F2EA;border-radius:12px;padding:24px;margin-bottom:24px;text-align:center">
+    <div style="font-size:48px;margin-bottom:12px"><span class=\'icon\' data-lucide=\'party-popper\'></span></div>
+    <div style="font-size:20px;font-weight:700;color:#5F8A61;margin-bottom:8px">URS Successfully Created!</div>
+    <div style="font-size:14px;color:#5F8A61">${reqCount} requirements captured for <strong>${escHtml(urs.equipment_name || ursState.wizardData.equipment_name || "")}</strong></div>
   </div>
 
   <div class="urs-info-grid">
@@ -991,10 +991,10 @@ function renderStep5(body) {
       <div class="urs-info-card-title">Next Steps</div>
       <div style="display:flex;flex-direction:column;gap:10px">
         <div style="display:flex;align-items:center;gap:10px;font-size:13px">
-          <span style="color:#2E7D32;font-weight:700">✓</span> URS draft created
+          <span style="color:#5F8A61;font-weight:700"><span class=\'icon\' data-lucide=\'check\'></span></span> URS draft created
         </div>
         <div style="display:flex;align-items:center;gap:10px;font-size:13px">
-          <span style="color:var(--blue);font-weight:700">→</span> Submit for review
+          <span style="color:var(--blue);font-weight:700"><span class=\'icon\' data-lucide=\'arrow-right\'></span></span> Submit for review
         </div>
         <div style="display:flex;align-items:center;gap:10px;font-size:13px">
           <span style="color:var(--text-muted)">○</span> QA / SME review
@@ -1011,12 +1011,12 @@ function renderStep5(body) {
 
   <div style="display:flex;gap:12px;justify-content:center;margin-top:8px;flex-wrap:wrap">
     ${urs.id ? `
-    <button class="btn-urs-primary" onclick="openURS(${urs.id})">📂 Open URS</button>
-    <button class="btn-urs-outline" onclick="exportURSDocx(${urs.id}, '${escHtml(urs.urs_number || 'URS')}')">⬇ Export DOCX</button>
-    <button class="btn-urs-outline" onclick="submitForReview(${urs.id})">📨 Submit for Review</button>
+    <button class="btn-urs-primary" onclick="openURS(${urs.id})"><span class=\'icon\' data-lucide=\'folder-open\'></span> Open URS</button>
+    <button class="btn-urs-outline" onclick="exportURSDocx(${urs.id}, '${escHtml(urs.urs_number || 'URS')}')"><span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span> Export DOCX</button>
+    <button class="btn-urs-outline" onclick="submitForReview(${urs.id})"><span class=\'icon\' data-lucide=\'mail\'></span> Submit for Review</button>
     ` : ""}
-    <button class="btn-urs-outline" onclick="startNewURS()">➕ Create Another URS</button>
-    <button class="btn-urs-outline" onclick="loadURSList()">📋 View All URS</button>
+    <button class="btn-urs-outline" onclick="startNewURS()"><span class=\'icon\' data-lucide=\'plus\'></span> Create Another URS</button>
+    <button class="btn-urs-outline" onclick="loadURSList()"><span class=\'icon\' data-lucide=\'clipboard-list\'></span> View All URS</button>
   </div>`;
 }
 
@@ -1160,10 +1160,10 @@ function renderOverviewPanel(panel, urs, reqs) {
     <div class="urs-info-card-title">Purpose</div><p style="font-size:14px;line-height:1.6">${escHtml(urs.purpose)}</p>
   </div>` : ""}
   <div style="display:flex;gap:10px;margin-top:4px;flex-wrap:wrap">
-    <button class="btn-urs-primary" onclick="exportURSDocx(${urs.id}, '${escHtml(urs.urs_number||'URS')}')">⬇ Export DOCX</button>
-    <button class="btn-urs-outline" onclick="submitForReview(${urs.id})">📨 Submit for Review</button>
-    <button class="btn-urs-outline" onclick="switchDetailTab('review')">🤖 AI Review</button>
-    <button class="btn-urs-outline" onclick="createVersionSnapshot(${urs.id})">📸 Snapshot Version</button>
+    <button class="btn-urs-primary" onclick="exportURSDocx(${urs.id}, '${escHtml(urs.urs_number||'URS')}')"><span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span> Export DOCX</button>
+    <button class="btn-urs-outline" onclick="submitForReview(${urs.id})"><span class=\'icon\' data-lucide=\'mail\'></span> Submit for Review</button>
+    <button class="btn-urs-outline" onclick="switchDetailTab('review')"><span class=\'icon\' data-lucide=\'bot\'></span> AI Review</button>
+    <button class="btn-urs-outline" onclick="createVersionSnapshot(${urs.id})"><span class=\'icon\' data-lucide=\'camera\'></span> Snapshot Version</button>
   </div>`;
 }
 
@@ -1187,8 +1187,8 @@ function renderRequirementsPanel(panel, urs, reqs) {
       </select>
     </div>
     <div style="display:flex;gap:8px">
-      <button class="btn-urs-outline" onclick="addDetailRow()">➕ Add</button>
-      <button class="btn-urs-primary" onclick="saveDetailRequirements()">💾 Save</button>
+      <button class="btn-urs-outline" onclick="addDetailRow()"><span class=\'icon\' data-lucide=\'plus\'></span> Add</button>
+      <button class="btn-urs-primary" onclick="saveDetailRequirements()"><span class=\'icon\' data-lucide=\'save\'></span> Save</button>
     </div>
   </div>
   <div class="urs-table-wrap">
@@ -1237,7 +1237,7 @@ function buildDetailRow(req, idx) {
     <td><span contenteditable="true" data-field="verification_method" style="font-size:12px">${escHtml(req.verification_method || '')}</span></td>
     <td><span contenteditable="true" data-field="acceptance_criteria" style="font-size:12px">${escHtml(req.acceptance_criteria || '')}</span></td>
     <td><div class="req-row-actions">
-      <button class="req-action-btn delete" title="Delete" onclick="deleteDetailRow(this)">🗑</button>
+ <button class="req-action-btn delete"title="Delete"onclick="deleteDetailRow(this)"></button>
     </div></td>
   </tr>`;
 }
@@ -1292,7 +1292,7 @@ window.saveDetailRequirements = async function () {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(reqs),
     }).then(r => r.json());
     ursState.requirements = saved;
-    ursToast(`✅ ${saved.length} requirements saved`, "success");
+ ursToast(`${saved.length} requirements saved`, "success");
   } catch (e) {
     ursToast(`Error: ${e.message}`, "error");
   }
@@ -1307,7 +1307,7 @@ function renderReviewPanel(panel, urs) {
     panel.innerHTML = `
     <div class="urs-ai-panel">
       <div class="urs-ai-panel-header">
-        <div class="urs-ai-icon">🤖</div>
+        <div class="urs-ai-icon"><span class=\'icon\' data-lucide=\'bot\'></span></div>
         <div>
           <div class="urs-ai-panel-title">AI Review Engine</div>
           <div class="urs-ai-panel-sub">Gemini will analyze your URS for completeness, regulatory compliance, and GMP readiness.</div>
@@ -1365,7 +1365,7 @@ function renderReviewPanel(panel, urs) {
     </div>
   </div>
   <div style="margin-top:16px">
-    <button class="btn-urs-outline" onclick="runAIReview(${urs.id})">↻ Re-run Review</button>
+    <button class="btn-urs-outline" onclick="runAIReview(${urs.id})"><span class=\'icon\' data-lucide=\'refresh-cw\'></span> Re-run Review</button>
   </div>`;
 }
 
@@ -1392,7 +1392,7 @@ window.runAIReview = async function (uid) {
       document.querySelector('.urs-detail-panel[data-tab="review"]'),
       ursState.currentURS
     );
-    ursToast("✅ AI Review complete", "success");
+ ursToast("AI Review complete", "success");
   } catch (e) {
     ursToast(`Review failed: ${e.message}`, "error");
     if (btn) btn.disabled = false;
@@ -1405,13 +1405,13 @@ function renderApprovalPanel(panel, urs) {
   panel.innerHTML = `
   <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
     <div style="flex:1;min-width:280px">
-      <div class="urs-section-header" style="margin-bottom:16px"><div class="section-icon">✅</div>Approval Trail</div>
+      <div class="urs-section-header" style="margin-bottom:16px"><div class="section-icon"><span class=\'icon\' data-lucide=\'check-circle-2\'></span></div>Approval Trail</div>
       <div class="urs-approval-timeline" id="approval-timeline">
         <div class="urs-empty" style="padding:20px"><div class="urs-gen-spinner" style="margin:0 auto"></div></div>
       </div>
     </div>
     <div style="width:280px;flex-shrink:0">
-      <div class="urs-section-header" style="margin-bottom:16px"><div class="section-icon">➕</div>Add Entry</div>
+      <div class="urs-section-header" style="margin-bottom:16px"><div class="section-icon"><span class=\'icon\' data-lucide=\'plus\'></span></div>Add Entry</div>
       <div class="urs-field" style="margin-bottom:12px">
         <label class="urs-label">Action</label>
         <select class="urs-select" id="approval-action">
@@ -1455,7 +1455,7 @@ async function loadApprovalTrail(uid) {
         <div class="urs-approval-dot"></div>
         <div class="urs-approval-card">
           <div class="urs-approval-action">${escHtml(e.action)}</div>
-          <div class="urs-approval-meta">👤 ${escHtml(e.performed_by || "—")} · ${escHtml(e.role || "")} · 📅 ${formatDate(e.created_at)}</div>
+          <div class="urs-approval-meta"><span class=\'icon\' data-lucide=\'user\'></span> ${escHtml(e.performed_by || "—")} · ${escHtml(e.role || "")} · <span class=\'icon\' data-lucide=\'calendar\'></span> ${formatDate(e.created_at)}</div>
           ${e.comments ? `<div class="urs-approval-comments">${escHtml(e.comments)}</div>` : ""}
         </div>
       </div>`).join("");
@@ -1479,7 +1479,7 @@ window.addApprovalEntry = async function (uid) {
     // Refresh current URS state and re-render
     ursState.currentURS = await fetch(`/urs/${uid}`).then(r => r.json());
     loadApprovalTrail(uid);
-    ursToast("✅ Approval entry added", "success");
+ ursToast("Approval entry added", "success");
   } catch (e) {
     ursToast(`Error: ${e.message}`, "error");
   }
@@ -1489,8 +1489,8 @@ window.addApprovalEntry = async function (uid) {
 function renderVersionsPanel(panel, urs) {
   panel.innerHTML = `
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-    <div class="urs-section-header" style="margin-bottom:0"><div class="section-icon">🕐</div>Version History</div>
-    <button class="btn-urs-primary" onclick="createVersionSnapshot(${urs.id})">📸 New Snapshot</button>
+    <div class="urs-section-header" style="margin-bottom:0"><div class="section-icon"><span class=\'icon\' data-lucide=\'clock\'></span></div>Version History</div>
+    <button class="btn-urs-primary" onclick="createVersionSnapshot(${urs.id})"><span class=\'icon\' data-lucide=\'camera\'></span> New Snapshot</button>
   </div>
   <div id="versions-list">
     <div class="urs-empty"><div class="urs-gen-spinner" style="margin:0 auto"></div></div>
@@ -1531,7 +1531,7 @@ window.createVersionSnapshot = async function (uid) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ change_summary: summary, created_by: by }),
     });
-    ursToast("✅ Version snapshot created", "success");
+ ursToast("Version snapshot created", "success");
     loadVersionsList(uid);
   } catch (e) {
     ursToast(`Error: ${e.message}`, "error");
@@ -1541,26 +1541,26 @@ window.createVersionSnapshot = async function (uid) {
 /* ── Traceability Tab ───────────────────────────────────────────────────────── */
 function renderTraceabilityPanel(panel, urs) {
   const chain = [
-    { icon: "📋", name: "User Requirement Specification (URS)", sub: urs.urs_number || "This Document", status: "parent" },
-    { icon: "⚠️", name: "Risk Assessment", sub: "FMEA / ICH Q9", status: "" },
-    { icon: "🏗", name: "Design Qualification (DQ)", sub: "Design review & specifications", status: "" },
-    { icon: "🏭", name: "Factory Acceptance Test (FAT)", sub: "Vendor site verification", status: "" },
-    { icon: "🚚", name: "Site Acceptance Test (SAT)", sub: "Post-delivery verification", status: "" },
-    { icon: "🔧", name: "Installation Qualification (IQ)", sub: "Installation verification", status: "" },
-    { icon: "⚙️", name: "Operational Qualification (OQ)", sub: "Functional performance testing", status: "" },
-    { icon: "📊", name: "Performance Qualification (PQ)", sub: "Process capability studies", status: "" },
-    { icon: "🔗", name: "Traceability Matrix", sub: "URS → IQ/OQ/PQ linkage", status: "" },
-    { icon: "📄", name: "Validation Report", sub: "Summary & conclusion", status: "" },
+    { icon: "<span class=\'icon\' data-lucide=\'clipboard-list\'></span>", name: "User Requirement Specification (URS)", sub: urs.urs_number || "This Document", status: "parent" },
+    { icon: "<span class=\'icon\' data-lucide=\'alert-triangle\'></span>", name: "Risk Assessment", sub: "FMEA / ICH Q9", status: "" },
+    { icon: "<span class=\'icon\' data-lucide=\'hard-hat\'></span>", name: "Design Qualification (DQ)", sub: "Design review & specifications", status: "" },
+    { icon: "<span class=\'icon\' data-lucide=\'factory\'></span>", name: "Factory Acceptance Test (FAT)", sub: "Vendor site verification", status: "" },
+    { icon: "<span class=\'icon\' data-lucide=\'truck\'></span>", name: "Site Acceptance Test (SAT)", sub: "Post-delivery verification", status: "" },
+    { icon: "<span class=\'icon\' data-lucide=\'wrench\'></span>", name: "Installation Qualification (IQ)", sub: "Installation verification", status: "" },
+    { icon: "<span class=\'icon\' data-lucide=\'settings\'></span>", name: "Operational Qualification (OQ)", sub: "Functional performance testing", status: "" },
+    { icon: "<span class=\'icon\' data-lucide=\'bar-chart-3\'></span>", name: "Performance Qualification (PQ)", sub: "Process capability studies", status: "" },
+    { icon: "<span class=\'icon\' data-lucide=\'link-2\'></span>", name: "Traceability Matrix", sub: "URS <span class=\'icon\' data-lucide=\'arrow-right\'></span> IQ/OQ/PQ linkage", status: "" },
+    { icon: "<span class=\'icon\' data-lucide=\'file-text\'></span>", name: "Validation Report", sub: "Summary & conclusion", status: "" },
   ];
 
   panel.innerHTML = `
-  <div class="urs-section-header"><div class="section-icon">🔗</div>Validation Lifecycle Traceability</div>
+  <div class="urs-section-header"><div class="section-icon"><span class=\'icon\' data-lucide=\'link-2\'></span></div>Validation Lifecycle Traceability</div>
   <p style="font-size:13px;color:var(--text-muted);margin-bottom:20px">
     This URS is the parent document for the complete validation lifecycle. All downstream documents trace their requirements back to this URS.
   </p>
   <div class="urs-trace-chain">
     ${chain.map((item, i) => `
-      ${i > 0 ? `<div class="urs-trace-arrow">↓</div>` : ""}
+      ${i > 0 ? `<div class="urs-trace-arrow"><span class=\'icon\' data-lucide=\'arrow-down\'></span></div>` : ""}
       <div class="urs-trace-item">
         <div class="urs-trace-icon">${item.icon}</div>
         <div>
@@ -1582,14 +1582,14 @@ window.exportURSDocx = function (uid, ursNum) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  ursToast("⬇ Downloading DOCX…", "info");
+ ursToast("Downloading DOCX…", "info");
 };
 
 window.deleteURS = async function (uid) {
   if (!confirm("Delete this URS? This action cannot be undone.")) return;
   try {
     await fetch(`/urs/${uid}`, { method: "DELETE" });
-    ursToast("✅ URS deleted", "success");
+ ursToast("URS deleted", "success");
     loadURSList();
   } catch (e) {
     ursToast(`Error: ${e.message}`, "error");
@@ -1605,7 +1605,7 @@ window.submitForReview = async function (uid) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "Submitted for Review", performed_by: name, role: "Author", comments: "" }),
     });
-    ursToast("✅ URS submitted for review", "success");
+ ursToast("URS submitted for review", "success");
     ursState.currentURS = await fetch(`/urs/${uid}`).then(r => r.json());
   } catch (e) {
     ursToast(`Error: ${e.message}`, "error");

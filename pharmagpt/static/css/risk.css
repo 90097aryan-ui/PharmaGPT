@@ -2,14 +2,14 @@
 
 /* ── Risk colour palette ────────────────────────────────────────────────────── */
 :root {
-  --risk-critical: #C62828;
-  --risk-high:     #E65100;
-  --risk-medium:   #F9A825;
-  --risk-low:      #2E7D32;
-  --risk-bg:       #F3F6FB;
+  --risk-critical: #C35F5B;
+  --risk-high:     #A97D2E;
+  --risk-medium:   #C59A41;
+  --risk-low:      #5F8A61;
+  --risk-bg:       #F1ECE6;
   --risk-surface:  #FFFFFF;
-  --risk-border:   #D0D9E4;
-  --risk-accent:   #1565C0;
+  --risk-border:   #EEE7E1;
+  --risk-accent:   #8A6B52;
 }
 
 /* ── Risk main container ─────────────────────────────────────────────────────── */
@@ -29,8 +29,8 @@
 
 /* ── Risk page header ────────────────────────────────────────────────────────── */
 .risk-page-header {
-  background: #1E293B;
-  color: #fff;
+  background: #5B4C43;
+  color: #FFF;
   padding: 14px 24px;
   display: flex;
   align-items: center;
@@ -76,7 +76,7 @@
 }
 
 .risk-stat-card {
-  background: #fff;
+  background: #FFF;
   border-radius: 12px;
   padding: 18px 20px;
   border: 1px solid var(--risk-border);
@@ -106,7 +106,7 @@
 
 /* ── Section card ────────────────────────────────────────────────────────────── */
 .risk-section-card {
-  background: #fff;
+  background: #FFF;
   border-radius: 12px;
   border: 1px solid var(--risk-border);
   box-shadow: var(--shadow);
@@ -137,7 +137,7 @@
 }
 
 .assessment-card {
-  background: #fff;
+  background: #FFF;
   border: 1px solid var(--risk-border);
   border-radius: 10px;
   padding: 16px 20px;
@@ -151,7 +151,7 @@
 
 .assessment-card:hover {
   border-color: var(--risk-accent);
-  box-shadow: 0 4px 16px rgba(21,101,192,0.12);
+  box-shadow: 0 4px 16px rgba(123,91,69,0.12);
   transform: translateY(-1px);
 }
 
@@ -208,15 +208,15 @@
   letter-spacing: 0.3px;
 }
 
-.badge-critical { background: #FFEBEE; color: var(--risk-critical); }
-.badge-high     { background: #FFF3E0; color: var(--risk-high); }
-.badge-medium   { background: #FFFDE7; color: #E65100; }
-.badge-low      { background: #E8F5E9; color: var(--risk-low); }
-.badge-draft    { background: #ECEFF1; color: #546E7A; }
-.badge-in-review { background: #E3F2FD; color: #1565C0; }
-.badge-approved { background: #E8F5E9; color: #2E7D32; }
-.badge-closed   { background: #ECEFF1; color: #546E7A; }
-.badge-in-progress { background: #FFF9C4; color: #F57F17; }
+.badge-critical { background: #F7E8E7; color: var(--risk-critical); }
+.badge-high     { background: #FFF4E5; color: var(--risk-high); }
+.badge-medium   { background: #F1ECE6; color: #A97D2E; }
+.badge-low      { background: #E8F2EA; color: var(--risk-low); }
+.badge-draft    { background: #F1ECE6; color: #66615B; }
+.badge-in-review { background: #F1ECE6; color: #8A6B52; }
+.badge-approved { background: #E8F2EA; color: #5F8A61; }
+.badge-closed   { background: #F1ECE6; color: #66615B; }
+.badge-in-progress { background: #FFF4E5; color: #C59A41; }
 
 /* ── Wizard ──────────────────────────────────────────────────────────────────── */
 .risk-wizard {
@@ -228,7 +228,7 @@
   display: flex;
   gap: 0;
   margin-bottom: 28px;
-  background: #fff;
+  background: #FFF;
   border-radius: 12px;
   padding: 16px 24px;
   border: 1px solid var(--risk-border);
@@ -280,12 +280,12 @@
 
 .wizard-step.active .wizard-step-num {
   background: var(--risk-accent);
-  color: #fff;
+  color: #FFF;
 }
 
 .wizard-step.done .wizard-step-num {
   background: var(--risk-low);
-  color: #fff;
+  color: #FFF;
 }
 
 .wizard-panel {
@@ -347,7 +347,7 @@
   font-size: 13px;
   font-family: inherit;
   color: var(--text);
-  background: #fff;
+  background: #FFF;
   transition: border-color 0.15s;
   outline: none;
 }
@@ -356,7 +356,7 @@
 .form-field select:focus,
 .form-field textarea:focus {
   border-color: var(--risk-accent);
-  box-shadow: 0 0 0 3px rgba(21,101,192,0.08);
+  box-shadow: 0 0 0 3px rgba(123,91,69,0.08);
 }
 
 .form-field textarea {
@@ -377,19 +377,19 @@
   padding: 18px 16px;
   cursor: pointer;
   transition: all 0.18s ease;
-  background: #fff;
+  background: #FFF;
   text-align: left;
 }
 
 .risk-type-card:hover {
   border-color: var(--risk-accent);
   transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(21,101,192,0.10);
+  box-shadow: 0 4px 16px rgba(123,91,69,0.10);
 }
 
 .risk-type-card.selected {
   border-color: var(--risk-accent);
-  background: #EEF4FD;
+  background: #F1ECE6;
 }
 
 .risk-type-card .rtc-icon {
@@ -423,18 +423,18 @@
   padding: 14px;
   cursor: pointer;
   transition: all 0.18s ease;
-  background: #fff;
+  background: #FFF;
   text-align: center;
 }
 
 .methodology-card:hover {
   border-color: var(--risk-accent);
-  background: #EEF4FD;
+  background: #F1ECE6;
 }
 
 .methodology-card.selected {
   border-color: var(--risk-accent);
-  background: #EEF4FD;
+  background: #F1ECE6;
 }
 
 .methodology-card .mc-name {
@@ -466,7 +466,7 @@
 
 .risk-table thead th {
   background: var(--navy);
-  color: #fff;
+  color: #FFF;
   padding: 10px 12px;
   text-align: left;
   font-size: 11px;
@@ -481,8 +481,8 @@
 .risk-table thead th.narrow { width: 60px; }
 .risk-table thead th.med   { width: 90px; }
 
-.risk-table tbody tr:nth-child(even) { background: #F8FAFB; }
-.risk-table tbody tr:hover { background: #EEF4FD; }
+.risk-table tbody tr:nth-child(even) { background: #F1ECE6; }
+.risk-table tbody tr:hover { background: #F1ECE6; }
 
 .risk-table tbody td {
   padding: 8px 10px;
@@ -495,7 +495,7 @@
 .risk-table textarea {
   width: 100%;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: 4px 6px;
   font-size: 12px;
   font-family: inherit;
@@ -510,7 +510,7 @@
 .risk-table select:focus,
 .risk-table textarea:focus {
   border-color: var(--risk-accent);
-  background: #fff;
+  background: #FFF;
 }
 
 .risk-table input[type="number"] {
@@ -521,23 +521,23 @@
 /* RPN colour coding */
 .rpn-cell {
   font-weight: 800;
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: 3px 8px;
   text-align: center;
   display: inline-block;
   min-width: 40px;
 }
 
-.rpn-critical { background: #FFEBEE; color: var(--risk-critical); }
-.rpn-high     { background: #FFF3E0; color: var(--risk-high); }
-.rpn-medium   { background: #FFFDE7; color: #E65100; }
-.rpn-low      { background: #E8F5E9; color: var(--risk-low); }
+.rpn-critical { background: #F7E8E7; color: var(--risk-critical); }
+.rpn-high     { background: #FFF4E5; color: var(--risk-high); }
+.rpn-medium   { background: #F1ECE6; color: #A97D2E; }
+.rpn-low      { background: #E8F2EA; color: var(--risk-low); }
 
 /* ── AI panel ────────────────────────────────────────────────────────────────── */
 .risk-ai-panel {
-  background: #EEF4FB;
-  border: 1px solid #D5DDE5;
-  border-left: 3px solid #1565C0;
+  background: #F1ECE6;
+  border: 1px solid #E6DED6;
+  border-left: 3px solid #8A6B52;
   border-radius: 12px;
   padding: 20px 24px;
   margin-bottom: 20px;
@@ -581,7 +581,7 @@
 }
 
 .review-score-card {
-  background: #fff;
+  background: #FFF;
   border-radius: 10px;
   padding: 16px;
   text-align: center;
@@ -602,7 +602,7 @@
 }
 
 .score-excellent { color: var(--risk-low); }
-.score-good      { color: #00897B; }
+.score-good      { color: #5F8A61; }
 .score-fair      { color: var(--risk-medium); }
 .score-poor      { color: var(--risk-critical); }
 
@@ -618,7 +618,7 @@
 
 .heat-cell {
   aspect-ratio: 1;
-  border-radius: 6px;
+  border-radius: var(--radius);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -629,10 +629,10 @@
 }
 
 .heat-cell:hover { transform: scale(1.1); }
-.heat-low      { background: #C8E6C9; color: #1B5E20; }
-.heat-medium   { background: #FFF9C4; color: #F57F17; }
-.heat-high     { background: #FFE0B2; color: #BF360C; }
-.heat-critical { background: #FFCDD2; color: #B71C1C; }
+.heat-low      { background: #E8F2EA; color: #4C7A4E; }
+.heat-medium   { background: #FFF4E5; color: #C59A41; }
+.heat-high     { background: #FFF4E5; color: #8A6B52; }
+.heat-critical { background: #F2D8D6; color: #A8544F; }
 
 /* ── Library table ───────────────────────────────────────────────────────────── */
 .library-filters {
@@ -650,7 +650,7 @@
   border-radius: 8px;
   font-size: 13px;
   font-family: inherit;
-  background: #fff;
+  background: #FFF;
   outline: none;
 }
 
@@ -667,7 +667,7 @@
 }
 
 .template-card {
-  background: #fff;
+  background: #FFF;
   border: 1.5px solid var(--risk-border);
   border-radius: 12px;
   padding: 20px;
@@ -679,7 +679,7 @@
 .template-card:hover {
   border-color: var(--risk-accent);
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(21,101,192,0.12);
+  box-shadow: 0 6px 20px rgba(123,91,69,0.12);
 }
 
 .template-card-icon {
@@ -726,7 +726,7 @@
 .approval-entry {
   position: relative;
   margin-bottom: 18px;
-  background: #fff;
+  background: #FFF;
   border-radius: 10px;
   padding: 14px 16px;
   border: 1px solid var(--risk-border);
@@ -742,7 +742,7 @@
   height: 12px;
   border-radius: 50%;
   background: var(--risk-accent);
-  border: 2px solid #fff;
+  border: 2px solid #FFF;
   box-shadow: 0 0 0 2px var(--risk-accent);
 }
 
@@ -774,7 +774,7 @@
 /* ── Buttons ─────────────────────────────────────────────────────────────────── */
 .btn-risk-primary {
   background: var(--risk-accent);
-  color: #fff;
+  color: #FFF;
   border: none;
   border-radius: 8px;
   padding: 9px 18px;
@@ -791,11 +791,11 @@
 .btn-risk-primary:hover {
   background: var(--navy-light);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(21,101,192,0.25);
+  box-shadow: 0 4px 12px rgba(123,91,69,0.25);
 }
 
 .btn-risk-secondary {
-  background: #fff;
+  background: #FFF;
   color: var(--text);
   border: 1.5px solid var(--risk-border);
   border-radius: 8px;
@@ -813,11 +813,11 @@
 .btn-risk-secondary:hover {
   border-color: var(--risk-accent);
   color: var(--risk-accent);
-  background: #EEF4FD;
+  background: #F1ECE6;
 }
 
 .btn-risk-danger {
-  background: #fff;
+  background: #FFF;
   color: var(--risk-critical);
   border: 1.5px solid var(--risk-critical);
   border-radius: 8px;
@@ -833,15 +833,15 @@
 }
 
 .btn-risk-danger:hover {
-  background: #FFEBEE;
+  background: #F7E8E7;
 }
 
 .btn-risk-icon {
   width: 32px;
   height: 32px;
   border: 1px solid var(--risk-border);
-  border-radius: 6px;
-  background: #fff;
+  border-radius: var(--radius);
+  background: #FFF;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -853,7 +853,7 @@
 
 .btn-risk-icon:hover {
   border-color: var(--risk-accent);
-  background: #EEF4FD;
+  background: #F1ECE6;
 }
 
 /* ── Empty state ─────────────────────────────────────────────────────────────── */
@@ -883,7 +883,7 @@
   display: flex;
   gap: 12px;
   padding: 16px 32px;
-  background: #fff;
+  background: #FFF;
   border-bottom: 1px solid var(--risk-border);
   flex-wrap: wrap;
   align-items: center;
@@ -911,7 +911,7 @@
   border-radius: 8px;
   font-size: 13px;
   font-family: inherit;
-  background: #fff;
+  background: #FFF;
   outline: none;
   cursor: pointer;
 }

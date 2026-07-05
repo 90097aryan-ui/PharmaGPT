@@ -17,8 +17,8 @@ const VALIDATION_DOCS = {
   URS: {
     label: "User Requirement Specification",
     short: "URS",
-    icon: "📋",
-    color: "#7B1FA2",
+    icon: "<span class=\'icon\' data-lucide=\'clipboard-list\'></span>",
+    color: "#8A6B52",
     step2: [
       { id: "doc_number",    label: "Document Number",   placeholder: "URS-001",         required: true  },
       { id: "version",       label: "Version",           placeholder: "1.0",             required: true  },
@@ -30,8 +30,8 @@ const VALIDATION_DOCS = {
   DQ: {
     label: "Design Qualification",
     short: "DQ",
-    icon: "📐",
-    color: "#E65100",
+    icon: "<span class=\'icon\' data-lucide=\'ruler\'></span>",
+    color: "#A97D2E",
     step2: [
       { id: "doc_number",  label: "Document Number", placeholder: "DQ-001", required: true },
       { id: "version",     label: "Version",         placeholder: "1.0",    required: true },
@@ -42,8 +42,8 @@ const VALIDATION_DOCS = {
   FAT: {
     label: "Factory Acceptance Testing",
     short: "FAT",
-    icon: "🏭",
-    color: "#827717",
+    icon: "<span class=\'icon\' data-lucide=\'factory\'></span>",
+    color: "#C59A41",
     step2: [
       { id: "doc_number",    label: "Document Number",     placeholder: "FAT-001", required: true },
       { id: "version",       label: "Version",             placeholder: "1.0",     required: true },
@@ -55,8 +55,8 @@ const VALIDATION_DOCS = {
   SAT: {
     label: "Site Acceptance Testing",
     short: "SAT",
-    icon: "🔩",
-    color: "#4E342E",
+    icon: "<span class=\'icon\' data-lucide=\'wrench\'></span>",
+    color: "#2D2A28",
     step2: [
       { id: "doc_number",  label: "Document Number",  placeholder: "SAT-001", required: true },
       { id: "version",     label: "Version",          placeholder: "1.0",     required: true },
@@ -68,8 +68,8 @@ const VALIDATION_DOCS = {
   IQ: {
     label: "Installation Qualification",
     short: "IQ",
-    icon: "🔧",
-    color: "#1B5E20",
+    icon: "<span class=\'icon\' data-lucide=\'wrench\'></span>",
+    color: "#4C7A4E",
     step2: [
       { id: "protocol_number", label: "Protocol Number",        placeholder: "IQ-001",  required: true },
       { id: "version",         label: "Version",                placeholder: "1.0",     required: true },
@@ -81,8 +81,8 @@ const VALIDATION_DOCS = {
   OQ: {
     label: "Operational Qualification",
     short: "OQ",
-    icon: "🔬",
-    color: "#0D47A1",
+    icon: "<span class=\'icon\' data-lucide=\'microscope\'></span>",
+    color: "#5B4C43",
     step2: [
       { id: "protocol_number", label: "Protocol Number",         placeholder: "OQ-001",  required: true },
       { id: "version",         label: "Version",                 placeholder: "1.0",     required: true },
@@ -95,8 +95,8 @@ const VALIDATION_DOCS = {
   PQ: {
     label: "Performance Qualification",
     short: "PQ",
-    icon: "📊",
-    color: "#006064",
+    icon: "<span class=\'icon\' data-lucide=\'bar-chart-3\'></span>",
+    color: "#3D6140",
     step2: [
       { id: "protocol_number", label: "Protocol Number",    placeholder: "PQ-001",  required: true },
       { id: "version",         label: "Version",            placeholder: "1.0",     required: true },
@@ -110,8 +110,8 @@ const VALIDATION_DOCS = {
   FMEA: {
     label: "Failure Mode and Effects Analysis",
     short: "FMEA",
-    icon: "⚠️",
-    color: "#B71C1C",
+    icon: "<span class=\'icon\' data-lucide=\'alert-triangle\'></span>",
+    color: "#A8544F",
     step2: [
       { id: "doc_number",   label: "FMEA Document Number", placeholder: "FMEA-001", required: true },
       { id: "version",      label: "Version",              placeholder: "1.0",      required: true },
@@ -122,8 +122,8 @@ const VALIDATION_DOCS = {
   CAPA: {
     label: "Corrective and Preventive Action",
     short: "CAPA",
-    icon: "🔄",
-    color: "#1A237E",
+    icon: "<span class=\'icon\' data-lucide=\'repeat\'></span>",
+    color: "#5B4C43",
     step2: [
       { id: "capa_number",  label: "CAPA Number",   placeholder: "CAPA-001",              required: true },
       { id: "version",      label: "Version",        placeholder: "1.0",                   required: true },
@@ -135,8 +135,8 @@ const VALIDATION_DOCS = {
   Deviation: {
     label: "Deviation Report",
     short: "DEV",
-    icon: "⚡",
-    color: "#E65100",
+    icon: "<span class=\'icon\' data-lucide=\'zap\'></span>",
+    color: "#A97D2E",
     step2: [
       { id: "deviation_number", label: "Deviation Number", placeholder: "DEV-001",                      required: true },
       { id: "version",          label: "Version",          placeholder: "1.0",                          required: true },
@@ -148,8 +148,8 @@ const VALIDATION_DOCS = {
   "Change Control": {
     label: "Change Control",
     short: "CC",
-    icon: "🔀",
-    color: "#37474F",
+    icon: "<span class=\'icon\' data-lucide=\'shuffle\'></span>",
+    color: "#66615B",
     step2: [
       { id: "cc_number",           label: "Change Control Number", placeholder: "CC-001",            required: true },
       { id: "version",             label: "Version",               placeholder: "1.0",               required: true },

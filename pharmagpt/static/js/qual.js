@@ -63,7 +63,7 @@ async function loadQualDashboard() {
     const d = await res.json();
     pane.innerHTML = renderQualDashboard(d);
   } catch (e) {
-    pane.innerHTML = `<div class="qual-empty"><div class="qual-empty-icon">⚠️</div><div class="qual-empty-text">Failed to load dashboard</div></div>`;
+    pane.innerHTML = `<div class="qual-empty"><div class="qual-empty-icon"><span class=\'icon\' data-lucide=\'alert-triangle\'></span></div><div class="qual-empty-text">Failed to load dashboard</div></div>`;
   }
 }
 
@@ -71,14 +71,14 @@ function renderQualDashboard(d) {
   const pct = d.total > 0 ? Math.round((d.completed + d.approved) / d.total * 100) : 0;
   return `
     <div class="qual-dash-stats">
-      <div class="qual-stat-card"><div class="qual-stat-icon">📋</div><div class="qual-stat-value">${d.total}</div><div class="qual-stat-label">Total Qualifications</div></div>
-      <div class="qual-stat-card"><div class="qual-stat-icon">✅</div><div class="qual-stat-value">${d.iq_complete}</div><div class="qual-stat-label">IQ Complete</div></div>
-      <div class="qual-stat-card"><div class="qual-stat-icon">✅</div><div class="qual-stat-value">${d.oq_complete}</div><div class="qual-stat-label">OQ Complete</div></div>
-      <div class="qual-stat-card"><div class="qual-stat-icon">✅</div><div class="qual-stat-value">${d.pq_complete}</div><div class="qual-stat-label">PQ Complete</div></div>
-      <div class="qual-stat-card"><div class="qual-stat-icon">🧪</div><div class="qual-stat-value">${d.total_tests}</div><div class="qual-stat-label">Total Tests</div></div>
-      <div class="qual-stat-card"><div class="qual-stat-icon">✔️</div><div class="qual-stat-value">${d.pass_count}</div><div class="qual-stat-label">Tests Passed</div></div>
-      <div class="qual-stat-card"><div class="qual-stat-icon">❌</div><div class="qual-stat-value">${d.fail_count}</div><div class="qual-stat-label">Tests Failed</div></div>
-      <div class="qual-stat-card"><div class="qual-stat-icon">⚠️</div><div class="qual-stat-value">${d.open_deviations}</div><div class="qual-stat-label">Open Deviations</div></div>
+      <div class="qual-stat-card"><div class="qual-stat-icon"><span class=\'icon\' data-lucide=\'clipboard-list\'></span></div><div class="qual-stat-value">${d.total}</div><div class="qual-stat-label">Total Qualifications</div></div>
+      <div class="qual-stat-card"><div class="qual-stat-icon"><span class=\'icon\' data-lucide=\'check-circle-2\'></span></div><div class="qual-stat-value">${d.iq_complete}</div><div class="qual-stat-label">IQ Complete</div></div>
+      <div class="qual-stat-card"><div class="qual-stat-icon"><span class=\'icon\' data-lucide=\'check-circle-2\'></span></div><div class="qual-stat-value">${d.oq_complete}</div><div class="qual-stat-label">OQ Complete</div></div>
+      <div class="qual-stat-card"><div class="qual-stat-icon"><span class=\'icon\' data-lucide=\'check-circle-2\'></span></div><div class="qual-stat-value">${d.pq_complete}</div><div class="qual-stat-label">PQ Complete</div></div>
+      <div class="qual-stat-card"><div class="qual-stat-icon"><span class=\'icon\' data-lucide=\'test-tube-2\'></span></div><div class="qual-stat-value">${d.total_tests}</div><div class="qual-stat-label">Total Tests</div></div>
+      <div class="qual-stat-card"><div class="qual-stat-icon"><span class=\'icon\' data-lucide=\'check\'></span></div><div class="qual-stat-value">${d.pass_count}</div><div class="qual-stat-label">Tests Passed</div></div>
+      <div class="qual-stat-card"><div class="qual-stat-icon"><span class=\'icon\' data-lucide=\'circle-x\'></span></div><div class="qual-stat-value">${d.fail_count}</div><div class="qual-stat-label">Tests Failed</div></div>
+      <div class="qual-stat-card"><div class="qual-stat-icon"><span class=\'icon\' data-lucide=\'alert-triangle\'></span></div><div class="qual-stat-value">${d.open_deviations}</div><div class="qual-stat-label">Open Deviations</div></div>
       <div class="qual-stat-card"><div class="qual-stat-icon">⏳</div><div class="qual-stat-value">${d.pending_approvals}</div><div class="qual-stat-label">Pending Approvals</div></div>
     </div>
 
@@ -91,9 +91,9 @@ function renderQualDashboard(d) {
           <span class="qual-progress-pct">${pct}%</span>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:14px;text-align:center;font-size:12px;">
-          <div><div style="font-size:20px;font-weight:800;color:#1565C0">${d.draft}</div><div style="color:#888">Draft</div></div>
-          <div><div style="font-size:20px;font-weight:800;color:#F57F17">${d.in_progress}</div><div style="color:#888">In Progress</div></div>
-          <div><div style="font-size:20px;font-weight:800;color:#1B5E20">${d.approved}</div><div style="color:#888">Approved</div></div>
+          <div><div style="font-size:20px;font-weight:800;color:#8A6B52">${d.draft}</div><div style="color:#66615B">Draft</div></div>
+          <div><div style="font-size:20px;font-weight:800;color:#C59A41">${d.in_progress}</div><div style="color:#66615B">In Progress</div></div>
+          <div><div style="font-size:20px;font-weight:800;color:#4C7A4E">${d.approved}</div><div style="color:#66615B">Approved</div></div>
         </div>
       </div>
       <div class="qual-card">
@@ -101,14 +101,14 @@ function renderQualDashboard(d) {
         ${d.total_tests > 0 ? `
         <div class="qual-progress-row">
           <span class="qual-progress-label">Pass</span>
-          <div class="qual-progress-bar-track"><div class="qual-progress-bar-fill" style="width:${Math.round(d.pass_count/d.total_tests*100)}%;background:linear-gradient(90deg,#43A047,#1B5E20)"></div></div>
+          <div class="qual-progress-bar-track"><div class="qual-progress-bar-fill" style="width:${Math.round(d.pass_count/d.total_tests*100)}%;background:linear-gradient(90deg,#5F8A61,#4C7A4E)"></div></div>
           <span class="qual-progress-pct">${d.pass_count}</span>
         </div>
         <div class="qual-progress-row">
           <span class="qual-progress-label">Fail</span>
-          <div class="qual-progress-bar-track"><div class="qual-progress-bar-fill" style="width:${Math.round(d.fail_count/d.total_tests*100)}%;background:linear-gradient(90deg,#EF5350,#B71C1C)"></div></div>
+          <div class="qual-progress-bar-track"><div class="qual-progress-bar-fill" style="width:${Math.round(d.fail_count/d.total_tests*100)}%;background:linear-gradient(90deg,#C35F5B,#A8544F)"></div></div>
           <span class="qual-progress-pct">${d.fail_count}</span>
-        </div>` : '<div class="qual-empty" style="padding:20px"><div class="qual-empty-icon" style="font-size:28px">🧪</div><div class="qual-empty-text" style="font-size:12px">No tests executed yet</div></div>'}
+        </div>` : '<div class="qual-empty" style="padding:20px"><div class="qual-empty-icon" style="font-size:28px"><span class=\'icon\' data-lucide=\'test-tube-2\'></span></div><div class="qual-empty-text" style="font-size:12px">No tests executed yet</div></div>'}
       </div>
     </div>
 
@@ -130,12 +130,12 @@ function renderQualDashboard(d) {
                 <td>${qualPhasePill('IQ', q.iq_status)}</td>
                 <td>${qualPhasePill('OQ', q.oq_status)}</td>
                 <td>${qualPhasePill('PQ', q.pq_status)}</td>
-                <td style="font-size:11px;color:#888">${q.created_at ? q.created_at.split('T')[0] : ''}</td>
+                <td style="font-size:11px;color:#66615B">${q.created_at ? q.created_at.split('T')[0] : ''}</td>
                 <td><button class="btn-qual-outline" onclick="qualShowDetail(${q.id})" style="padding:4px 10px;font-size:11px">Open</button></td>
               </tr>`).join('')}
           </tbody>
         </table>
-      </div>` : '<div class="qual-empty" style="padding:20px"><div class="qual-empty-icon" style="font-size:28px">📋</div><div class="qual-empty-text">No qualifications yet</div><button class="btn-qual-primary" onclick="qualShowNew()">+ New Qualification</button></div>'}
+      </div>` : '<div class="qual-empty" style="padding:20px"><div class="qual-empty-icon" style="font-size:28px"><span class=\'icon\' data-lucide=\'clipboard-list\'></span></div><div class="qual-empty-text">No qualifications yet</div><button class="btn-qual-primary" onclick="qualShowNew()">+ New Qualification</button></div>'}
     </div>`;
 }
 
@@ -194,7 +194,7 @@ function filterQualList() {
 function renderQualListBody(list) {
   const body = document.getElementById('qual-list-body');
   if (!list || !list.length) {
-    body.innerHTML = `<div class="qual-empty"><div class="qual-empty-icon">📋</div><div class="qual-empty-text">No qualifications found</div><button class="btn-qual-primary" onclick="qualShowNew()">+ New Qualification</button></div>`;
+    body.innerHTML = `<div class="qual-empty"><div class="qual-empty-icon"><span class=\'icon\' data-lucide=\'clipboard-list\'></span></div><div class="qual-empty-text">No qualifications found</div><button class="btn-qual-primary" onclick="qualShowNew()">+ New Qualification</button></div>`;
     return;
   }
   body.innerHTML = `
@@ -207,7 +207,7 @@ function renderQualListBody(list) {
               <td><strong>${q.qual_number || '—'}</strong></td>
               <td>
                 <div style="font-weight:600;font-size:13px">${q.equipment_name || q.title}</div>
-                ${q.manufacturer ? `<div style="font-size:11px;color:#888">${q.manufacturer} ${q.model || ''}</div>` : ''}
+                ${q.manufacturer ? `<div style="font-size:11px;color:#66615B">${q.manufacturer} ${q.model || ''}</div>` : ''}
               </td>
               <td style="font-size:12px">${q.category || '—'}</td>
               <td style="font-size:12px">${q.department || '—'}</td>
@@ -215,7 +215,7 @@ function renderQualListBody(list) {
               <td>${qualPhasePill('IQ', q.iq_status)}</td>
               <td>${qualPhasePill('OQ', q.oq_status)}</td>
               <td>${qualPhasePill('PQ', q.pq_status)}</td>
-              <td style="font-size:11px;color:#888">${q.created_at ? q.created_at.split('T')[0] : ''}</td>
+              <td style="font-size:11px;color:#66615B">${q.created_at ? q.created_at.split('T')[0] : ''}</td>
               <td>
                 <button class="btn-qual-outline" onclick="qualShowDetail(${q.id})" style="padding:4px 10px;font-size:11px">Open</button>
               </td>
@@ -232,7 +232,7 @@ function renderQualForm(qual) {
   pane.innerHTML = `
     <div class="qual-wizard">
       <div class="qual-form-section">
-        <div class="qual-form-section-title">🏷️ Qualification Identification</div>
+        <div class="qual-form-section-title"><span class=\'icon\' data-lucide=\'tag\'></span> Qualification Identification</div>
         <div class="qual-form-grid">
           <div class="qual-form-group">
             <label>Qualification Number</label>
@@ -260,7 +260,7 @@ function renderQualForm(qual) {
       </div>
 
       <div class="qual-form-section">
-        <div class="qual-form-section-title">🔧 Equipment Information</div>
+        <div class="qual-form-section-title"><span class=\'icon\' data-lucide=\'wrench\'></span> Equipment Information</div>
         <div class="qual-form-grid">
           <div class="qual-form-group">
             <label>Equipment Name <span class="required">*</span></label>
@@ -306,7 +306,7 @@ function renderQualForm(qual) {
       </div>
 
       <div class="qual-form-section">
-        <div class="qual-form-section-title">🔗 Module Integration</div>
+        <div class="qual-form-section-title"><span class=\'icon\' data-lucide=\'link-2\'></span> Module Integration</div>
         <div class="qual-form-grid">
           <div class="qual-form-group">
             <label>Linked URS ID</label>
@@ -324,7 +324,7 @@ function renderQualForm(qual) {
       </div>
 
       <div class="qual-form-section">
-        <div class="qual-form-section-title">📝 Description</div>
+        <div class="qual-form-section-title"><span class=\'icon\' data-lucide=\'pencil-line\'></span> Description</div>
         <div class="qual-form-grid">
           <div class="qual-form-group full-width">
             <label>Purpose</label>
@@ -346,7 +346,7 @@ function renderQualForm(qual) {
       </div>
 
       <div class="qual-form-section">
-        <div class="qual-form-section-title">👥 Personnel & Dates</div>
+        <div class="qual-form-section-title"><span class=\'icon\' data-lucide=\'users\'></span> Personnel & Dates</div>
         <div class="qual-form-grid three-col">
           <div class="qual-form-group">
             <label>Prepared By</label>
@@ -378,7 +378,7 @@ function renderQualForm(qual) {
       <div style="display:flex;gap:12px;justify-content:flex-end">
         <button class="btn-qual-outline" onclick="qualShowList()">Cancel</button>
         <button class="btn-qual-primary" onclick="saveQualification(${isEdit ? qual.id : 'null'})">
-          ${isEdit ? '💾 Save Changes' : '✅ Create Qualification'}
+          ${isEdit ? '<span class=\'icon\' data-lucide=\'save\'></span> Save Changes' : '<span class=\'icon\' data-lucide=\'check-circle-2\'></span> Create Qualification'}
         </button>
       </div>
     </div>`;
@@ -458,24 +458,24 @@ function renderQualDetail(qual, protocols) {
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
       <div style="flex:1;min-width:200px">
         <div style="font-size:20px;font-weight:800;color:var(--navy)">${qual.equipment_name || qual.title}</div>
-        <div style="font-size:13px;color:#666;margin-top:2px">${qual.qual_number || 'No number assigned'} · Rev ${qual.revision} · ${qual.department || 'No department'}</div>
+        <div style="font-size:13px;color:#66615B;margin-top:2px">${qual.qual_number || 'No number assigned'} · Rev ${qual.revision} · ${qual.department || 'No department'}</div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         ${qualStatusBadge(qual.status)}
-        <button class="btn-qual-secondary" onclick="renderQualForm(${JSON.stringify(qual).replace(/"/g,'&quot;')});qualShowTab('new')" style="padding:7px 14px;font-size:12px">✏️ Edit</button>
-        <button class="btn-qual-danger" onclick="deleteQualification(${qual.id})" style="font-size:12px">🗑️ Delete</button>
+        <button class="btn-qual-secondary" onclick="renderQualForm(${JSON.stringify(qual).replace(/"/g,'&quot;')});qualShowTab('new')" style="padding:7px 14px;font-size:12px"><span class=\'icon\' data-lucide=\'pencil\'></span> Edit</button>
+        <button class="btn-qual-danger" onclick="deleteQualification(${qual.id})" style="font-size:12px"><span class=\'icon\' data-lucide=\'trash-2\'></span> Delete</button>
       </div>
     </div>
 
     <!-- Tabs -->
     <div class="qual-tabs" id="qual-detail-tabs">
-      <button class="qual-tab active" onclick="qualDetailTab('overview',${qual.id})">📋 Overview</button>
-      <button class="qual-tab" onclick="qualDetailTab('protocols',${qual.id})">🧪 Protocols</button>
+      <button class="qual-tab active" onclick="qualDetailTab('overview',${qual.id})"><span class=\'icon\' data-lucide=\'clipboard-list\'></span> Overview</button>
+      <button class="qual-tab" onclick="qualDetailTab('protocols',${qual.id})"><span class=\'icon\' data-lucide=\'test-tube-2\'></span> Protocols</button>
       <button class="qual-tab" onclick="qualDetailTab('execution',${qual.id})">▶️ Execution</button>
-      <button class="qual-tab" onclick="qualDetailTab('deviations',${qual.id})">⚠️ Deviations</button>
-      <button class="qual-tab" onclick="qualDetailTab('traceability',${qual.id})">🔗 Traceability</button>
-      <button class="qual-tab" onclick="qualDetailTab('approvals',${qual.id})">✅ Approvals</button>
-      <button class="qual-tab" onclick="qualDetailTab('versions',${qual.id})">📜 History</button>
+      <button class="qual-tab" onclick="qualDetailTab('deviations',${qual.id})"><span class=\'icon\' data-lucide=\'alert-triangle\'></span> Deviations</button>
+      <button class="qual-tab" onclick="qualDetailTab('traceability',${qual.id})"><span class=\'icon\' data-lucide=\'link-2\'></span> Traceability</button>
+      <button class="qual-tab" onclick="qualDetailTab('approvals',${qual.id})"><span class=\'icon\' data-lucide=\'check-circle-2\'></span> Approvals</button>
+      <button class="qual-tab" onclick="qualDetailTab('versions',${qual.id})"><span class=\'icon\' data-lucide=\'scroll-text\'></span> History</button>
     </div>
 
     <div id="qual-detail-content">
@@ -525,7 +525,7 @@ function renderQualOverview(qual, iqProt, oqProt, pqProt) {
             ['Department', qual.department],
             ['Location', qual.location],
             ['Validation Type', qual.validation_type],
-          ].map(([k,v]) => `<tr><td style="padding:5px 0;color:#888;font-weight:600;width:40%">${k}</td><td style="padding:5px 0;color:#333">${v||'—'}</td></tr>`).join('')}
+          ].map(([k,v]) => `<tr><td style="padding:5px 0;color:#66615B;font-weight:600;width:40%">${k}</td><td style="padding:5px 0;color:#2D2A28">${v||'—'}</td></tr>`).join('')}
         </table>
       </div>
       <div class="qual-card">
@@ -536,10 +536,10 @@ function renderQualOverview(qual, iqProt, oqProt, pqProt) {
             ['OQ Protocol', qual.oq_status, oqProt],
             ['PQ Protocol', qual.pq_status, pqProt],
           ].map(([label, status, prot]) => `
-            <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#f8fbff;border-radius:8px;border:1px solid #E3F2FD">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#F1ECE6;border-radius:8px;border:1px solid #F1ECE6">
               <div>
                 <div style="font-size:13px;font-weight:700;color:var(--navy)">${label}</div>
-                ${prot ? `<div style="font-size:11px;color:#888">${prot.pass_count || 0} pass / ${prot.fail_count || 0} fail</div>` : '<div style="font-size:11px;color:#aaa">Not created</div>'}
+                ${prot ? `<div style="font-size:11px;color:#66615B">${prot.pass_count || 0} pass / ${prot.fail_count || 0} fail</div>` : '<div style="font-size:11px;color:#9A948C">Not created</div>'}
               </div>
               <div style="display:flex;align-items:center;gap:8px">
                 ${qualPhasePill(label.split(' ')[0], status)}
@@ -553,8 +553,8 @@ function renderQualOverview(qual, iqProt, oqProt, pqProt) {
     ${qual.purpose || qual.scope ? `
     <div class="qual-card" style="margin-top:18px">
       <div class="qual-card-header"><span class="qual-card-title">Scope & Purpose</span></div>
-      ${qual.purpose ? `<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:#888;margin-bottom:4px">PURPOSE</div><div style="font-size:13px;color:#333">${qual.purpose}</div></div>` : ''}
-      ${qual.scope ? `<div><div style="font-size:11px;font-weight:700;color:#888;margin-bottom:4px">SCOPE</div><div style="font-size:13px;color:#333">${qual.scope}</div></div>` : ''}
+      ${qual.purpose ? `<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:#66615B;margin-bottom:4px">PURPOSE</div><div style="font-size:13px;color:#2D2A28">${qual.purpose}</div></div>` : ''}
+      ${qual.scope ? `<div><div style="font-size:11px;font-weight:700;color:#66615B;margin-bottom:4px">SCOPE</div><div style="font-size:13px;color:#2D2A28">${qual.scope}</div></div>` : ''}
     </div>` : ''}`;
 }
 
@@ -598,10 +598,10 @@ function renderProtocolsPane(qualId, protocols) {
           </div>
           <div class="qual-protocol-card-actions" onclick="event.stopPropagation()">
             <button class="btn-qual-outline" onclick="openProtocol(${qualId},${prot.id},'${ptype}')">Open Protocol</button>
-            <button class="btn-qual-primary" onclick="exportProtocol(${qualId},${prot.id})">⬇ DOCX</button>
+            <button class="btn-qual-primary" onclick="exportProtocol(${qualId},${prot.id})"><span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span> DOCX</button>
           </div>` : `
           <div class="qual-empty" style="padding:16px 0;text-align:left">
-            <div style="font-size:12px;color:#aaa;margin-bottom:8px">Protocol not created yet</div>
+            <div style="font-size:12px;color:#9A948C;margin-bottom:8px">Protocol not created yet</div>
             <button class="btn-qual-primary" style="font-size:12px" onclick="event.stopPropagation();createProtocol(${qualId},'${ptype}')">+ Create ${ptype} Protocol</button>
           </div>`}
         </div>`;
@@ -656,24 +656,24 @@ function renderProtocolDetail(qualId, protocol, testCases) {
 
   return `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
-      <button class="btn-qual-outline" onclick="loadProtocolsPane(${qualId})" style="font-size:12px">← Protocols</button>
+      <button class="btn-qual-outline" onclick="loadProtocolsPane(${qualId})" style="font-size:12px"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Protocols</button>
       <div style="flex:1">
         <div style="font-size:16px;font-weight:800;color:var(--navy)">${protocol.title}</div>
-        <div style="font-size:12px;color:#888">${protocol.protocol_number || 'No number'} · Rev ${protocol.revision} · ${total} test cases</div>
+        <div style="font-size:12px;color:#66615B">${protocol.protocol_number || 'No number'} · Rev ${protocol.revision} · ${total} test cases</div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${qualStatusBadge(protocol.status)}
-        <button class="btn-qual-primary" onclick="generateTestCases(${qualId},${protocol.id},'${ptype}')">🤖 AI Generate</button>
-        <button class="btn-qual-secondary" onclick="aiReviewProtocol(${qualId},${protocol.id})" style="padding:7px 14px;font-size:12px">🔍 AI Review</button>
-        <button class="btn-qual-dark" onclick="exportProtocol(${qualId},${protocol.id})" style="padding:7px 14px;font-size:12px">⬇ DOCX</button>
+        <button class="btn-qual-primary" onclick="generateTestCases(${qualId},${protocol.id},'${ptype}')"><span class=\'icon\' data-lucide=\'bot\'></span> AI Generate</button>
+        <button class="btn-qual-secondary" onclick="aiReviewProtocol(${qualId},${protocol.id})" style="padding:7px 14px;font-size:12px"><span class=\'icon\' data-lucide=\'search\'></span> AI Review</button>
+        <button class="btn-qual-dark" onclick="exportProtocol(${qualId},${protocol.id})" style="padding:7px 14px;font-size:12px"><span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span> DOCX</button>
       </div>
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">
-      <div class="qual-stat-card"><div class="qual-stat-icon">🧪</div><div class="qual-stat-value">${total}</div><div class="qual-stat-label">Total Tests</div></div>
-      <div class="qual-stat-card"><div class="qual-stat-icon">✅</div><div class="qual-stat-value" style="color:#1B5E20">${pass}</div><div class="qual-stat-label">Pass</div></div>
-      <div class="qual-stat-card"><div class="qual-stat-icon">❌</div><div class="qual-stat-value" style="color:#B71C1C">${fail}</div><div class="qual-stat-label">Fail</div></div>
-      <div class="qual-stat-card"><div class="qual-stat-icon">⏳</div><div class="qual-stat-value" style="color:#F57F17">${pend}</div><div class="qual-stat-label">Pending</div></div>
+      <div class="qual-stat-card"><div class="qual-stat-icon"><span class=\'icon\' data-lucide=\'test-tube-2\'></span></div><div class="qual-stat-value">${total}</div><div class="qual-stat-label">Total Tests</div></div>
+      <div class="qual-stat-card"><div class="qual-stat-icon"><span class=\'icon\' data-lucide=\'check-circle-2\'></span></div><div class="qual-stat-value" style="color:#4C7A4E">${pass}</div><div class="qual-stat-label">Pass</div></div>
+      <div class="qual-stat-card"><div class="qual-stat-icon"><span class=\'icon\' data-lucide=\'circle-x\'></span></div><div class="qual-stat-value" style="color:#A8544F">${fail}</div><div class="qual-stat-label">Fail</div></div>
+      <div class="qual-stat-card"><div class="qual-stat-icon">⏳</div><div class="qual-stat-value" style="color:#C59A41">${pend}</div><div class="qual-stat-label">Pending</div></div>
     </div>
 
     <div class="qual-progress-row" style="margin-bottom:18px">
@@ -689,12 +689,12 @@ function renderProtocolDetail(qualId, protocol, testCases) {
 
     <div class="qual-tc-list" id="tc-list-${protocol.id}">
       ${testCases.length ? testCases.map(tc => renderTestCaseItem(qualId, protocol.id, tc)).join('') :
-        `<div class="qual-empty"><div class="qual-empty-icon">🧪</div><div class="qual-empty-text">No test cases yet. Click AI Generate to create them automatically.</div></div>`}
+        `<div class="qual-empty"><div class="qual-empty-icon"><span class=\'icon\' data-lucide=\'test-tube-2\'></span></div><div class="qual-empty-text">No test cases yet. Click AI Generate to create them automatically.</div></div>`}
     </div>`;
 }
 
 function renderTestCaseItem(qualId, protocolId, tc) {
-  const statusIcon = { pass: '✅', fail: '❌', na: 'N/A', pending: '⏳' }[tc.status || 'pending'] || '⏳';
+  const statusIcon = { pass: '<span class=\'icon\' data-lucide=\'check-circle-2\'></span>', fail: '<span class=\'icon\' data-lucide=\'circle-x\'></span>', na: 'N/A', pending: '⏳' }[tc.status || 'pending'] || '⏳';
   return `
     <div class="qual-tc-item" id="tc-item-${tc.id}">
       <div class="qual-tc-header" onclick="toggleTestCase(${tc.id})">
@@ -721,7 +721,7 @@ function renderTestCaseItem(qualId, protocolId, tc) {
 
         <!-- Execution panel -->
         <div class="qual-exec-panel">
-          <h4>⚡ Execute Test Case</h4>
+          <h4><span class=\'icon\' data-lucide=\'zap\'></span> Execute Test Case</h4>
           <div class="qual-exec-grid">
             <div class="qual-form-group">
               <label>Actual Result</label>
@@ -745,16 +745,16 @@ function renderTestCaseItem(qualId, protocolId, tc) {
             </div>
           </div>
           <div style="margin-top:12px">
-            <label style="font-size:11px;font-weight:700;color:#555;display:block;margin-bottom:6px">RESULT</label>
+            <label style="font-size:11px;font-weight:700;color:#66615B;display:block;margin-bottom:6px">RESULT</label>
             <div class="qual-result-btns">
-              <button class="qual-result-btn pass" id="rb-pass-${tc.id}" onclick="setResult(${tc.id},'pass')">✅ PASS</button>
-              <button class="qual-result-btn fail" id="rb-fail-${tc.id}" onclick="setResult(${tc.id},'fail')">❌ FAIL</button>
+              <button class="qual-result-btn pass" id="rb-pass-${tc.id}" onclick="setResult(${tc.id},'pass')"><span class=\'icon\' data-lucide=\'check-circle-2\'></span> PASS</button>
+              <button class="qual-result-btn fail" id="rb-fail-${tc.id}" onclick="setResult(${tc.id},'fail')"><span class=\'icon\' data-lucide=\'circle-x\'></span> FAIL</button>
               <button class="qual-result-btn na"   id="rb-na-${tc.id}"   onclick="setResult(${tc.id},'na')">N/A</button>
             </div>
           </div>
           <div style="display:flex;gap:8px;margin-top:12px">
-            <button class="btn-qual-success" onclick="saveExecution(${qualId},${protocolId},${tc.id})">💾 Save Result</button>
-            <button class="btn-qual-danger" onclick="deleteTestCase(${qualId},${protocolId},${tc.id})" style="font-size:11px">🗑️ Delete TC</button>
+            <button class="btn-qual-success" onclick="saveExecution(${qualId},${protocolId},${tc.id})"><span class=\'icon\' data-lucide=\'save\'></span> Save Result</button>
+            <button class="btn-qual-danger" onclick="deleteTestCase(${qualId},${protocolId},${tc.id})" style="font-size:11px"><span class=\'icon\' data-lucide=\'trash-2\'></span> Delete TC</button>
           </div>
         </div>
       </div>
@@ -795,11 +795,11 @@ async function saveExecution(qualId, protocolId, tcId) {
     if (!res.ok) throw new Error(await res.text());
     // Update local status badge
     const badge = document.querySelector(`#tc-item-${tcId} .qs-badge:last-child`);
-    const icon = { pass: '✅', fail: '❌', na: 'N/A', pending: '⏳' }[result] || '⏳';
+    const icon = { pass: '<span class=\'icon\' data-lucide=\'check-circle-2\'></span>', fail: '<span class=\'icon\' data-lucide=\'circle-x\'></span>', na: 'N/A', pending: '⏳' }[result] || '⏳';
     if (badge) badge.innerHTML = `${icon} ${result.toUpperCase()}`;
     const item = document.getElementById(`tc-item-${tcId}`);
-    if (item) item.querySelector('.qual-tc-header').style.background = result === 'pass' ? '#f0fff4' : result === 'fail' ? '#fff5f5' : '';
-    alert(result === 'pass' ? '✅ Test passed and saved!' : result === 'fail' ? '❌ Test failed. Deviation created.' : '✔ Result saved.');
+    if (item) item.querySelector('.qual-tc-header').style.background = result === 'pass' ? '#E8F2EA' : result === 'fail' ? '#F7E8E7' : '';
+ alert(result === 'pass' ? ' Test passed and saved!' : result === 'fail' ? ' Test failed. Deviation created.' : ' Result saved.');
   } catch (e) {
     alert('Save failed: ' + e.message);
   }
@@ -823,7 +823,7 @@ async function generateTestCases(qualId, protocolId, ptype) {
   overlay.innerHTML = `
     <div class="qual-generating-box">
       <div class="qual-generating-spinner"></div>
-      <div class="qual-generating-title">🤖 Generating ${ptype} Test Cases</div>
+      <div class="qual-generating-title"><span class=\'icon\' data-lucide=\'bot\'></span> Generating ${ptype} Test Cases</div>
       <div class="qual-generating-sub" id="qual-gen-sub">AI is analyzing equipment and URS requirements…</div>
       <div id="qual-gen-count" style="font-size:22px;font-weight:800;color:var(--navy);margin-top:12px">0 test cases</div>
     </div>`;
@@ -877,7 +877,7 @@ async function generateTestCases(qualId, protocolId, ptype) {
 async function aiReviewProtocol(qualId, protocolId) {
   const content = document.getElementById('qual-detail-content');
   const reviewArea = document.createElement('div');
-  reviewArea.innerHTML = '<div class="qual-loading" style="padding:30px">🔍 Running AI review…</div>';
+  reviewArea.innerHTML = '<div class="qual-loading" style="padding:30px"><span class=\'icon\' data-lucide=\'search\'></span> Running AI review…</div>';
   content.appendChild(reviewArea);
   try {
     const res = await fetch(`/qual/${qualId}/protocols/${protocolId}/review`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
@@ -894,7 +894,7 @@ function renderAIReview(r) {
   return `
     <div class="qual-review-panel" style="margin-top:18px">
       <div class="qual-card-header">
-        <span class="qual-card-title">🤖 AI Protocol Review</span>
+        <span class="qual-card-title"><span class=\'icon\' data-lucide=\'bot\'></span> AI Protocol Review</span>
       </div>
       <div class="qual-review-recommendation ${recClass}">${rec}</div>
       <div class="qual-review-scores">
@@ -903,13 +903,13 @@ function renderAIReview(r) {
         <div class="qual-review-score-card"><div class="qual-review-score-value">${r.completeness_score || 0}</div><div class="qual-review-score-label">Completeness</div></div>
         <div class="qual-review-score-card"><div class="qual-review-score-value">${r.risk_coverage_score || 0}</div><div class="qual-review-score-label">Risk Coverage</div></div>
       </div>
-      ${r.executive_summary ? `<div style="padding:14px;background:#f8fbff;border-radius:8px;font-size:13px;color:#333;margin-bottom:16px;line-height:1.6">${r.executive_summary}</div>` : ''}
+      ${r.executive_summary ? `<div style="padding:14px;background:#F1ECE6;border-radius:8px;font-size:13px;color:#2D2A28;margin-bottom:16px;line-height:1.6">${r.executive_summary}</div>` : ''}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-        ${reviewSection('✅ Strengths', r.strengths, '#E8F5E9', '#2E7D32', '✔')}
-        ${reviewSection('⚠️ Missing Tests', r.missing_tests, '#FFF8E1', '#F57F17', '!')}
-        ${reviewSection('📋 Improvements', r.improvements, '#E3F2FD', '#1565C0', '→')}
-        ${reviewSection('🔴 Regulatory Gaps', r.regulatory_gaps, '#FFEBEE', '#B71C1C', '!')}
-        ${r.duplicate_tests?.length ? reviewSection('🔄 Duplicate Tests', r.duplicate_tests, '#F3E5F5', '#6A1B9A', '≡') : ''}
+        ${reviewSection('<span class=\'icon\' data-lucide=\'check-circle-2\'></span> Strengths', r.strengths, '#E8F2EA', '#5F8A61', '<span class=\'icon\' data-lucide=\'check\'></span>')}
+        ${reviewSection('<span class=\'icon\' data-lucide=\'alert-triangle\'></span> Missing Tests', r.missing_tests, '#FFF4E5', '#C59A41', '!')}
+        ${reviewSection('<span class=\'icon\' data-lucide=\'clipboard-list\'></span> Improvements', r.improvements, '#F1ECE6', '#8A6B52', '<span class=\'icon\' data-lucide=\'arrow-right\'></span>')}
+        ${reviewSection('<span class=\'icon\' data-lucide=\'circle\'></span> Regulatory Gaps', r.regulatory_gaps, '#F7E8E7', '#A8544F', '!')}
+        ${r.duplicate_tests?.length ? reviewSection('<span class=\'icon\' data-lucide=\'repeat\'></span> Duplicate Tests', r.duplicate_tests, '#F1ECE6', '#66615B', '≡') : ''}
       </div>
     </div>`;
 }
@@ -952,9 +952,9 @@ async function loadExecutionPane(qualId) {
           </div>
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">
             <div class="qual-stat-card" style="padding:10px"><div class="qual-stat-value">${total}</div><div class="qual-stat-label">Total</div></div>
-            <div class="qual-stat-card" style="padding:10px"><div class="qual-stat-value" style="color:#1B5E20">${pass}</div><div class="qual-stat-label">Pass</div></div>
-            <div class="qual-stat-card" style="padding:10px"><div class="qual-stat-value" style="color:#B71C1C">${fail}</div><div class="qual-stat-label">Fail</div></div>
-            <div class="qual-stat-card" style="padding:10px"><div class="qual-stat-value" style="color:#F57F17">${pend}</div><div class="qual-stat-label">Pending</div></div>
+            <div class="qual-stat-card" style="padding:10px"><div class="qual-stat-value" style="color:#4C7A4E">${pass}</div><div class="qual-stat-label">Pass</div></div>
+            <div class="qual-stat-card" style="padding:10px"><div class="qual-stat-value" style="color:#A8544F">${fail}</div><div class="qual-stat-label">Fail</div></div>
+            <div class="qual-stat-card" style="padding:10px"><div class="qual-stat-value" style="color:#C59A41">${pend}</div><div class="qual-stat-label">Pending</div></div>
           </div>
           <div class="qual-progress-row">
             <span class="qual-progress-label">Pass Rate</span>
@@ -983,7 +983,7 @@ async function loadDeviationsPane(qualId) {
       </div>
       <div id="qual-dev-list">
         ${devs.length ? devs.map(d => renderDeviationItem(qualId, d)).join('') :
-          `<div class="qual-empty"><div class="qual-empty-icon">✅</div><div class="qual-empty-text">No deviations recorded</div></div>`}
+          `<div class="qual-empty"><div class="qual-empty-icon"><span class=\'icon\' data-lucide=\'check-circle-2\'></span></div><div class="qual-empty-text">No deviations recorded</div></div>`}
       </div>`;
   } catch (e) {
     content.innerHTML = '<div class="qual-empty">Failed to load deviations</div>';
@@ -1002,7 +1002,7 @@ function renderDeviationItem(qualId, d) {
         <span class="qs-badge ${d.impact === 'Critical' ? 'qs-fail' : d.impact === 'Major' ? 'qs-in-progress' : 'qs-draft'}">${d.impact}</span>
       </div>
       <div class="qual-dev-meta">
-        ${d.description ? `<div style="margin-bottom:4px;color:#555">${d.description}</div>` : ''}
+        ${d.description ? `<div style="margin-bottom:4px;color:#66615B">${d.description}</div>` : ''}
         <div>Raised by: ${d.raised_by || '—'} on ${d.raised_date || '—'}</div>
         ${d.corrective_action ? `<div style="margin-top:4px"><strong>CAPA:</strong> ${d.corrective_action}</div>` : ''}
       </div>
@@ -1052,16 +1052,16 @@ function renderTraceabilityPane(qualId, matrix) {
 
   return `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <div style="font-size:14px;font-weight:700;color:var(--navy)">🔗 Auto-Generated Traceability Matrix</div>
-      <button class="btn-qual-primary" onclick="exportTraceability(${qualId})">⬇ Export DOCX</button>
+      <div style="font-size:14px;font-weight:700;color:var(--navy)"><span class=\'icon\' data-lucide=\'link-2\'></span> Auto-Generated Traceability Matrix</div>
+      <button class="btn-qual-primary" onclick="exportTraceability(${qualId})"><span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span> Export DOCX</button>
     </div>
 
     <div class="qual-trace-summary">
       <div class="qual-trace-stat"><div class="qual-trace-stat-value">${rows.length}</div><div class="qual-trace-stat-label">Test Cases</div></div>
       <div class="qual-trace-stat"><div class="qual-trace-stat-value">${ursTotal}</div><div class="qual-trace-stat-label">URS Requirements</div></div>
-      <div class="qual-trace-stat"><div class="qual-trace-stat-value" style="color:${ursCovPct>=80?'#1B5E20':'#F57F17'}">${ursCovPct}%</div><div class="qual-trace-stat-label">URS Coverage</div></div>
+      <div class="qual-trace-stat"><div class="qual-trace-stat-value" style="color:${ursCovPct>=80?'#4C7A4E':'#C59A41'}">${ursCovPct}%</div><div class="qual-trace-stat-label">URS Coverage</div></div>
       <div class="qual-trace-stat"><div class="qual-trace-stat-value">${riskTotal}</div><div class="qual-trace-stat-label">Risk Items</div></div>
-      <div class="qual-trace-stat"><div class="qual-trace-stat-value" style="color:${riskCovPct>=80?'#1B5E20':'#F57F17'}">${riskCovPct}%</div><div class="qual-trace-stat-label">Risk Coverage</div></div>
+      <div class="qual-trace-stat"><div class="qual-trace-stat-value" style="color:${riskCovPct>=80?'#4C7A4E':'#C59A41'}">${riskCovPct}%</div><div class="qual-trace-stat-label">Risk Coverage</div></div>
     </div>
 
     <div class="qual-card">
@@ -1074,7 +1074,7 @@ function renderTraceabilityPane(qualId, matrix) {
               <tr>
                 <td><strong>${r.test_id}</strong></td>
                 <td style="font-size:12px">${r.test_name || ''}</td>
-                <td style="font-size:11px;color:#888">${r.section || ''}</td>
+                <td style="font-size:11px;color:#66615B">${r.section || ''}</td>
                 <td style="font-size:11px">${(r.urs_req_ids||[]).join(', ') || '—'}</td>
                 <td style="font-size:11px">${(r.risk_item_ids||[]).join(', ') || '—'}</td>
                 <td>${qualResultBadge(r.status)}</td>
@@ -1104,7 +1104,7 @@ async function loadApprovalsPane(qualId) {
             <div class="qual-timeline-content">
               <div class="qual-timeline-action">${e.action}</div>
               <div class="qual-timeline-meta">${e.performed_by} · ${e.role || ''} · ${e.created_at?.split('T')[0] || ''}</div>
-              ${e.comments ? `<div style="font-size:12px;color:#555;margin-top:4px">${e.comments}</div>` : ''}
+              ${e.comments ? `<div style="font-size:12px;color:#66615B;margin-top:4px">${e.comments}</div>` : ''}
             </div>
           </div>`).join('') :
           '<div class="qual-empty" style="padding:20px">No approval entries yet</div>'}
@@ -1154,14 +1154,14 @@ async function loadVersionsPane(qualId) {
                 <td>Rev ${v.revision}</td>
                 <td>${qualStatusBadge(v.status)}</td>
                 <td>${v.test_count}</td>
-                <td style="color:#1B5E20;font-weight:600">${v.pass_count}</td>
-                <td style="color:#B71C1C;font-weight:600">${v.fail_count}</td>
+                <td style="color:#4C7A4E;font-weight:600">${v.pass_count}</td>
+                <td style="color:#A8544F;font-weight:600">${v.fail_count}</td>
                 <td style="font-size:12px">${v.created_by || '—'}</td>
-                <td style="font-size:11px;color:#888">${v.created_at?.split('T')[0] || ''}</td>
+                <td style="font-size:11px;color:#66615B">${v.created_at?.split('T')[0] || ''}</td>
               </tr>`).join('')}
           </tbody>
         </table>
-      </div>` : '<div class="qual-empty"><div class="qual-empty-icon">📜</div><div class="qual-empty-text">No version snapshots yet</div></div>'}`;
+      </div>` : '<div class="qual-empty"><div class="qual-empty-icon"><span class=\'icon\' data-lucide=\'scroll-text\'></span></div><div class="qual-empty-text">No version snapshots yet</div></div>'}`;
   } catch (e) {
     content.innerHTML = '<div class="qual-empty">Failed to load</div>';
   }
@@ -1226,7 +1226,7 @@ function qualStatusBadge(status) {
     in_progress: ['qs-in-progress', 'In Progress'],
     completed: ['qs-completed', 'Completed'],
     completed_with_deviations: ['qs-in-progress', 'Completed w/ Devs'],
-    approved: ['qs-approved', '✓ Approved'],
+    approved: ['qs-approved', '<span class=\'icon\' data-lucide=\'check\'></span> Approved'],
     under_review: ['qs-under-review', 'Under Review'],
     pending_approval: ['qs-pending-approval', 'Pending Approval'],
     not_started: ['qs-not-started', 'Not Started'],
@@ -1246,7 +1246,7 @@ function qualPhasePill(phase, status) {
 }
 
 function qualResultBadge(status) {
-  const map = { pass: 'qs-pass ✅ PASS', fail: 'qs-fail ❌ FAIL', na: 'qs-na N/A', pending: 'qs-pending ⏳ PENDING' };
+  const map = { pass: 'qs-pass <span class=\'icon\' data-lucide=\'check-circle-2\'></span> PASS', fail: 'qs-fail <span class=\'icon\' data-lucide=\'circle-x\'></span> FAIL', na: 'qs-na N/A', pending: 'qs-pending ⏳ PENDING' };
   const v = map[status] || 'qs-pending ⏳ PENDING';
   const [cls, ...rest] = v.split(' ');
   return `<span class="qs-badge ${cls}">${rest.join(' ')}</span>`;

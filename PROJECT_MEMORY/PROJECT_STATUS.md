@@ -91,11 +91,24 @@ drafting, deviation investigation, CAPA suggestions, and quality trend summaries
 
 ## Current UI Theme
 
-Dark, professional theme, hand-crafted CSS (no framework). Navy/blue brand palette
-(`#1e40af`/`#3b82f6` family), system-UI font stack, no external web fonts (fully offline-capable),
-Unicode emoji for iconography (no icon library). The document viewer / DOCX export is the
-deliberate light-background exception, styled to mimic a printed Word document. Full token list in
-`docs/DESIGN_SYSTEM.md`.
+**"Premium Enterprise" palette v3.0 (2026-07-05, uncommitted)** — refines the "Executive Office"
+redesign (DEC-018) to an exact business-attire palette (Primary BG `#F7F5F2`, Secondary BG
+`#F1ECE6`, Card `#FFFFFF`, Sidebar `#5B4C43`/hover `#6D5B52`/active `#8A6B52`, Primary Button
+`#8A6B52`/hover `#9D7B60`, Primary Text `#2D2A28`, Secondary Text `#66615B`, Muted Text `#9A948C`,
+Border `#E6DED6`, Divider `#EEE7E1`, Success `#5F8A61`, Warning `#C59A41`, Danger `#C35F5B`,
+Information `#6E8FA5`, soft tints `#E7EEF6`/`#E8F2EA`/`#FFF4E5`), and swaps the previous Unicode
+emoji iconography for a single consistent icon library, **Lucide** (loaded via CDN, converted
+client-side by a body-level `MutationObserver` so no individual JS module needs to call
+`lucide.createIcons()` itself — see `refreshIcons()` in `templates/index.html`). The **Regulatory
+Scope** sidebar section (USFDA/MHRA/EU GMP/etc. badges) was removed entirely per explicit
+instruction — regulatory context now belongs inside modules, not as sidebar chrome. Inter remains
+the typeface (Google Fonts, same loading mechanism since v0.2); 14px card radius / 8px spacing /
+soft shadows were already correct from DEC-018 and were preserved. The document viewer / DOCX
+export on-screen component remains the deliberate light-background exception (its exported
+`.docx` styling in `doc_exporter.py` still uses pre-redesign navy — still-open follow-up, unchanged
+by this pass). Full detail in [DECISIONS.md](DECISIONS.md) DEC-019 (supersedes DEC-018's palette
+values and icon strategy; DEC-018's architectural approach — token-based sweep — was reused, not
+replaced).
 
 ---
 
@@ -135,6 +148,57 @@ between `send_file` and `os.remove()` (fixed test-side).
 
 ## Current Sprint
 
+**Pre-Deployment UI Audit** (uncommitted working-tree code, browser-verified, complete): full
+navigation pass through every accessible module, wizard, dialog, modal, dashboard, and workspace
+to close out DEC-019's remaining icon-sweep gap and catch anything a text/hex-based audit can't
+see. Completed the Lucide icon sweep (0 emoji remain anywhere in the codebase, confirmed by a
+full-repo scan) and found/fixed four genuine defects along the way: a cross-suite JS global-function
+name collision (`risk.js`/`urs.js` both declared `renderWizardStep`/`renderApprovalPanel` — URS's
+silently won, meaning Risk's New Assessment wizard and Approval panel never rendered), a missing
+`flex-direction: column` on `.urs-empty` (JS toggles it to `display:flex`, which without that
+property laid empty-state content out in a row instead of stacked), an un-migrated dark theme
+across the entire Validation Report Management Suite's content area (`report.css`/`report.js` —
+predates even DEC-018; two prior colour sweeps had repainted the dark cards' hex *values* without
+ever rendering the screen to notice they were still dark cards), and a missing `flex: 1` on
+`.report-container` that left the whole Report suite at ~70% of its intended width. All four are
+fixed; see [DECISIONS.md](DECISIONS.md) DEC-020 for full root-cause detail on each, plus two
+in-flight regressions this pass introduced-then-caught-itself (a `MutationObserver` infinite loop
+in the icon-conversion script, and an HTML-vs-JS quote-escaping bug), and a documented Flask/Jinja2
+template-caching gotcha for future sessions (restart the dev server after editing
+`templates/index.html`, page-reload alone can serve a stale cached template). Verified live across
+every suite (Dashboard, Knowledge Base, AI Assistant, Generate Document full 5-step wizard shell,
+Documents, Insights, Validation Workspace, single-shot Validation Generator, Risk's 7 views
+including its wizard and AI Assistant, URS's 4 views including its 5-step wizard, Qualification,
+Validation Report's dashboard/list/new-wizard, QMS Dashboard/Documents/Deviations/CAPA including
+opening real detail records and their tabs, and all 3 modals) — zero console errors, zero remaining
+emoji, zero legacy-palette hex literals, zero Bootstrap/FontAwesome references anywhere. No
+backend/API/DB/business-logic changes. See [DECISIONS.md](DECISIONS.md) DEC-020. Next action is a
+git commit, not further design work.
+
+**"Executive Office" Design System Redesign** (uncommitted working-tree code, browser-verified):
+UI-only visual redesign from the earlier navy/blue theme to a warm business-attire palette (Soft
+White/Warm Ivory/Stone/Sand/Beige/Taupe/Walnut Brown/Charcoal/Soft Olive-Sage) across every screen
+— Dashboard, Knowledge Base, Chat, Generate Document, Validation Workspace, QMS (Document Control/
+Deviation/CAPA), and the backend-complete Risk/URS/Qualification/Validation Report suites. Achieved
+by repointing the shared `:root` CSS tokens in `style.css` (reused by every suite CSS per DEC-012)
+and sweeping ~1,200 hardcoded hex/`rgb()` colour literals across all 7 CSS files and 11 JS modules
+to the new palette. No backend, API, database, route, or business-logic changes. See
+[DECISIONS.md](DECISIONS.md) DEC-018 and `docs/DESIGN_SYSTEM.md` (v2.0). Next action is a git
+commit, not further design work — see Known Issues for the one deliberately-deferred follow-up
+(exported-DOCX styling still uses the old navy).
+
+**Validation & Usability Testing Sprint** (uncommitted working-tree code, functionally complete):
+redesigned the Generate Document workspace into a reusable **Enterprise Workspace** layout
+(`workspace.css` + `workspace.js`) — see [ARCHITECTURE.md](ARCHITECTURE.md) §7 and
+[DECISIONS.md](DECISIONS.md) DEC-017. Root cause of the reported "Dashboard visible behind the
+wizard / large blank area / unprofessional feel" was a misplaced `.app-body` closing `</div>` that
+had (since the 2026-06-30 Risk/URS/Qual/Report commit) put every view after the old Validation
+Document Generator view — Generate Document, Risk, URS, Qualification, Validation Report, and all
+of QMS — outside the sidebar-flex layout. Fixed at the root, plus a new reusable workspace shell
+applied to Generate Document as its first implementation. No API, database, or business-logic
+changes. Next action for this sprint is further self-validation / a git commit, not further
+feature work.
+
 **Quality Management Suite — Phase 1** (uncommitted working-tree code, functionally complete):
 Document Control, Deviation Management, CAPA — see [ARCHITECTURE.md](ARCHITECTURE.md) §12 and
 `docs/QMS_PHASE1.md` for full detail. Next action for this sprint is a git commit + version bump,
@@ -160,6 +224,8 @@ not further feature work.
 | 2026-07-01 | Dashboard & Workspace UX | Navigation and project-workspace UX improvements |
 | 2026-07-01 → 07-02 | Document Intelligence Engine (v1.0 rewrite) | Async, multi-engine, timeout-bounded, quality-scored extraction pipeline; replaces synchronous single-engine extractor |
 | v0.9.8 | Release | Document Intelligence Engine + Validation UI improvements (last committed release) |
+| 2026-07-04 | Enterprise Workspace Layout (Validation & Usability Testing Sprint) | Fixed a pre-existing `.app-body` HTML nesting bug (Generate Document/Risk/URS/Qual/Report/QMS all rendered outside the sidebar layout); introduced reusable `workspace.css`/`workspace.js` shell; Generate Document is the first implementation |
+| 2026-07-05 | "Executive Office" Design System Redesign | UI-only visual redesign, navy/blue → warm business-attire palette (Walnut Brown/Warm Charcoal/Muted Sage), across every screen; ~1,200 hardcoded colour literals swept to new tokens across all 7 CSS files + 11 JS modules; no backend/API/DB changes |
 
 ---
 
@@ -296,6 +362,18 @@ From the repository's own code review (`docs/CODE_REVIEW.md`, scope v0.7, findin
   implementations between the global scope and `val_workspace.js`.
 - **UI gap:** Risk/URS/Qual/Report suites have no live sidebar navigation entry point (see
   Completed Modules above).
+- **Visual parity gap (introduced 2026-07-05):** `docx_generator.py`/`doc_exporter.py` still emit
+  the pre-redesign navy heading/table styling in exported `.docx` files — the on-screen "Executive
+  Office" redesign (DEC-018) deliberately did not touch Python-generated document styling (UI-only
+  mandate). Recommended follow-up: repaint exported-document colours to Walnut Brown/Warm Charcoal
+  to match the on-screen viewer.
+- **Competing `showView()` implementations** entry above is the same *class* of bug as the
+  `renderWizardStep`/`renderApprovalPanel` collision found and fixed between `risk.js` and `urs.js`
+  during the 2026-07-05 UI audit (DEC-020) — this codebase's suite `.js` files are not IIFE-wrapped
+  or namespaced, so any two suites declaring a same-named top-level function will silently collide
+  (last-loaded wins). The `val_workspace.js`/global `showView()` pair listed here has not itself
+  been fixed (out of scope for the UI audit, which fixed only the specific instance it found live-
+  broke a wizard); treat this as a live, not just theoretical, risk for any future suite work.
 
 ## Resolved Issues
 
@@ -305,6 +383,38 @@ From the repository's own code review (`docs/CODE_REVIEW.md`, scope v0.7, findin
 - **`get_dashboard_stats()` counting stale data** — previously counted pending CAPAs/Deviations
   from legacy `generated_documents` wizard rows instead of the real `qms_capas`/`qms_deviations`
   tables; fixed as part of the (uncommitted) QMS Phase 1 work.
+- **Views rendered outside the sidebar layout (blank space / no sidebar bug)** — `templates/
+  index.html`'s `.app-body` closing `</div>` was misplaced immediately after the old Validation
+  Document Generator view instead of after the last view in the file, since the 2026-06-30 Risk/
+  URS/Qual/Report commit. Every view after that point (Generate Document, all Risk views, all URS
+  views, Qualification, Validation Report, all QMS views) rendered as a sibling of `.app-body` at
+  the `<body>` level — full-width, no sidebar, with the collapsed-but-still-flex-sized `.app-body`
+  showing as blank space above it. Fixed as part of the Enterprise Workspace redesign (2026-07-04);
+  see [DECISIONS.md](DECISIONS.md) DEC-017.
+- **Icon sweep completed** — the Lucide icon conversion left incomplete by DEC-019 (Risk/URS/
+  Qualification/Validation Report suite-internal emoji, 484 occurrences across 18 files) was
+  finished during the 2026-07-05 pre-deployment UI audit; zero emoji remain anywhere in the
+  codebase. See [DECISIONS.md](DECISIONS.md) DEC-020.
+- **Risk Management Suite's "New Assessment" wizard and Approval panel silently not rendering** —
+  root cause was a global-scope function-name collision: `risk.js` and `urs.js` both declared
+  top-level `renderWizardStep()`/`renderApprovalPanel()`, and since `urs.js` loads after `risk.js`
+  in `templates/index.html`, URS's versions silently overwrote Risk's. Pre-existing defect, never
+  caught before because Risk's sidebar nav is unwired; found and fixed (renamed risk.js's copies to
+  `riskRenderWizardStep`/`riskRenderApprovalPanel`) during the 2026-07-05 UI audit. See
+  [DECISIONS.md](DECISIONS.md) DEC-020.
+- **URS empty-state layout broken (icon/title/button laid out in a row instead of stacked)** —
+  `.urs-empty` was missing `flex-direction: column; align-items: center`; `urs.js` toggles it to
+  `display: flex` via inline style, which without that property defaults to `flex-direction: row`.
+  Fixed during the 2026-07-05 UI audit. See [DECISIONS.md](DECISIONS.md) DEC-020.
+- **Validation Report Management Suite rendered in a pre-DEC-018 dark theme at ~70% width** — the
+  entire content area (`report.css`/`report.js`, ~45+ declarations plus 30 inline styles) was still
+  styled with dark card/table/panel backgrounds and light text, a leftover neither DEC-018 nor
+  DEC-019's automated hex-value sweeps could detect (they correctly translated the literal hex
+  values without knowing those values' *role* — a dark card — was wrong for a light theme); compounded
+  by `.report-container` missing `flex: 1`, leaving the suite narrower than every other view. Fixed
+  during the 2026-07-05 UI audit (property-aware light-theme conversion, print/export `<style>`
+  templates in `risk.js`/`validation.js` deliberately kept dark-header-with-white-text since that's
+  correct for a printed document). See [DECISIONS.md](DECISIONS.md) DEC-020.
 
 ## Known Limitations
 

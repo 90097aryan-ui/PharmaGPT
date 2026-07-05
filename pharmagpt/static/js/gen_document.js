@@ -22,6 +22,8 @@ let gdDraft     = null;   // Final JSON draft object
 
 // ── Entry point ────────────────────────────────────────────────────────────────
 function openGenDocument() {
+  if (window.Workspace) window.Workspace.enter();
+
   gdStep      = 1;
   gdProject   = window.activeProject || null;
   gdDocType   = null;
@@ -34,28 +36,36 @@ function openGenDocument() {
 }
 
 function _gdUpdateHeader() {
-  const tag = document.getElementById("gd-project-tag");
-  if (tag) tag.textContent = gdProject ? gdProject.name : "No project selected";
+  const docs = window.VALIDATION_DOCS || {};
+  const tag  = document.getElementById("gd-project-tag");
+  const dtag = document.getElementById("gd-doctype-tag");
+  if (tag) {
+    tag.textContent = gdProject ? gdProject.name : "No project selected";
+    tag.classList.toggle("is-empty", !gdProject);
+  }
+  if (dtag) {
+    const cfg = docs[gdDocType];
+    dtag.textContent = cfg ? cfg.label || gdDocType : "No document type selected";
+    dtag.classList.toggle("is-empty", !gdDocType);
+  }
 }
 
 const GD_STEP_LABELS = {
   1: "Project", 2: "Doc Type", 3: "Equipment",
   4: "Questions", 5: "Review", 6: "Generate",
 };
+const GD_STEP_ORDER = ["Project", "Doc Type", "Equipment", "Questions", "Review", "Generate"];
 
 function _gdUpdateBreadcrumb() {
-  const el = document.getElementById("gd-breadcrumb");
-  if (!el) return;
-  const projCrumb = gdProject ? _gdEsc(gdProject.name) : "No project selected";
+  if (!window.Workspace) return;
+  const projCrumb = gdProject ? gdProject.name : "No project selected";
   const stepCrumb = GD_STEP_LABELS[gdStep] || "";
-  el.innerHTML = `
-    <span>Dashboard</span>
-    <span class="gd-crumb-sep">›</span>
-    <span>${projCrumb}</span>
-    <span class="gd-crumb-sep">›</span>
-    <span>Generate Document</span>
-    <span class="gd-crumb-sep">›</span>
-    <span class="gd-crumb-current">Step ${gdStep} — ${stepCrumb}</span>`;
+  window.Workspace.renderBreadcrumb("gd-breadcrumb", [
+    { label: "Dashboard" },
+    { label: projCrumb },
+    { label: "Generate Document" },
+    { label: `Step ${gdStep} — ${stepCrumb}`, current: true },
+  ]);
 }
 
 // ── Step rendering ─────────────────────────────────────────────────────────────
@@ -81,20 +91,7 @@ function _gdRenderStep(n) {
 }
 
 function _gdUpdateProgress(active) {
-  for (let i = 1; i <= 6; i++) {
-    const dot  = document.getElementById(`gd-dot-${i}`);
-    const lbl  = document.getElementById(`gd-lbl-${i}`);
-    const line = document.getElementById(`gd-line-${i}`);
-    if (!dot) continue;
-    if (i < active) {
-      dot.className = "gd-step-dot done"; lbl.className = "gd-step-label done";
-    } else if (i === active) {
-      dot.className = "gd-step-dot active"; lbl.className = "gd-step-label active";
-    } else {
-      dot.className = "gd-step-dot"; lbl.className = "gd-step-label";
-    }
-    if (line) line.className = i < active ? "gd-step-line done" : "gd-step-line";
-  }
+  if (window.Workspace) window.Workspace.renderProgress("gd-progress", GD_STEP_ORDER, active);
 }
 
 // ── Step 1: Project Selection ──────────────────────────────────────────────────
@@ -106,7 +103,7 @@ async function _gdStep1(panel) {
       <div id="gd-proj-list" class="gd-proj-list"><div class="gd-loading">Loading projects…</div></div>
       <div class="gd-nav-row">
         <span></span>
-        <button class="gd-btn-primary" onclick="gdNext()">Next → Document Type</button>
+        <button class="gd-btn-primary" onclick="gdNext()">Next <span class=\'icon\' data-lucide=\'arrow-right\'></span> Document Type</button>
       </div>
     </div>`;
 
@@ -125,13 +122,13 @@ async function _gdStep1(panel) {
       return `
         <div class="gd-proj-card ${sel ? "selected" : ""}" data-id="${p.id}" onclick="gdSelectProject(${p.id}, this)">
           <div class="gd-proj-card-left">
-            <div class="gd-proj-icon">📁</div>
+            <div class="gd-proj-icon"><span class=\'icon\' data-lucide=\'folder\'></span></div>
             <div>
               <div class="gd-proj-name">${_gdEsc(p.name)}</div>
               <div class="gd-proj-meta">${_gdEsc(p.equipment_name || "")}${p.department ? " · " + _gdEsc(p.department) : ""}</div>
             </div>
           </div>
-          ${sel ? '<span class="gd-sel-badge">✓ Selected</span>' : ""}
+          ${sel ? '<span class="gd-sel-badge"><span class=\'icon\' data-lucide=\'check\'></span> Selected</span>' : ""}
         </div>`;
     }).join("");
 
@@ -147,7 +144,7 @@ function gdSelectProject(id, el) {
     if (badge) badge.remove();
   });
   el.classList.add("selected");
-  el.insertAdjacentHTML("beforeend", `<span class="gd-sel-badge">✓ Selected</span>`);
+  el.insertAdjacentHTML("beforeend", `<span class="gd-sel-badge"><span class=\'icon\' data-lucide=\'check\'></span> Selected</span>`);
 
   // Find from window projects cache or build minimal object
   gdProject = { id, name: el.querySelector(".gd-proj-name")?.textContent || "" };
@@ -172,15 +169,15 @@ function _gdStep2(panel) {
             <div class="gd-doctype-card ${sel ? "selected" : ""}" data-type="${type}"
                  onclick="gdSelectDocType('${type}', this)"
                  style="${sel ? `border-color:${cfg.color};box-shadow:0 0 0 3px ${cfg.color}22` : ""}">
-              <div class="gd-doctype-icon">${cfg.icon || "📄"}</div>
-              <div class="gd-doctype-short" style="color:${cfg.color || "#1565C0"}">${type}</div>
+              <div class="gd-doctype-icon">${cfg.icon || "<span class=\'icon\' data-lucide=\'file-text\'></span>"}</div>
+              <div class="gd-doctype-short" style="color:${cfg.color || "#8A6B52"}">${type}</div>
               <div class="gd-doctype-label">${cfg.label || type}</div>
             </div>`;
         }).join("")}
       </div>
       <div class="gd-nav-row">
-        <button class="gd-btn-secondary" onclick="gdBack()">← Back</button>
-        <button class="gd-btn-primary" onclick="gdNext()">Next → Equipment Info</button>
+        <button class="gd-btn-secondary" onclick="gdBack()"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Back</button>
+        <button class="gd-btn-primary" onclick="gdNext()">Next <span class=\'icon\' data-lucide=\'arrow-right\'></span> Equipment Info</button>
       </div>
     </div>`;
 }
@@ -194,9 +191,10 @@ function gdSelectDocType(type, el) {
   });
   el.classList.add("selected");
   const cfg = docs[type] || {};
-  el.style.borderColor = cfg.color || "#1565C0";
-  el.style.boxShadow  = `0 0 0 3px ${cfg.color || "#1565C0"}22`;
+  el.style.borderColor = cfg.color || "#8A6B52";
+  el.style.boxShadow  = `0 0 0 3px ${cfg.color || "#8A6B52"}22`;
   gdDocType = type;
+  _gdUpdateHeader();
 }
 
 // ── Step 3: Equipment Information ─────────────────────────────────────────────
@@ -246,8 +244,8 @@ function _gdStep3(panel) {
         ${fields.map(renderField).join("")}
       </div>
       <div class="gd-nav-row">
-        <button class="gd-btn-secondary" onclick="gdBack()">← Back</button>
-        <button class="gd-btn-primary" onclick="gdNext()">Next → Questionnaire</button>
+        <button class="gd-btn-secondary" onclick="gdBack()"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Back</button>
+        <button class="gd-btn-primary" onclick="gdNext()">Next <span class=\'icon\' data-lucide=\'arrow-right\'></span> Questionnaire</button>
       </div>
     </div>`;
 }
@@ -365,8 +363,8 @@ function _gdStep4(panel) {
         <h3 class="gd-step-title">Step 4 — Questionnaire</h3>
         <p class="gd-step-sub">No specific questionnaire for ${gdDocType}. Proceed to review.</p>
         <div class="gd-nav-row">
-          <button class="gd-btn-secondary" onclick="gdBack()">← Back</button>
-          <button class="gd-btn-primary" onclick="gdNext()">Next → Review</button>
+          <button class="gd-btn-secondary" onclick="gdBack()"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Back</button>
+          <button class="gd-btn-primary" onclick="gdNext()">Next <span class=\'icon\' data-lucide=\'arrow-right\'></span> Review</button>
         </div>
       </div>`;
     return;
@@ -395,8 +393,8 @@ function _gdStep4(panel) {
         }).join("")}
       </div>
       <div class="gd-nav-row">
-        <button class="gd-btn-secondary" onclick="gdBack()">← Back</button>
-        <button class="gd-btn-primary" onclick="gdNext()">Next → Review</button>
+        <button class="gd-btn-secondary" onclick="gdBack()"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Back</button>
+        <button class="gd-btn-primary" onclick="gdNext()">Next <span class=\'icon\' data-lucide=\'arrow-right\'></span> Review</button>
       </div>
     </div>`;
 }
@@ -446,7 +444,7 @@ function _gdStep5(panel) {
 
       <div class="gd-review-section">
         <div class="gd-review-section-title">
-          <span class="gd-review-badge" style="background:${cfg.color || "#1565C0"}">${gdDocType}</span>
+          <span class="gd-review-badge" style="background:${cfg.color || "#8A6B52"}">${gdDocType}</span>
           <span>${cfg.label || gdDocType}</span>
           <span class="gd-review-project">Project: ${_gdEsc(gdProject?.name || "—")}</span>
         </div>
@@ -463,11 +461,11 @@ function _gdStep5(panel) {
         ${qRows}
       </div>` : ""}
 
-      <p class="gd-review-hint">💡 All fields above are editable. Changes here are saved when you proceed.</p>
+      <p class="gd-review-hint"><span class=\'icon\' data-lucide=\'lightbulb\'></span> All fields above are editable. Changes here are saved when you proceed.</p>
 
       <div class="gd-nav-row">
-        <button class="gd-btn-secondary" onclick="gdBack()">← Back</button>
-        <button class="gd-btn-primary" onclick="gdNext()">Generate Draft →</button>
+        <button class="gd-btn-secondary" onclick="gdBack()"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Back</button>
+        <button class="gd-btn-primary" onclick="gdNext()">Generate Draft <span class=\'icon\' data-lucide=\'arrow-right\'></span></button>
       </div>
     </div>`;
 }
@@ -492,9 +490,9 @@ function _gdStep6(panel) {
       <p class="gd-step-sub">All inputs have been compiled. Click <strong>Build Draft</strong> to create the structured document data package.</p>
       <div id="gd-gen-area"></div>
       <div class="gd-nav-row" id="gd-gen-nav">
-        <button class="gd-btn-secondary" onclick="gdBack()">← Back</button>
+        <button class="gd-btn-secondary" onclick="gdBack()"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Back</button>
         <button class="gd-btn-generate" id="gd-build-btn" onclick="gdBuildDraft()">
-          ✦ Build Draft
+          <span class=\'icon\' data-lucide=\'sparkle\'></span> Build Draft
         </button>
       </div>
     </div>`;
@@ -536,7 +534,7 @@ async function gdBuildDraft() {
     ai_note: "AI content generation deferred to v1.0. This JSON package is ready to be submitted to the Gemini generation endpoint.",
   };
 
-  if (btn) { btn.disabled = false; btn.textContent = "✦ Build Draft"; }
+ if (btn) { btn.disabled = false; btn.textContent = "Build Draft"; }
 
   _gdRenderDraftResult(area);
 }
@@ -550,7 +548,7 @@ function _gdRenderDraftResult(area) {
   area.innerHTML = `
     <div class="gd-draft-result">
       <div class="gd-draft-success">
-        <span class="gd-draft-check">✓</span>
+        <span class="gd-draft-check"><span class=\'icon\' data-lucide=\'check\'></span></span>
         <div>
           <strong>Draft package built successfully</strong>
           <div class="gd-draft-sub">Ready for AI generation in v1.0</div>
@@ -560,7 +558,7 @@ function _gdRenderDraftResult(area) {
       <div class="gd-draft-summary">
         <div class="gd-draft-sum-row">
           <span>Document Type</span>
-          <strong style="color:${cfg.color || "#1565C0"}">${cfg.label || gdDocType}</strong>
+          <strong style="color:${cfg.color || "#8A6B52"}">${cfg.label || gdDocType}</strong>
         </div>
         <div class="gd-draft-sum-row">
           <span>Project</span>
@@ -591,14 +589,14 @@ function _gdRenderDraftResult(area) {
       <div class="gd-draft-json-section">
         <div class="gd-draft-json-header">
           <span>Structured JSON Package</span>
-          <button class="gd-chip" onclick="gdCopyJson()">📋 Copy JSON</button>
-          <button class="gd-chip" onclick="gdDownloadJson()">⬇ Download</button>
+          <button class="gd-chip" onclick="gdCopyJson()"><span class=\'icon\' data-lucide=\'clipboard-list\'></span> Copy JSON</button>
+          <button class="gd-chip" onclick="gdDownloadJson()"><span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span> Download</button>
         </div>
         <pre class="gd-draft-json" id="gd-draft-json">${_gdEsc(JSON.stringify(gdDraft, null, 2))}</pre>
       </div>
 
       <div class="gd-ai-teaser">
-        <span class="gd-teaser-icon">✦</span>
+        <span class="gd-teaser-icon"><span class=\'icon\' data-lucide=\'sparkle\'></span></span>
         <div>
           <strong>AI Generation — Coming in v1.0</strong>
           <p>This draft package will be submitted to Gemini to generate a full GMP-compliant document with executive summary, test protocols, acceptance criteria tables, and signature blocks.</p>
@@ -609,14 +607,14 @@ function _gdRenderDraftResult(area) {
   // Hide Back/Build buttons, show Start Over
   const nav = document.getElementById("gd-gen-nav");
   if (nav) nav.innerHTML = `
-    <button class="gd-btn-secondary" onclick="gdBack()">← Edit Inputs</button>
-    <button class="gd-btn-primary" onclick="openGenDocument()">✦ New Document</button>`;
+    <button class="gd-btn-secondary" onclick="gdBack()"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Edit Inputs</button>
+    <button class="gd-btn-primary" onclick="openGenDocument()"><span class=\'icon\' data-lucide=\'sparkle\'></span> New Document</button>`;
 }
 
 function gdCopyJson() {
   if (!gdDraft) return;
   navigator.clipboard.writeText(JSON.stringify(gdDraft, null, 2))
-    .then(() => { const b = event.target; b.textContent = "✓ Copied!"; setTimeout(() => b.textContent = "📋 Copy JSON", 2000); })
+ .then(() => { const b = event.target; b.textContent = "Copied!"; setTimeout(() => b.textContent = "Copy JSON", 2000); })
     .catch(() => alert("Copy failed — please select and copy manually."));
 }
 
@@ -681,11 +679,11 @@ function _gdHasProgress() {
             Object.keys(gdAnswers).some(k => gdAnswers[k]));
 }
 
-function gdBackToProject() {
-  _gdCollectCurrentStep();
-  if (_gdHasProgress() && !confirm("Leave Generate Document? Unsaved progress will be lost unless you Save Draft first.")) {
-    return;
-  }
+// Actually leaves the wizard and returns to the project (Chat view) or the
+// Dashboard, with no confirmation — callers (gdBackToProject / gdCancel) are
+// responsible for confirming first.
+function _gdLeaveToProject() {
+  if (window.Workspace) window.Workspace.exit();
   if (gdProject && window.selectProject) {
     window.selectProject(gdProject);
   }
@@ -699,12 +697,34 @@ function gdBackToProject() {
   if (!gdProject && window.loadDashboard) window.loadDashboard();
 }
 
-function gdCancel() {
+async function gdBackToProject() {
   _gdCollectCurrentStep();
-  if (_gdHasProgress() && !confirm("Cancel document generation? All progress on this document will be discarded.")) {
-    return;
+  if (_gdHasProgress()) {
+    const ok = window.Workspace
+      ? await window.Workspace.confirmDialog({
+          title: "Leave Generate Document?",
+          message: "Unsaved progress will be lost unless you Save Draft first.",
+          confirmLabel: "Leave", cancelLabel: "Stay", danger: true,
+        })
+      : confirm("Leave Generate Document? Unsaved progress will be lost unless you Save Draft first.");
+    if (!ok) return;
   }
-  gdBackToProject();
+  _gdLeaveToProject();
+}
+
+async function gdCancel() {
+  _gdCollectCurrentStep();
+  if (_gdHasProgress()) {
+    const ok = window.Workspace
+      ? await window.Workspace.confirmDialog({
+          title: "Discard changes?",
+          message: "All progress on this document will be discarded.",
+          confirmLabel: "Yes", cancelLabel: "No", danger: true,
+        })
+      : confirm("Cancel document generation? All progress on this document will be discarded.");
+    if (!ok) return;
+  }
+  _gdLeaveToProject();
 }
 
 async function gdSaveDraft() {
@@ -780,3 +800,4 @@ window.gdSelectDocType  = gdSelectDocType;
 window.gdBuildDraft     = gdBuildDraft;
 window.gdCopyJson       = gdCopyJson;
 window.gdDownloadJson   = gdDownloadJson;
+window.gdHasUnsavedChanges = _gdHasProgress;

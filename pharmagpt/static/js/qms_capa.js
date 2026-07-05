@@ -82,7 +82,7 @@ async function qmsCapaLoadList(filters = {}) {
     if (!capas.length) {
       container.innerHTML = `
         <div class="qms-empty">
-          <div class="qms-empty-icon">🔄</div>
+          <div class="qms-empty-icon"><span class=\'icon\' data-lucide=\'repeat\'></span></div>
           <h3>No CAPAs yet</h3>
           <p>Create your first CAPA, or raise one from a Deviation's "CAPA Links" tab.</p>
         </div>`;
@@ -260,7 +260,7 @@ function qmsCapaRenderTab(capa) {
         <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px">
           Suggests a refined problem statement, root cause, and corrective/preventive actions.
         </p>
-        <button class="btn-primary" onclick="qmsCapaSuggestDraft(${id})">✨ Suggest CAPA Draft with AI</button>
+        <button class="btn-primary" onclick="qmsCapaSuggestDraft(${id})"><span class=\'icon\' data-lucide=\'sparkles\'></span> Suggest CAPA Draft with AI</button>
         <div id="qms-capa-draft-suggestion" style="margin-top:12px"></div>
       </div>
       <div class="qms-section-card">
@@ -446,7 +446,7 @@ async function qmsCapaRenderEffectiveness(id) {
   el.innerHTML = `
     <div class="qms-section-card">
       <h3>AI-Suggested Effectiveness Checks</h3>
-      <button class="btn-secondary" onclick="qmsCapaSuggestEffectiveness(${id})">✨ Suggest Effectiveness Checks with AI</button>
+      <button class="btn-secondary" onclick="qmsCapaSuggestEffectiveness(${id})"><span class=\'icon\' data-lucide=\'sparkles\'></span> Suggest Effectiveness Checks with AI</button>
       <div id="qms-capa-eff-suggestions" style="margin-top:12px"></div>
     </div>
     ${checks.length ? `

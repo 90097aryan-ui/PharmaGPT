@@ -4,8 +4,8 @@
     {
       "name": "pharmagpt-flask",
       "runtimeExecutable": "D:\\PharmaAgent\\venv\\Scripts\\python.exe",
-      "runtimeArgs": ["-m", "flask", "--app", "pharmagpt.app", "run", "--port", "5060"],
-      "port": 5060
+      "runtimeArgs": ["-m", "flask", "--app", "pharmagpt.app", "run", "--port", "5077"],
+      "port": 5077
     }
   ]
 }

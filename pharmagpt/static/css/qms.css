@@ -88,7 +88,7 @@
   box-shadow: var(--shadow);
 }
 
-.qms-stat-card.critical { border-left-color: #C62828; }
+.qms-stat-card.critical { border-left-color: #C35F5B; }
 .qms-stat-card.warning  { border-left-color: var(--warning); }
 .qms-stat-card.success  { border-left-color: var(--success); }
 .qms-stat-card.info     { border-left-color: var(--info); }
@@ -122,7 +122,11 @@
   font-weight: 700;
   color: var(--navy);
   margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+.qms-section-card h3 .icon { color: var(--blue-light); }
 
 /* ── Toolbar / filters ──────────────────────────────────────────────────── */
 
@@ -138,7 +142,7 @@
 .qms-toolbar select {
   padding: 8px 12px;
   border: 1.5px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   font-size: 12.5px;
   background: var(--surface);
   color: var(--text);
@@ -294,21 +298,21 @@
 
 /* ── Badges (new QMS status/priority variants; base .badge from risk.css) ── */
 
-.badge-effective       { background: #E8F5E9; color: #2E7D32; }
-.badge-under-review     { background: #E3F2FD; color: #1565C0; }
-.badge-pending-approval { background: #FFF3E0; color: #E65100; }
-.badge-under-revision   { background: #FFFDE7; color: #F57F17; }
-.badge-obsolete         { background: #ECEFF1; color: #546E7A; }
-.badge-initiated        { background: #E3F2FD; color: #1565C0; }
-.badge-open             { background: #FFF3E0; color: #E65100; }
-.badge-minor            { background: #E8F5E9; color: #2E7D32; }
-.badge-major            { background: #FFF3E0; color: #E65100; }
-.badge-market           { background: #FCE4EC; color: #AD1457; }
-.badge-overdue          { background: #FFEBEE; color: #C62828; }
-.badge-escalated        { background: #FFEBEE; color: #C62828; }
-.badge-pending          { background: #ECEFF1; color: #546E7A; }
-.badge-pass             { background: #E8F5E9; color: #2E7D32; }
-.badge-fail             { background: #FFEBEE; color: #C62828; }
+.badge-effective       { background: #E8F2EA; color: #5F8A61; }
+.badge-under-review     { background: #F1ECE6; color: #8A6B52; }
+.badge-pending-approval { background: #FFF4E5; color: #A97D2E; }
+.badge-under-revision   { background: #F1ECE6; color: #C59A41; }
+.badge-obsolete         { background: #F1ECE6; color: #66615B; }
+.badge-initiated        { background: #F1ECE6; color: #8A6B52; }
+.badge-open             { background: #FFF4E5; color: #A97D2E; }
+.badge-minor            { background: #E8F2EA; color: #5F8A61; }
+.badge-major            { background: #FFF4E5; color: #A97D2E; }
+.badge-market           { background: #F7E8E7; color: #A9534F; }
+.badge-overdue          { background: #F7E8E7; color: #C35F5B; }
+.badge-escalated        { background: #F7E8E7; color: #C35F5B; }
+.badge-pending          { background: #F1ECE6; color: #66615B; }
+.badge-pass             { background: #E8F2EA; color: #5F8A61; }
+.badge-fail             { background: #F7E8E7; color: #C35F5B; }
 
 /* ── Wizard / form modal ────────────────────────────────────────────────── */
 

@@ -1,138 +1,177 @@
 # Design System — PharmaGPT
 
-**Version:** 1.0  
-**Date:** 2026-06-27  
-**Source file:** `pharmagpt/static/css/style.css` (~3,309 lines)
+**Version:** 2.0 — "Executive Office"
+**Date:** 2026-07-05
+**Source files:** `pharmagpt/static/css/style.css` (~3,750 lines), `workspace.css`, and per-suite
+CSS (`risk.css`, `urs.css`, `qual.css`, `report.css`, `qms.css`) which reuse the same `:root`
+tokens defined in `style.css`.
+
+> **Supersedes v1.0** (the earlier navy/blue "dark, professional theme" described in prior
+> revisions of this document). See [PROJECT_MEMORY/DECISIONS.md](../PROJECT_MEMORY/DECISIONS.md)
+> DEC-018 for the full rationale. This was a **visual redesign only** — no backend, API, database,
+> route, or business-logic change accompanied it.
 
 ---
 
 ## 1. Design Philosophy
 
-PharmaGPT uses a **dark, professional theme** appropriate for technical/enterprise pharmaceutical software. The design prioritises:
+PharmaGPT uses a **warm, "business-attire" premium enterprise theme** — soft white / warm ivory /
+stone / sand / beige / taupe / walnut brown / charcoal / soft olive-sage — replacing the earlier
+navy/blue enterprise-software palette. The design prioritises:
 
-- **Information density** — validation engineers work with large amounts of structured data
-- **Clarity over decoration** — no gratuitous animations or distracting UI chrome
-- **Regulatory feel** — navy/blue palette evokes trust, precision, and compliance
-- **Keyboard-friendly** — inputs, buttons, and modals all accessible without a mouse
+- **Executive-office feel** — the app should read like a premium office environment (comparable in
+  spirit to Stripe Dashboard, Linear, Notion Enterprise, Arc Browser, modern SAP Fiora), not a
+  traditional dark technical dashboard.
+- **Information density retained** — validation engineers still work with large amounts of
+  structured data; the palette changed, the layout density did not.
+- **Warmth over coolness** — no blue/navy/slate/cyan/purple hues anywhere in the UI; every accent
+  is warm (brown, olive-sage, amber, terracotta) except the deliberately-distinct Information
+  semantic colour (a muted blue-grey, used only for informational badges/status, never for buttons
+  or brand chrome).
+- **Consistency** — one set of tokens (`:root` in `style.css`) is shared by the core app shell and
+  every suite (Risk, URS, Qualification, Validation Report, QMS). No screen has its own competing
+  palette.
 
-There is no external CSS framework. All styles are hand-crafted in a single `style.css` file.
+There is no external CSS framework. All styles are hand-crafted, split by domain per
+[ARCHITECTURE.md](../PROJECT_MEMORY/ARCHITECTURE.md) §3/§17 (DEC-012).
 
 ---
 
 ## 2. Colour Palette
 
-### 2.1 Background Layers
+### 2.1 Backgrounds
 
-| Token (conceptual) | Hex | Usage |
-|--------------------|-----|-------|
-| `bg-deepest` | `#0a0e1a` | Root page background |
-| `bg-sidebar` | `#0d1117` | Left sidebar panel |
-| `bg-surface` | `#161b27` | Cards, input fields, panels |
-| `bg-elevated` | `#1e2535` | Hover states, selected rows, modals |
-| `bg-border` | `#2d3748` | Dividers, input borders |
+| Token (CSS var) | Hex | Usage |
+|---|---|---|
+| `--bg` | `#F8F6F2` | Primary background (main content area) |
+| `--bg-secondary` | `#F2EEE8` | Secondary background (headers, tints, table zebra) |
+| `--surface` | `#FFFFFF` | Cards, inputs, panels, modals |
 
-### 2.2 Primary Brand (Navy/Blue)
+### 2.2 Brand — Walnut Brown (primary interactive)
 
 | Token | Hex | Usage |
-|-------|-----|-------|
-| `brand-primary` | `#1e40af` | Primary buttons, active states |
-| `brand-primary-hover` | `#1d4ed8` | Button hover |
-| `brand-accent` | `#3b82f6` | Links, focus rings, highlights |
-| `brand-light` | `#60a5fa` | Secondary text accents, icons |
-| `brand-sidebar-active` | `#1e3a5f` | Active sidebar item background |
+|---|---|---|
+| `--blue-light` | `#7B5B45` | Primary button / active state (default shade) |
+| `--blue` | `#6A4D39` | Primary button hover (darker shade) |
+| `--navy` | `#2B2B2B` | Heading / strong-emphasis text |
+| `--accent` | `#8FA68E` | Muted Sage accent (focus rings, hover borders, decorative dots/spinners — **not** primary buttons) |
 
-### 2.3 Text
+These historical variable names (`--navy`, `--blue`, `--blue-light`) are kept so every existing
+`var()` consumer across all 7 CSS files repaints automatically; new code may keep using them or the
+plain-English aliases below.
 
-| Token | Hex | Usage |
-|-------|-----|-------|
-| `text-primary` | `#e2e8f0` | Body text, headings |
-| `text-secondary` | `#94a3b8` | Subtitles, labels, timestamps |
-| `text-muted` | `#64748b` | Placeholder text, disabled states |
-| `text-inverse` | `#ffffff` | Text on coloured buttons |
-
-### 2.4 Semantic Colours
+### 2.3 Sidebar
 
 | Token | Hex | Usage |
-|-------|-----|-------|
-| `success` | `#10b981` | Extraction OK badges, success toasts |
-| `warning` | `#f59e0b` | Overdue date highlights, caution states |
-| `danger` | `#ef4444` | Delete buttons, error states, overdue badges |
-| `info` | `#3b82f6` | Info badges, KB folder counts |
+|---|---|---|
+| `--sidebar-bg` | `#3F3A36` | Warm Charcoal — sidebar background |
+| `--sidebar-hover` | `#544C45` | Sidebar item hover |
+| `--sidebar-active` | `#7B5B45` | Active sidebar item (Walnut Brown) + `border-left: 3px solid rgba(255,255,255,.75)` indicator |
 
-### 2.5 Validation Document Type Colours
+### 2.4 Text
 
-Each of the 11 validation document types has a dedicated accent colour defined in `validation_config.js` and reflected in CSS:
+| Token | Hex | Usage |
+|---|---|---|
+| `--text` | `#2B2B2B` | Primary text |
+| `--text-muted` | `#66635F` | Secondary text (subtitles, labels, timestamps) |
+| `--text-disabled` | `#9A948C` | Muted text (placeholders, disabled states) |
 
-| Doc Type | Colour |
-|----------|--------|
-| URS | `#6366f1` (indigo) |
-| DQ | `#8b5cf6` (violet) |
-| FAT | `#ec4899` (pink) |
-| SAT | `#f97316` (orange) |
-| IQ | `#10b981` (emerald) |
-| OQ | `#14b8a6` (teal) |
-| PQ | `#3b82f6` (blue) |
-| FMEA | `#ef4444` (red) |
-| CAPA | `#f59e0b` (amber) |
-| Deviation | `#6b7280` (grey) |
-| Change Control | `#84cc16` (lime) |
+### 2.5 Borders
+
+| Token | Hex | Usage |
+|---|---|---|
+| `--border` | `#DDD6CC` | Standard borders, dividers between input/card edges |
+| `--divider` | `#E7E1D6` | Subtle internal separators (table headers, card headers) |
+
+### 2.6 Semantic / Status Colours
+
+| Token | Hex | Usage |
+|---|---|---|
+| `--success` | `#5B8C5A` | Success badges, "done" states, extraction-OK |
+| `--warning` | `#C79B3B` | Warning badges, overdue-soon highlights |
+| `--error` | `#C65B57` | Danger — delete buttons, error states, critical badges |
+| `--info` | `#5C8FB5` | Information — the one intentionally-blue token, muted blue-grey, used **only** for informational badges/status (e.g. "processing", "pending"), never for brand chrome or buttons |
+
+### 2.7 Chart / Data-Visualisation Palette
+
+No charting library is used anywhere in the app (confirmed — no `<canvas>`/Chart.js/D3 usage as of
+this writing). The closest analogues — risk-severity matrices, progress bars, and status
+dot/badge colours — use the same warm palette: Sage (`--accent` / `--success`), Amber (`--warning`),
+Terracotta (`#B9713C`, deep-orange family), and muted Olive/Taupe (`#6E6B35`, `#8A6E5E`) for
+category markers that previously used purple/teal. If a real chart library is introduced in the
+future, reuse this same set rather than defaulting to library defaults (which are typically
+saturated/neon).
+
+### 2.8 Suite-Specific Severity Tokens
+
+`risk.css` defines its own small `:root` block (reused conceptually by URS/Qual/Report severity
+badges):
+
+```css
+:root {
+  --risk-critical: #C65B57;   /* Danger */
+  --risk-high:     #B9713C;   /* Terracotta */
+  --risk-medium:   #C79B3B;   /* Warning */
+  --risk-low:      #5B8C5A;   /* Success */
+  --risk-bg:       #F3EEE5;
+  --risk-surface:  #FFFFFF;
+  --risk-border:   #E3DCD0;
+  --risk-accent:   #7B5B45;   /* Walnut Brown */
+}
+```
 
 ---
 
 ## 3. Typography
 
 | Role | Family | Weight | Size |
-|------|--------|--------|------|
-| Body | System UI stack (`-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`) | 400 | 14px |
-| Headings (H1) | Same stack | 700 | 20px |
-| Headings (H2) | Same stack | 600 | 17px |
-| Headings (H3) | Same stack | 600 | 15px |
+|---|---|---|---|
+| Body | **Inter** (Google Fonts), fallback `'Segoe UI', system-ui, -apple-system, sans-serif` | 400–500 | 13px |
+| Headings (H1) | Inter | 700 | 20px |
+| Headings (H2) | Inter | 600 | 17px |
+| Headings (H3) | Inter | 600 | 15px |
 | Code / pre | `'Courier New', monospace` | 400 | 13px |
-| Sidebar labels | Same stack | 500 | 12px |
-| Timestamps | Same stack | 400 | 11px |
+| Sidebar labels | Inter | 500 | 12px |
+| Timestamps | Inter | 400 | 11px |
 
-Line height: `1.6` for body text, `1.3` for headings.  
-No external web fonts are loaded — fully offline-capable.
+Line height: `1.5`–`1.6` for body text, `1.3` for headings. Inter is loaded via
+`@import url('https://fonts.googleapis.com/css2?family=Inter:...')` at the top of `style.css` (an
+established precedent — the app previously loaded IBM Plex Sans the same way; DEC-005's "fully
+offline-capable" framing referred to the app having no build step, not to font loading, which has
+used a Google Fonts `@import` since v0.2).
 
 ---
 
 ## 4. Layout
 
+Unchanged from v1.0 — this was a colour/token/typography redesign only, not a layout redesign.
+
 ### 4.1 Page Structure
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  HEADER  (60px, fixed top)                          │
+│  HEADER  (56px, white, minimal)                     │
 ├────────────┬────────────────────────────────────────┤
 │            │                                        │
 │  SIDEBAR   │  MAIN CONTENT AREA                    │
-│  (260px,   │  (flex-1, scrollable)                 │
-│  fixed)    │                                        │
+│  (240px,   │  (flex-1, scrollable)                 │
+│  charcoal) │                                        │
 │            │                                        │
 └────────────┴────────────────────────────────────────┘
 ```
 
-- **Header:** `height: 60px; position: fixed; z-index: 100`
-- **Sidebar:** `width: 260px; position: fixed; top: 60px; height: calc(100vh - 60px); overflow-y: auto`
-- **Main:** `margin-left: 260px; margin-top: 60px; padding: 24px; overflow-y: auto`
-
 ### 4.2 Sidebar Sections
 
-1. Navigation icons (Home, Chat, Documents, Insights, Knowledge Base)
-2. Validation document type buttons (collapsible)
-3. Projects list (scrollable)
-4. Regulatory tags footer
-5. Specialization tags footer
+Unchanged structure (Main Menu, Projects, Documents, Quality Management, Regulatory Scope footer) —
+see [ARCHITECTURE.md](../PROJECT_MEMORY/ARCHITECTURE.md) §5/§7 for the live-navigation vs.
+backend-complete-but-unwired suites (Risk/URS/Qualification/Validation Report still lack a wired
+sidebar entry point — a pre-existing gap, unrelated to and not fixed by this redesign).
 
-### 4.3 Content Views
+### 4.3 Enterprise Workspace Shell
 
-All views are rendered inside the main content area. JavaScript toggles `display` to switch between:
-- `.dashboard-view`
-- `.chat-view`
-- `.documents-view`
-- `.insights-view`
-- `.kb-view`
-- `.validation-view`
+Unchanged (`workspace.css`/`workspace.js`, DEC-017) — repainted with the new palette
+(`.ent-ws-header` now Warm Charcoal instead of navy, step dots now Walnut/Sage/Success instead of
+blue).
 
 ---
 
@@ -143,239 +182,169 @@ All views are rendered inside the main content area. JavaScript toggles `display
 ```css
 /* Primary */
 .btn-primary {
-  background: #1e40af;
+  background: #7B5B45;   /* Walnut Brown */
   color: #fff;
-  border-radius: 6px;
-  padding: 8px 16px;
+  border-radius: 8px;
+  padding: 8px 20px;
   font-weight: 500;
 }
-.btn-primary:hover { background: #1d4ed8; }
+.btn-primary:hover { background: #6A4D39; }
+
+/* Secondary */
+.btn-secondary {
+  background: #fff;
+  border: 1px solid #DDD6CC;
+  color: #2B2B2B;
+}
 
 /* Danger */
 .btn-danger {
-  background: #ef4444;
+  background: #C65B57;
   color: #fff;
 }
-
-/* Ghost */
-.btn-ghost {
-  background: transparent;
-  border: 1px solid #2d3748;
-  color: #94a3b8;
-}
 ```
+
+Every suite's primary CTA (`.btn-urs-primary`, `.btn-qual-primary`, `.btn-risk-primary`,
+`style.css`'s `.btn-primary`) now resolves to the same Walnut Brown — `var(--accent)` (Muted Sage)
+is reserved for focus rings, hover-highlight borders, decorative dots, and spinners, never for a
+primary call-to-action, so every screen's main button reads identically.
 
 ### 5.2 Cards / Panels
 
 ```css
-.card {
-  background: #161b27;
-  border: 1px solid #2d3748;
-  border-radius: 8px;
-  padding: 16px;
+.dash-card, .dash-stat-card, .vw-project-card, .insights-stat-card {
+  background: #FFFFFF;
+  border: 1px solid #E7E1D6;   /* --divider, softer than a full border */
+  border-radius: 14px;         /* --radius-lg */
+  box-shadow: 0 1px 3px rgba(61,47,33,0.07), 0 1px 2px rgba(61,47,33,0.05);
 }
 ```
+
+Dashboard KPI cards keep a 3px coloured top accent (project/blue-grey/success/warning/danger/
+walnut) for at-a-glance scanning, small icon, large value, small uppercase subtitle label — no
+heavy borders, soft warm-tinted shadow instead.
 
 ### 5.3 Input Fields
 
 ```css
 input, textarea, select {
-  background: #0d1117;
-  border: 1px solid #2d3748;
-  border-radius: 6px;
-  color: #e2e8f0;
+  background: #FFFFFF;
+  border: 1px solid #DDD6CC;
+  border-radius: 8px;         /* var(--radius); dedicated var(--radius-input): 10px for larger fields */
+  color: #2B2B2B;
   padding: 8px 12px;
 }
 input:focus {
-  border-color: #3b82f6;
+  border-color: #7B5B45;
   outline: none;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+  box-shadow: 0 0 0 3px rgba(123,91,69,0.10);   /* warm walnut focus ring */
 }
 ```
 
 ### 5.4 Chat Bubbles
 
 ```css
-.message-row { display: flex; gap: 12px; padding: 12px 0; }
-
-/* User message */
 .bubble.user {
-  background: #1e3a5f;
-  border-left: 3px solid #3b82f6;
-  border-radius: 8px;
-  padding: 12px 16px;
+  background: #7B5B45;   /* was navy/blue */
+  border-left: 3px solid #7B5B45;
+  color: #fff;
 }
-
-/* AI message */
 .bubble.model {
-  background: #161b27;
-  border-left: 3px solid #10b981;
-  border-radius: 8px;
-  padding: 12px 16px;
+  background: #FFFFFF;
+  border-left: 3px solid #5B8C5A;   /* Success sage-green accent */
 }
 ```
 
-### 5.5 Source Strip
-
-Appears below AI responses when document context was injected:
+### 5.5 Tables
 
 ```css
-.sources-strip {
-  font-size: 11px;
-  color: #64748b;
-  border-top: 1px solid #2d3748;
-  padding-top: 6px;
-  margin-top: 8px;
-}
-.source-tag {
-  background: #1e2535;
-  border: 1px solid #2d3748;
-  border-radius: 4px;
-  padding: 2px 6px;
-  margin: 2px;
-  display: inline-block;
-}
+th { background: #F2EEE8; color: #2B2B2B; text-transform: uppercase; font-size: 11px; }
+tr:nth-child(even) td { background: #F2EEE8; }   /* soft zebra */
+tr:hover td           { background: #EFE7D8; }   /* distinct hover highlight */
 ```
 
-### 5.6 Document Viewer (A4 Style)
+`th:first-child`/`th:last-child` pick up the shared `--radius` for a rounded header row. The one
+deliberate exception remains the DOCX-mimicking `.val-doc-content` viewer table, which keeps a
+solid Warm-Charcoal header row (`#3F3A36`) with white text to read as a formal printed document —
+see §5.7.
+
+### 5.6 Badges
 
 ```css
-.doc-viewer {
-  background: #fff;
-  color: #1a1a1a;
-  max-width: 794px;       /* A4 width at 96dpi */
-  min-height: 1123px;     /* A4 height at 96dpi */
-  margin: 0 auto;
-  padding: 60px 72px;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.4);
-  font-family: 'Times New Roman', serif;
-  line-height: 1.7;
-}
+.badge-success { background: #EFF5EE; color: #5B8C5A; }
+.badge-warning { background: #F5EFE1; color: #C79B3B; }
+.badge-danger  { background: #F3E2DF; color: #C65B57; }
+.badge-info    { background: #F3EEE5; color: #5C8FB5; }
 ```
 
-This is the only component that uses **light background + dark text** — mimicking a printed Word document.
+Every one-off badge/tint colour formerly hardcoded per suite (risk severities, QMS status pills,
+KB extraction badges, validation review scores, etc.) was swept to this same warm-tint family so no
+two suites render the same semantic status in a different shade.
 
-### 5.7 Wizard Steps
+### 5.7 Document Viewer (A4 Style)
 
-```css
-.wizard-step {
-  display: none;
-}
-.wizard-step.active {
-  display: block;
-}
-.step-indicator {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 24px;
-}
-.step-dot {
-  width: 28px; height: 28px;
-  border-radius: 50%;
-  background: #2d3748;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 12px; font-weight: 600;
-}
-.step-dot.active { background: #1e40af; color: #fff; }
-.step-dot.done { background: #10b981; color: #fff; }
-```
+Unchanged — light background + dark text, the deliberate exception mimicking a printed Word
+document (see [ARCHITECTURE.md](../PROJECT_MEMORY/ARCHITECTURE.md)). Its table header now uses
+Warm Charcoal (`#3F3A36`) instead of the old navy, and its zebra striping uses the same warm tint
+as every other table.
 
-### 5.8 Knowledge Base Table
+### 5.8 Modals
 
 ```css
-.kb-table { width: 100%; border-collapse: collapse; }
-.kb-table th {
-  background: #0d1117;
-  color: #94a3b8;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 8px 12px;
-  border-bottom: 1px solid #2d3748;
-}
-.kb-table tr:hover { background: #1e2535; cursor: pointer; }
-.kb-table td { padding: 10px 12px; border-bottom: 1px solid #1e2535; }
-```
-
-### 5.9 Badges
-
-```css
-.badge {
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 11px;
-  font-weight: 500;
-}
-.badge-success { background: rgba(16,185,129,0.15); color: #10b981; }
-.badge-warning { background: rgba(245,158,11,0.15); color: #f59e0b; }
-.badge-danger  { background: rgba(239,68,68,0.15);  color: #ef4444; }
-.badge-info    { background: rgba(59,130,246,0.15);  color: #60a5fa; }
+.modal-overlay { background: rgba(63,58,54,0.55); }   /* warm-tinted overlay, was black */
+.modal { border-radius: 4px; box-shadow: 0 4px 24px rgba(61,47,33,0.18); }
 ```
 
 ---
 
 ## 6. Iconography
 
-No icon library is imported. Icons are implemented as:
-- Unicode emoji (🗂, 📋, ⚙️, 📄) in sidebar navigation labels
-- CSS-drawn indicators (coloured dots, step circles)
-- Validation doc type icons are emoji characters stored in `validation_config.js`
+Unchanged — Unicode emoji, no icon library, CSS-drawn indicators (coloured dots, step circles,
+sidebar left-indicator bar).
 
 ---
 
 ## 7. Motion & Animation
 
-Animations are minimal by design:
-- **SSE streaming cursor:** blinking `|` appended to in-progress AI text
-- **Sidebar item transitions:** `transition: background 0.15s ease`
-- **Button hover states:** `transition: background 0.1s ease`
-- No page transitions or skeleton loaders
+Unchanged from v1.0.
 
 ---
 
 ## 8. Print Styles (PDF Export)
 
-Activated when the user clicks "Print / PDF" in the document viewer:
-
-```css
-@media print {
-  .sidebar, .header, .toolbar { display: none; }
-  .doc-viewer {
-    box-shadow: none;
-    margin: 0;
-    padding: 40px 60px;
-    page-break-inside: avoid;
-  }
-  h1, h2, h3 { page-break-after: avoid; }
-  table { page-break-inside: avoid; }
-}
-```
+Unchanged from v1.0.
 
 ---
 
 ## 9. Responsive Behaviour
 
-The app is primarily designed for desktop (1280px+). At narrower widths:
-- Sidebar can be collapsed (hamburger toggle planned for v0.8)
-- Chat bubbles stack correctly on tablets
-- Document viewer scales down with `max-width: 100%`
-
-Mobile-native layout is not a current priority.
+Unchanged — desktop-first (1280px+); the sidebar hides below a ~768px breakpoint (pre-existing,
+not part of this redesign).
 
 ---
 
 ## 10. DOCX Export Styling (python-docx)
 
-The `doc_exporter.py` service applies Word-document styling programmatically:
+Unchanged — `doc_exporter.py` was **not** touched by this redesign (out of scope per the
+UI-only mandate). Its navy (`#003366`) heading colour and header-row styling remain as documented
+in the prior revision of this file; consider aligning it to Walnut Brown (`#7B5B45`)/Warm Charcoal
+(`#3F3A36`) in a future pass if visual parity between the on-screen viewer and the exported .docx
+is desired — see §11 Future Recommendations.
 
-| Element | Style |
-|---------|-------|
-| Page size | A4 (21cm × 29.7cm) |
-| Margins | 1.25" left, 1.0" right, 1.0" top/bottom |
-| Heading 1 | Navy (`#003366`), 16pt, bold, space-before 12pt |
-| Heading 2 | Navy (`#003366`), 13pt, bold, space-before 8pt |
-| Heading 3 | Dark grey (`#333333`), 11pt, bold |
-| Body text | Black, 11pt, Calibri, 1.15 line spacing |
-| Tables | Header row: navy background, white text; alternating row shading |
-| Header | Company name + document title, 9pt, right-aligned |
-| Footer | "CONFIDENTIAL — For Internal Use Only" + page number |
+---
+
+## 11. Migration Notes / Future Recommendations
+
+- **Font loading**: Inter now loads via the same Google Fonts `@import` mechanism the app has used
+  since v0.2 (previously IBM Plex Sans). No new offline-capability regression was introduced.
+- **`docx_generator.py` / `doc_exporter.py`** still emit the old navy DOCX styling (out of scope for
+  this UI-only redesign — see [CLAUDE.md](../PROJECT_MEMORY/CLAUDE.md) "Never modify business
+  logic"). Recommended follow-up: repaint the exported-document heading/table colours to Walnut
+  Brown / Warm Charcoal for full on-screen/exported-document visual parity.
+- **Risk/URS/Qualification/Validation Report sidebar navigation** remains unwired (pre-existing gap,
+  see [ARCHITECTURE.md](../PROJECT_MEMORY/ARCHITECTURE.md) §5) — their CSS was fully repainted and
+  spot-verified by temporarily forcing their views visible in a browser, but they still have no
+  live sidebar entry point. Wiring that navigation is a separate, previously-tracked item, not part
+  of this redesign.
+- **No chart library exists** in the codebase today (§2.7) — if one is introduced, reuse the warm
+  palette defined here rather than a library's default (often neon) colours.

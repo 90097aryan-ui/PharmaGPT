@@ -46,6 +46,19 @@
     document.getElementById("dash-stat-proto").textContent    = counts.protocols_generated ?? 0;
     document.getElementById("dash-stat-capa").textContent     = counts.pending_capas  ?? 0;
     document.getElementById("dash-stat-dev").textContent      = counts.pending_deviations ?? 0;
+
+    const capaSub = document.getElementById("dash-stat-capa-sub");
+    if (capaSub) {
+      const n = counts.pending_capas ?? 0;
+      capaSub.textContent = n > 0 ? "Needs attention" : "All caught up";
+      capaSub.classList.toggle("is-attention", n > 0);
+    }
+    const devSub = document.getElementById("dash-stat-dev-sub");
+    if (devSub) {
+      const n = counts.pending_deviations ?? 0;
+      devSub.textContent = n > 0 ? "Needs attention" : "All caught up";
+      devSub.classList.toggle("is-attention", n > 0);
+    }
   }
 
   function renderActivity(items) {
@@ -76,7 +89,7 @@
     }
     el.innerHTML = projects.map(p => `
       <div class="dash-proj-row" onclick="switchToProject(${p.id})">
-        <div class="dash-proj-icon">📁</div>
+        <div class="dash-proj-icon"><span class=\'icon\' data-lucide=\'folder\'></span></div>
         <div class="dash-proj-info">
           <div class="dash-proj-name">${truncate(p.name, 40)}</div>
           <div class="dash-proj-meta">${p.equipment_name || "—"} · ${fmtDate(p.created_at)}</div>
@@ -207,8 +220,8 @@
     const card = el.closest(".dash-stat-card");
     if (card) {
       card.style.borderTop = avg >= 85
-        ? "3px solid #2E7D32"
-        : avg >= 70 ? "3px solid #F57F17" : "3px solid #B71C1C";
+        ? "3px solid #5F8A61"
+        : avg >= 70 ? "3px solid #C59A41" : "3px solid #A8544F";
     }
   }
 

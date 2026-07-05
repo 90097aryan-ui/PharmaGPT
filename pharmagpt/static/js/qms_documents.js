@@ -84,7 +84,7 @@ async function qmsDocLoadList(filters = {}) {
     if (!docs.length) {
       container.innerHTML = `
         <div class="qms-empty">
-          <div class="qms-empty-icon">📄</div>
+          <div class="qms-empty-icon"><span class=\'icon\' data-lucide=\'file-text\'></span></div>
           <h3>No documents yet</h3>
           <p>Create your first controlled document to get started.</p>
         </div>`;
@@ -272,7 +272,7 @@ function qmsDocRenderTab(doc) {
           Generates complete ${doc.doc_type} content (Purpose, Scope, Responsibilities, Procedure, Acceptance Criteria, References) using the PharmaGPT regulatory persona.
         </p>
         <div class="qms-form-actions" style="justify-content:flex-start;margin-top:0;margin-bottom:14px">
-          <button class="btn-primary" id="qms-doc-generate-btn" onclick="qmsDocGenerateDraft(${id})">✨ Generate Draft with AI</button>
+          <button class="btn-primary" id="qms-doc-generate-btn" onclick="qmsDocGenerateDraft(${id})"><span class=\'icon\' data-lucide=\'sparkles\'></span> Generate Draft with AI</button>
           <button class="btn-secondary" id="qms-doc-review-btn" onclick="qmsDocRunReview(${id})">Run Regulatory Compliance Review</button>
         </div>
         <div id="qms-doc-review-result"></div>

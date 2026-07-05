@@ -84,7 +84,7 @@
     }[p.status] || "status-inprogress";
 
     const targetStr = p.target_date
-      ? `🗓 ${fmtDate(p.target_date)}`
+      ? `<span class=\'icon\' data-lucide=\'calendar-clock\'></span> ${fmtDate(p.target_date)}`
       : "";
 
     card.innerHTML = `
@@ -96,15 +96,15 @@
         </div>
       </div>
       <div class="vw-card-meta">
-        ${p.equipment_name ? `<div class="vw-card-meta-row"><span>⚙️</span>${esc(p.equipment_name)}${p.model ? ` · ${esc(p.model)}` : ""}</div>` : ""}
-        ${p.department     ? `<div class="vw-card-meta-row"><span>🏢</span>${esc(p.department)}</div>` : ""}
-        ${p.owner          ? `<div class="vw-card-meta-row"><span>👤</span>${esc(p.owner)}</div>` : ""}
+        ${p.equipment_name ? `<div class="vw-card-meta-row"><span><span class=\'icon\' data-lucide=\'settings\'></span></span>${esc(p.equipment_name)}${p.model ? ` · ${esc(p.model)}` : ""}</div>` : ""}
+        ${p.department     ? `<div class="vw-card-meta-row"><span><span class=\'icon\' data-lucide=\'building-2\'></span></span>${esc(p.department)}</div>` : ""}
+        ${p.owner          ? `<div class="vw-card-meta-row"><span><span class=\'icon\' data-lucide=\'user\'></span></span>${esc(p.owner)}</div>` : ""}
         ${targetStr        ? `<div class="vw-card-meta-row">${targetStr}</div>` : ""}
       </div>
       <div class="vw-card-footer">
         <span class="vw-card-status ${statusClass}">${esc(p.status || "In Progress")}</span>
         <span class="vw-card-date">${fmtDatetime(p.created_at)}</span>
-        <button class="vw-card-del" title="Delete project" data-id="${p.id}">🗑</button>
+ <button class="vw-card-del"title="Delete project"data-id="${p.id}"></button>
       </div>
     `;
 
@@ -206,7 +206,7 @@
       const full = el.dataset.full;
       el.innerHTML = `
         <div class="vw-phase-block">
-          <div class="vw-phase-block-icon">📋</div>
+          <div class="vw-phase-block-icon"><span class=\'icon\' data-lucide=\'clipboard-list\'></span></div>
           <div class="vw-phase-block-title">${ph} — ${full}</div>
           <div class="vw-phase-block-sub">
             Document generation for this phase is coming in Step 2.<br>
