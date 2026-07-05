@@ -36,6 +36,7 @@ from pharmagpt.routes.qms_common     import bp as qms_common_bp
 from pharmagpt.routes.qms_documents  import bp as qms_documents_bp
 from pharmagpt.routes.qms_deviations import bp as qms_deviations_bp
 from pharmagpt.routes.qms_capa       import bp as qms_capa_bp
+from pharmagpt.routes.qms_change_control import bp as qms_change_control_bp
 
 
 # ── Application setup ─────────────────────────────────────────────────────────
@@ -64,6 +65,7 @@ app.register_blueprint(qms_common_bp)
 app.register_blueprint(qms_documents_bp)
 app.register_blueprint(qms_deviations_bp)
 app.register_blueprint(qms_capa_bp)
+app.register_blueprint(qms_change_control_bp)
 
 
 # ── SPA shell ─────────────────────────────────────────────────────────────────

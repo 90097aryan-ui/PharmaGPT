@@ -2,8 +2,11 @@
 
 > Part of the permanent [PROJECT_MEMORY](CLAUDE.md) set. A new developer or a new Claude session
 > should be able to understand what PharmaGPT actually does today from this file alone, without
-> reading source code. Last synchronized against the repository: **2026-07-02** (last commit
-> `684ca7d`, plus the uncommitted working-tree state described below).
+> reading source code. Last synchronized against the repository: **2026-07-05** (last commit
+> `3a94ccf`, plus the uncommitted Change Control working-tree state described below). See
+> [DECISIONS.md](DECISIONS.md) DEC-022 — this file, at commit `3a94ccf`, still described QMS Phase 1
+> and the "Executive Office"/v3.0 redesign as uncommitted working-tree state when they had, in fact,
+> already been committed (`6ffaa54`, `3a94ccf`); that drift is reconciled as of this sync.
 
 ---
 
@@ -20,15 +23,20 @@ Deviation Management, CAPA).
 
 ## Current Version
 
-**v0.9.8** — last committed release (commit `684ca7d`, 2026-07-02, "Document Intelligence Engine
-and Validation UI improvements").
+**Last committed release: commit `3a94ccf`, 2026-07-05, "PharmaGPT v3.0 Premium Enterprise UI
+completed."** That commit (and `6ffaa54`, 2026-07-04, "Release v0.9.9 - QMS Phase 2" — the commit
+message says "Phase 2" but its actual content is QMS Phase 1: Document Control, Deviation
+Management, CAPA) already include everything this document previously described as "uncommitted
+working-tree state": QMS Phase 1, the Enterprise Workspace layout, the "Executive Office"/v3.0
+Design System redesign, and the Pre-Deployment UI Audit. See [DECISIONS.md](DECISIONS.md) DEC-022
+for the reconciliation and DEC-014 for the original version-numbering discrepancy pattern this
+repeats (commit messages/version strings drifting from actual content/commit state).
 
-On top of that commit, the working tree also contains **Quality Management Suite Phase 1**
-(20 new files, 5 modified core files) which is functionally complete, wired into the app
-(blueprints registered, schema included in `init_db()`), and tested (42 new passing tests) — but
-**not yet committed to git**. Treat it as the current sprint, not a shipped release, until it is
-committed. See [DECISIONS.md](DECISIONS.md) DEC-014 for the full version-numbering reconciliation
-(this repo has historically used two overlapping version schemes across its `.md` files).
+On top of `3a94ccf`, the working tree now contains **Quality Management Suite Phase 2 (Change
+Control)** (6 new files, 16 modified files — all additive, no completed module's business logic
+touched — 16 new tests, browser-verified against the live Gemini API) — **not yet committed to
+git**. This is the only uncommitted work as of this sync. See [ARCHITECTURE.md](ARCHITECTURE.md)
+§12 and [DECISIONS.md](DECISIONS.md) DEC-021 for the Change Control architecture.
 
 ---
 
@@ -116,8 +124,9 @@ replaced).
 
 - Framework: pytest 8.3.4, config in `pytest.ini` (`testpaths = tests`, `slow` marker excluded by
   default for 1000-page stress tests).
-- **~83 tests total** across the committed Document Intelligence Engine suite (~41 tests) and the
-  uncommitted QMS suite (42 tests).
+- **101 tests total** across the committed Document Intelligence Engine suite (~41 tests) and the
+  uncommitted QMS suite (60 tests: 42 from Phase 1 Document Control/Deviation/CAPA + 16 new from
+  Phase 2 Change Control).
 - **Known collection issue:** running `pytest --collect-only` in a fresh environment currently
   fails to collect 4 modules (`test_document_processor.py`, `test_job_runner.py`,
   `test_pdf_engines.py`, `test_pipeline.py`) due to `ModuleNotFoundError` (`docx`, `dotenv`) — this
@@ -137,8 +146,8 @@ replaced).
 | `test_document_processor.py` | End-to-end extraction across all fixtures + performance targets |
 | `test_job_runner.py` | `ThreadPoolJobRunner` execution and crash isolation |
 | `test_routes_upload_async.py` | Upload → status polling → retry flow via Flask test client |
-| `test_qms_database.py` *(uncommitted)* | QMS schema, CRUD, polymorphic tables, auto-numbering |
-| `test_qms_routes.py` *(uncommitted)* | QMS HTTP routes, AI review/generation (mocked), DOCX export, approvals |
+| `test_qms_database.py` *(uncommitted)* | QMS schema, CRUD, polymorphic tables, auto-numbering — Document Control/Deviation/CAPA/Change Control |
+| `test_qms_routes.py` *(uncommitted)* | QMS HTTP routes, AI review/generation (mocked), DOCX export, approvals — Document Control/Deviation/CAPA/Change Control |
 
 Two real bugs were found and fixed while writing the QMS tests: `generate_document_number()`
 mishandling single-word abbreviated departments (e.g. "QA" → "Q"), and a Windows file-handle race
@@ -148,61 +157,32 @@ between `send_file` and `os.remove()` (fixed test-side).
 
 ## Current Sprint
 
-**Pre-Deployment UI Audit** (uncommitted working-tree code, browser-verified, complete): full
-navigation pass through every accessible module, wizard, dialog, modal, dashboard, and workspace
-to close out DEC-019's remaining icon-sweep gap and catch anything a text/hex-based audit can't
-see. Completed the Lucide icon sweep (0 emoji remain anywhere in the codebase, confirmed by a
-full-repo scan) and found/fixed four genuine defects along the way: a cross-suite JS global-function
-name collision (`risk.js`/`urs.js` both declared `renderWizardStep`/`renderApprovalPanel` — URS's
-silently won, meaning Risk's New Assessment wizard and Approval panel never rendered), a missing
-`flex-direction: column` on `.urs-empty` (JS toggles it to `display:flex`, which without that
-property laid empty-state content out in a row instead of stacked), an un-migrated dark theme
-across the entire Validation Report Management Suite's content area (`report.css`/`report.js` —
-predates even DEC-018; two prior colour sweeps had repainted the dark cards' hex *values* without
-ever rendering the screen to notice they were still dark cards), and a missing `flex: 1` on
-`.report-container` that left the whole Report suite at ~70% of its intended width. All four are
-fixed; see [DECISIONS.md](DECISIONS.md) DEC-020 for full root-cause detail on each, plus two
-in-flight regressions this pass introduced-then-caught-itself (a `MutationObserver` infinite loop
-in the icon-conversion script, and an HTML-vs-JS quote-escaping bug), and a documented Flask/Jinja2
-template-caching gotcha for future sessions (restart the dev server after editing
-`templates/index.html`, page-reload alone can serve a stale cached template). Verified live across
-every suite (Dashboard, Knowledge Base, AI Assistant, Generate Document full 5-step wizard shell,
-Documents, Insights, Validation Workspace, single-shot Validation Generator, Risk's 7 views
-including its wizard and AI Assistant, URS's 4 views including its 5-step wizard, Qualification,
-Validation Report's dashboard/list/new-wizard, QMS Dashboard/Documents/Deviations/CAPA including
-opening real detail records and their tabs, and all 3 modals) — zero console errors, zero remaining
-emoji, zero legacy-palette hex literals, zero Bootstrap/FontAwesome references anywhere. No
-backend/API/DB/business-logic changes. See [DECISIONS.md](DECISIONS.md) DEC-020. Next action is a
-git commit, not further design work.
+**Quality Management Suite — Phase 2: Change Control** (uncommitted working-tree code, functionally
+complete, browser-verified against the live Gemini API): full GMP change-control lifecycle covering
+Equipment/Facility/HVAC/Water System/Compressed Air/Steam/Electrical/Software/PLC/SCADA/MES/ERP/
+Barcode System/Vision System/BMS/LIMS/Validation/SOP/Specification/Packaging/Warehouse/Quality/
+Engineering/Production/Utilities/IT changes; Major/Minor/Critical/Temporary/Permanent/Emergency
+types; a 13-stage workflow (Draft → Submitted → Initial Review → Impact Assessment → Risk
+Assessment → Department Review → QA Review → Approval → Implementation → Verification →
+Effectiveness Review → Closed) with rejection supported at every stage back to Draft. Nine optional
+AI features (impact assessment, implementation plan/checklist, risk summary, rollback plan,
+regulatory impact, change justification, executive summary, verification summary, effectiveness
+review), all routed through the existing shared `services/qms_shared.py::call_gemini()` — no new
+AI-calling convention. Built entirely on the Phase 1 polymorphic shared tables
+(`qms_attachments`/`qms_comments`/`qms_audit_trail`/`qms_approvals`, `record_type='change_control'`)
+— no new shared table, no duplicated attachment/comment/audit/approval logic. See
+[ARCHITECTURE.md](ARCHITECTURE.md) §12 and [DECISIONS.md](DECISIONS.md) DEC-021 for full detail.
+Linking to an existing Deviation or CAPA is supported (one-directional; a reverse-lookup helper
+exists for a future "Related Change Controls" tab inside those modules' own detail views, not built
+here — see Known Issues). 16 new automated tests appended to the existing `test_qms_database.py`/
+`test_qms_routes.py`; full 101-test suite passes with zero regressions. Live-browser verification
+drove the complete lifecycle end-to-end including two AI features succeeding against the real
+Gemini API (one hit a transient upstream `503`, confirmed external, not a defect). Next action for
+this sprint is a git commit + version bump, not further feature work.
 
-**"Executive Office" Design System Redesign** (uncommitted working-tree code, browser-verified):
-UI-only visual redesign from the earlier navy/blue theme to a warm business-attire palette (Soft
-White/Warm Ivory/Stone/Sand/Beige/Taupe/Walnut Brown/Charcoal/Soft Olive-Sage) across every screen
-— Dashboard, Knowledge Base, Chat, Generate Document, Validation Workspace, QMS (Document Control/
-Deviation/CAPA), and the backend-complete Risk/URS/Qualification/Validation Report suites. Achieved
-by repointing the shared `:root` CSS tokens in `style.css` (reused by every suite CSS per DEC-012)
-and sweeping ~1,200 hardcoded hex/`rgb()` colour literals across all 7 CSS files and 11 JS modules
-to the new palette. No backend, API, database, route, or business-logic changes. See
-[DECISIONS.md](DECISIONS.md) DEC-018 and `docs/DESIGN_SYSTEM.md` (v2.0). Next action is a git
-commit, not further design work — see Known Issues for the one deliberately-deferred follow-up
-(exported-DOCX styling still uses the old navy).
-
-**Validation & Usability Testing Sprint** (uncommitted working-tree code, functionally complete):
-redesigned the Generate Document workspace into a reusable **Enterprise Workspace** layout
-(`workspace.css` + `workspace.js`) — see [ARCHITECTURE.md](ARCHITECTURE.md) §7 and
-[DECISIONS.md](DECISIONS.md) DEC-017. Root cause of the reported "Dashboard visible behind the
-wizard / large blank area / unprofessional feel" was a misplaced `.app-body` closing `</div>` that
-had (since the 2026-06-30 Risk/URS/Qual/Report commit) put every view after the old Validation
-Document Generator view — Generate Document, Risk, URS, Qualification, Validation Report, and all
-of QMS — outside the sidebar-flex layout. Fixed at the root, plus a new reusable workspace shell
-applied to Generate Document as its first implementation. No API, database, or business-logic
-changes. Next action for this sprint is further self-validation / a git commit, not further
-feature work.
-
-**Quality Management Suite — Phase 1** (uncommitted working-tree code, functionally complete):
-Document Control, Deviation Management, CAPA — see [ARCHITECTURE.md](ARCHITECTURE.md) §12 and
-`docs/QMS_PHASE1.md` for full detail. Next action for this sprint is a git commit + version bump,
-not further feature work.
+All other work previously tracked here (Pre-Deployment UI Audit, "Executive Office"/v3.0 Design
+System Redesign, Enterprise Workspace layout, QMS Phase 1) is now committed — see Completed Sprints
+below for each, and DEC-022 for how this file's earlier "uncommitted" framing was reconciled.
 
 ---
 
@@ -225,14 +205,19 @@ not further feature work.
 | 2026-07-01 → 07-02 | Document Intelligence Engine (v1.0 rewrite) | Async, multi-engine, timeout-bounded, quality-scored extraction pipeline; replaces synchronous single-engine extractor |
 | v0.9.8 | Release | Document Intelligence Engine + Validation UI improvements (last committed release) |
 | 2026-07-04 | Enterprise Workspace Layout (Validation & Usability Testing Sprint) | Fixed a pre-existing `.app-body` HTML nesting bug (Generate Document/Risk/URS/Qual/Report/QMS all rendered outside the sidebar layout); introduced reusable `workspace.css`/`workspace.js` shell; Generate Document is the first implementation |
+| 2026-07-04, commit `6ffaa54` | Quality Management Suite — Phase 1 | Document Control, Deviation Management, CAPA; shared polymorphic Attachments/Comments/Audit-Trail/Approval tables (DEC-010/DEC-011); commit message says "v0.9.9 - QMS Phase 2" but the content is Phase 1 (Document Control/Deviation/CAPA) — a version-numbering/commit-message discrepancy, see DEC-022 |
 | 2026-07-05 | "Executive Office" Design System Redesign | UI-only visual redesign, navy/blue → warm business-attire palette (Walnut Brown/Warm Charcoal/Muted Sage), across every screen; ~1,200 hardcoded colour literals swept to new tokens across all 7 CSS files + 11 JS modules; no backend/API/DB changes |
+| 2026-07-05 | "Premium Enterprise" Palette v3.0 + Lucide Icons | Exact business-attire hex palette refinement, sidebar Regulatory Scope section removed, Unicode emoji → Lucide icon library (see DEC-019) |
+| 2026-07-05 | Pre-Deployment UI Audit | Completed the Lucide icon sweep (0 emoji remain codebase-wide); fixed a cross-suite JS function-name collision (`risk.js`/`urs.js`), a `.urs-empty` layout bug, and the Validation Report suite's dark-theme/width leftovers (see DEC-020) |
+| 2026-07-05, commit `3a94ccf` | "PharmaGPT v3.0 Premium Enterprise UI completed" | Single commit bundling the three rows immediately above (Executive Office redesign, Premium Enterprise v3.0/Lucide icons, Pre-Deployment UI Audit) |
 
 ---
 
 ## Upcoming Sprint
 
-Commit and version the Quality Management Suite Phase 1 work (see Current Sprint above), then
-proceed per the Roadmap below.
+Commit and version the Quality Management Suite Phase 2 (Change Control) work (see Current Sprint
+above), then proceed per the Roadmap below (Non-Conformance / OOS-OOT to complete QMS Phase 2, or
+QMS Phase 3).
 
 ---
 
@@ -241,7 +226,7 @@ proceed per the Roadmap below.
 | Target | Theme | Key items |
 |---|---|---|
 | v0.8 (remainder) | Validation Workspace & Signatures | Full Validation Workspace UI, electronic signatures, 21 CFR Part 11 audit trail (`audit_log`, `signatures` tables), Vector RAG upgrade (Gemini embeddings + vector store), dashboard enhancement |
-| QMS Phase 2 | Change Control, Non-Conformance, OOS/OOT | Reuse the existing polymorphic shared tables (attachments/comments/audit/approvals) |
+| QMS Phase 2 | Change Control (done, uncommitted — see Current Sprint), Non-Conformance, OOS/OOT | Reuse the existing polymorphic shared tables (attachments/comments/audit/approvals) |
 | QMS Phase 3 | Audit Management, Supplier Quality, Training Management, Complaint Management | Same shared-table reuse pattern |
 | v0.9 | Multi-User & RBAC | User accounts, roles, project-level permissions, `users`/`project_members` tables, admin panel, activity notifications |
 | v1.0 | Production Hardening | Server-side PDF export, SOP/MVP template library, Audit Prep AI assistant, Docker packaging, PostgreSQL migration, rate limiting, HTTPS, security headers |
@@ -307,7 +292,13 @@ See Validation Management Suite above (backend-complete, nav not wired).
   Assistant (Fishbone + 5-Why + timeline + root cause), AI impact assessment, AI CAPA suggestions.
 - **CAPA** — corrective/preventive actions, escalation, effectiveness checks, AI draft/
   effectiveness suggestions, AI Quality Trend Summary.
-- Shared across all three: Attachments, Comments, Audit Trail, E-Signature/Approval, Print, DOCX
+- **Change Control** *(Phase 2)* — Equipment/Facility/Utility/Software/Process/Documentation/
+  Specification/Engineering/Quality-System changes; Major/Minor/Critical/Temporary/Permanent/
+  Emergency types; 13-stage workflow (Draft → ... → Closed) with rejection at every stage; AI
+  impact assessment, implementation plan/checklist, risk summary, rollback plan, regulatory impact,
+  change justification, executive summary, verification summary, effectiveness review; links to
+  existing Deviations/CAPAs.
+- Shared across all four: Attachments, Comments, Audit Trail, E-Signature/Approval, Print, DOCX
   Export, Status Badges, unified cross-module QMS dashboard.
 
 ### Document Control
@@ -319,13 +310,16 @@ See Quality Management Suite above.
 ### CAPA
 See Quality Management Suite above.
 
+### Change Control
+See Quality Management Suite above.
+
 ---
 
 ## Modules Planned
 
 | Module | Phase | Status |
 |---|---|---|
-| Change Control | QMS Phase 2 | Not started |
+| Change Control | QMS Phase 2 | **Done** (uncommitted — see Current Sprint / Completed Modules) |
 | Non-Conformance | QMS Phase 2 | Not started |
 | OOS/OOT | QMS Phase 2 | Not started |
 | Audit | QMS Phase 3 | Not started |
@@ -362,6 +356,11 @@ From the repository's own code review (`docs/CODE_REVIEW.md`, scope v0.7, findin
   implementations between the global scope and `val_workspace.js`.
 - **UI gap:** Risk/URS/Qual/Report suites have no live sidebar navigation entry point (see
   Completed Modules above).
+- **No "Related Change Controls" tab in Deviation/CAPA:** Change Control (QMS Phase 2) can link to
+  an existing Deviation or CAPA, and a reverse-lookup helper
+  (`qms_change_control_database.get_change_controls_for_record()`) is queryable, but
+  `qms_deviations.js`/`qms_capa.js` were not modified to surface it — deferred per the "don't modify
+  completed modules unless integration requires it" instruction. See DECISIONS.md DEC-021.
 - **Visual parity gap (introduced 2026-07-05):** `docx_generator.py`/`doc_exporter.py` still emit
   the pre-redesign navy heading/table styling in exported `.docx` files — the on-screen "Executive
   Office" redesign (DEC-018) deliberately did not touch Python-generated document styling (UI-only

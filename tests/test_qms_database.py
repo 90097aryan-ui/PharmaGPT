@@ -204,6 +204,107 @@ def test_capa_delete(db_path):
     assert cdb.get_capa(capa["id"]) is None
 
 
+# ── Change Control ─────────────────────────────────────────────────────────────
+
+def test_create_change_control_generates_number(db_path):
+    from pharmagpt import qms_change_control_database as ccdb
+
+    cc = ccdb.create_change_control({"title": "Upgrade HVAC firmware", "change_type": "Major"})
+    assert cc["cc_number"].startswith("CC-")
+    assert cc["status"] == "Draft"
+
+    cc2 = ccdb.create_change_control({"title": "Second change"})
+    assert cc2["cc_number"] != cc["cc_number"]
+
+
+def test_change_control_update_and_form_data_roundtrip(db_path):
+    from pharmagpt import qms_change_control_database as ccdb
+
+    cc = ccdb.create_change_control({"title": "Change", "form_data": {"a": 1}})
+    assert cc["form_data"] == {"a": 1}
+
+    updated = ccdb.update_change_control(cc["id"], {"status": "Submitted", "form_data": {"a": 2}})
+    assert updated["status"] == "Submitted"
+    assert updated["form_data"] == {"a": 2}
+
+
+def test_change_control_narratives_roundtrip(db_path):
+    from pharmagpt import qms_change_control_database as ccdb
+
+    cc = ccdb.create_change_control({"title": "Change"})
+    ccdb.set_narrative(cc["id"], "risk_summary", "Risk text")
+    ccdb.set_narrative(cc["id"], "rollback_plan", "Rollback text")
+    updated = ccdb.get_change_control(cc["id"])
+    assert updated["ai_narratives"]["risk_summary"] == "Risk text"
+    assert updated["ai_narratives"]["rollback_plan"] == "Rollback text"
+
+
+def test_change_control_impact_entries(db_path):
+    from pharmagpt import qms_change_control_database as ccdb
+
+    cc = ccdb.create_change_control({"title": "Change"})
+    ccdb.add_impact(cc["id"], {"impact_area": "Validation", "impacted": "Yes"})
+    impacts = ccdb.get_impacts(cc["id"])
+    assert len(impacts) == 1
+    assert impacts[0]["impact_area"] == "Validation"
+
+
+def test_change_control_actions_upsert(db_path):
+    from pharmagpt import qms_change_control_database as ccdb
+
+    cc = ccdb.create_change_control({"title": "Change"})
+    action = ccdb.upsert_action(cc["id"], {"step_no": 1, "activity": "Procure parts", "responsible": "Engineering"})
+    assert action["status"] == "Pending"
+
+    updated = ccdb.upsert_action(cc["id"], {"id": action["id"], "activity": "Procure parts", "status": "Completed"})
+    assert updated["id"] == action["id"]
+    assert updated["status"] == "Completed"
+
+    actions = ccdb.get_actions(cc["id"])
+    assert len(actions) == 1
+
+
+def test_change_control_deviation_capa_linkage(db_path):
+    from pharmagpt import qms_change_control_database as ccdb
+    from pharmagpt import qms_deviation_database as ddb
+    from pharmagpt import qms_capa_database as cdb
+
+    cc = ccdb.create_change_control({"title": "Change"})
+    dev = ddb.create_deviation({"title": "Dev"})
+    capa = cdb.create_capa({"title": "CAPA"})
+
+    ccdb.link_record(cc["id"], "deviation", dev["id"])
+    ccdb.link_record(cc["id"], "capa", capa["id"])
+
+    linked_devs = ccdb.get_linked_records(cc["id"], "deviation")
+    linked_capas = ccdb.get_linked_records(cc["id"], "capa")
+    assert len(linked_devs) == 1 and linked_devs[0]["linked_id"] == dev["id"]
+    assert len(linked_capas) == 1 and linked_capas[0]["linked_id"] == capa["id"]
+
+    reverse = ccdb.get_change_controls_for_record("deviation", dev["id"])
+    assert reverse[0]["id"] == cc["id"]
+
+
+def test_change_control_dashboard_stats(db_path):
+    from pharmagpt import qms_change_control_database as ccdb
+
+    ccdb.create_change_control({"title": "A", "change_type": "Minor"})
+    c2 = ccdb.create_change_control({"title": "B", "change_type": "Emergency"})
+    ccdb.update_change_control(c2["id"], {"status": "Closed"})
+    stats = ccdb.get_dashboard_stats()
+    assert stats["total"] == 2
+    assert stats["open"] == 1
+    assert stats["closed"] == 1
+
+
+def test_change_control_delete(db_path):
+    from pharmagpt import qms_change_control_database as ccdb
+
+    cc = ccdb.create_change_control({"title": "To delete"})
+    ccdb.delete_change_control(cc["id"])
+    assert ccdb.get_change_control(cc["id"]) is None
+
+
 # ── Shared tables: attachments / comments / audit trail / approvals ───────────
 
 def test_shared_attachments_polymorphic(db_path):
@@ -249,6 +350,10 @@ def test_qms_meta_contains_expected_enums():
     assert "SOP" in qmsdb.QMS_META["document_types"]
     assert "Minor" in qmsdb.QMS_META["deviation_types"]
     assert "Open" in qmsdb.QMS_META["capa_statuses"]
+    assert "Emergency" in qmsdb.QMS_META["change_types"]
+    assert "Software" in qmsdb.QMS_META["change_categories"]
+    assert "Closed" in qmsdb.QMS_META["change_control_statuses"]
+    assert "Validation" in qmsdb.QMS_META["change_control_impact_areas"]
 
 
 def test_qms_schema_creates_all_tables(db_path):
@@ -265,5 +370,7 @@ def test_qms_schema_creates_all_tables(db_path):
         "qms_documents", "qms_document_versions", "qms_document_distribution", "qms_document_training",
         "qms_capas", "qms_capa_actions", "qms_capa_effectiveness",
         "qms_deviations", "qms_deviation_investigation", "qms_deviation_impact", "qms_deviation_capa_link",
+        "qms_change_controls", "qms_change_control_impact", "qms_change_control_actions",
+        "qms_change_control_links",
     }
     assert expected.issubset(tables)

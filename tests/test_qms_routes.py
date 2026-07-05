@@ -30,6 +30,7 @@ def mock_gemini(monkeypatch):
     import pharmagpt.services.qms_document_service as doc_svc
     import pharmagpt.services.qms_deviation_service as dev_svc
     import pharmagpt.services.qms_capa_service as capa_svc
+    import pharmagpt.services.qms_change_control_service as cc_svc
     import pharmagpt.routes.qms_documents as doc_routes
 
     def _fake_call_gemini(prompt, temperature=0.3):
@@ -39,7 +40,7 @@ def mock_gemini(monkeypatch):
         yield "# Generated Title\n"
         yield "Some generated markdown content."
 
-    for mod in (shared, doc_svc, dev_svc, capa_svc):
+    for mod in (shared, doc_svc, dev_svc, capa_svc, cc_svc):
         monkeypatch.setattr(mod, "call_gemini", _fake_call_gemini)
     monkeypatch.setattr(shared, "stream_gemini", _fake_stream_gemini)
     monkeypatch.setattr(doc_routes, "stream_gemini", _fake_stream_gemini)
@@ -54,6 +55,8 @@ def test_meta_endpoint(client):
     data = r.get_json()
     assert "SOP" in data["document_types"]
     assert "Open" in data["capa_statuses"]
+    assert "Emergency" in data["change_types"]
+    assert "Closed" in data["change_control_statuses"]
 
 
 def test_dashboard_endpoint_empty(client):
@@ -63,6 +66,10 @@ def test_dashboard_endpoint_empty(client):
     assert summary["total_documents"] == 0
     assert summary["open_deviations"] == 0
     assert summary["open_capas"] == 0
+    assert summary["total_changes"] == 0
+    assert summary["open_changes"] == 0
+    assert summary["pending_change_approvals"] == 0
+    assert summary["emergency_changes"] == 0
 
 
 # ── Document Control ─────────────────────────────────────────────────────────
@@ -301,6 +308,126 @@ def test_capa_docx_export(client):
     assert len(r.data) > 1000
 
 
+# ── Change Control ───────────────────────────────────────────────────────────
+
+def test_change_control_crud_lifecycle(client):
+    r = client.post("/qms/change-control", json={"title": "Upgrade HVAC firmware", "change_type": "Major"})
+    assert r.status_code == 201
+    cc = r.get_json()
+    assert cc["cc_number"].startswith("CC-")
+    assert cc["status"] == "Draft"
+    cc_id = cc["id"]
+
+    assert client.get("/qms/change-control").status_code == 200
+    r = client.put(f"/qms/change-control/{cc_id}", json={"risk_level": "Medium"})
+    assert r.get_json()["risk_level"] == "Medium"
+
+    r = client.delete(f"/qms/change-control/{cc_id}")
+    assert r.status_code == 200
+    assert client.get(f"/qms/change-control/{cc_id}").status_code == 404
+
+
+def test_change_control_create_requires_title(client):
+    r = client.post("/qms/change-control", json={"change_type": "Minor"})
+    assert r.status_code == 400
+
+
+def test_change_control_impact_ai_route(client, mock_gemini, monkeypatch):
+    import pharmagpt.services.qms_change_control_service as cc_svc
+    import json as _json
+    canned = _json.dumps([
+        {"impact_area": "Validation", "impacted": "Yes", "extent": "Re-qualification required", "action_required": "Re-IQ/OQ"},
+    ])
+    monkeypatch.setattr(cc_svc, "call_gemini", lambda prompt, temperature=0.3: canned)
+
+    cc = client.post("/qms/change-control", json={"title": "Change"}).get_json()
+    r = client.post(f"/qms/change-control/{cc['id']}/suggest-impact")
+    assert r.status_code == 200
+    suggestions = r.get_json()
+    assert suggestions[0]["impact_area"] == "Validation"
+
+    r = client.post(f"/qms/change-control/{cc['id']}/impact", json=suggestions[0])
+    assert r.status_code == 201
+    assert len(client.get(f"/qms/change-control/{cc['id']}/impact").get_json()) == 1
+
+
+def test_change_control_implementation_plan_ai_route(client, mock_gemini, monkeypatch):
+    import pharmagpt.services.qms_change_control_service as cc_svc
+    import json as _json
+    canned = _json.dumps([{"step_no": 1, "activity": "Procure parts", "responsible": "Engineering"}])
+    monkeypatch.setattr(cc_svc, "call_gemini", lambda prompt, temperature=0.3: canned)
+
+    cc = client.post("/qms/change-control", json={"title": "Change"}).get_json()
+    r = client.post(f"/qms/change-control/{cc['id']}/suggest-implementation-plan")
+    assert r.status_code == 200
+    steps = r.get_json()
+    assert steps[0]["activity"] == "Procure parts"
+
+    r = client.post(f"/qms/change-control/{cc['id']}/actions", json=steps[0])
+    assert r.status_code == 201
+    assert len(client.get(f"/qms/change-control/{cc['id']}/actions").get_json()) == 1
+
+
+def test_change_control_ai_narratives(client, mock_gemini):
+    cc = client.post("/qms/change-control", json={"title": "Change"}).get_json()
+    for path, key in [
+        ("risk-summary", "risk_summary"), ("rollback-plan", "rollback_plan"),
+        ("regulatory-impact", "regulatory_impact"), ("justification", "justification"),
+        ("executive-summary", "executive_summary"), ("verification-summary", "verification_summary"),
+        ("effectiveness-review", "effectiveness_review"),
+    ]:
+        r = client.post(f"/qms/change-control/{cc['id']}/{path}")
+        assert r.status_code == 200
+        assert r.get_json()["text"] == "canned response"
+
+    saved = client.get(f"/qms/change-control/{cc['id']}").get_json()
+    assert saved["ai_narratives"]["risk_summary"] == "canned response"
+    assert saved["ai_narratives"]["effectiveness_review"] == "canned response"
+
+
+def test_change_control_deviation_capa_linking(client):
+    cc = client.post("/qms/change-control", json={"title": "Change"}).get_json()
+    dev = client.post("/qms/deviations", json={"title": "Dev"}).get_json()
+    capa = client.post("/qms/capa", json={"title": "CAPA"}).get_json()
+
+    r = client.post(f"/qms/change-control/{cc['id']}/link-deviation", json={"deviation_id": dev["id"]})
+    assert r.status_code == 201
+    r = client.post(f"/qms/change-control/{cc['id']}/link-capa", json={"capa_id": capa["id"]})
+    assert r.status_code == 201
+
+    assert client.get(f"/qms/change-control/{cc['id']}/deviations").get_json()[0]["id"] == dev["id"]
+    assert client.get(f"/qms/change-control/{cc['id']}/capas").get_json()[0]["id"] == capa["id"]
+
+
+def test_change_control_approval_status_map(client):
+    cc = client.post("/qms/change-control", json={"title": "Change"}).get_json()
+    cc_id = cc["id"]
+
+    client.post(f"/qms/change-control/{cc_id}/approval", json={"action": "Submitted", "performed_by": "A"})
+    assert client.get(f"/qms/change-control/{cc_id}").get_json()["status"] == "Submitted"
+
+    client.post(f"/qms/change-control/{cc_id}/approval", json={"action": "Approved", "performed_by": "B"})
+    assert client.get(f"/qms/change-control/{cc_id}").get_json()["status"] == "Implementation"
+
+    client.post(f"/qms/change-control/{cc_id}/approval", json={"action": "Closed", "performed_by": "C"})
+    assert client.get(f"/qms/change-control/{cc_id}").get_json()["status"] == "Closed"
+
+
+def test_change_control_rejection_returns_to_draft(client):
+    cc = client.post("/qms/change-control", json={"title": "Change"}).get_json()
+    cc_id = cc["id"]
+    client.post(f"/qms/change-control/{cc_id}/approval", json={"action": "Submitted", "performed_by": "A"})
+    client.post(f"/qms/change-control/{cc_id}/approval", json={"action": "Rejected", "performed_by": "B"})
+    assert client.get(f"/qms/change-control/{cc_id}").get_json()["status"] == "Draft"
+
+
+def test_change_control_docx_export(client):
+    cc = client.post("/qms/change-control", json={"title": "Change", "change_description": "Upgrade firmware"}).get_json()
+    r = client.post(f"/qms/change-control/{cc['id']}/export/docx")
+    assert r.status_code == 200
+    assert len(r.data) > 1000
+
+
 # ── Shared: attachments / comments / audit-trail ──────────────────────────────
 
 def test_attachments_upload_download_delete(client):
@@ -344,3 +471,15 @@ def test_comments_and_audit_trail_generic_endpoints(client):
 def test_invalid_record_type_rejected(client):
     r = client.get("/qms/not-a-real-type/1/attachments")
     assert r.status_code == 400
+
+
+def test_change_control_shares_generic_comment_and_audit_endpoints(client):
+    cc = client.post("/qms/change-control", json={"title": "Change"}).get_json()
+    cc_id = cc["id"]
+
+    r = client.post(f"/qms/change_control/{cc_id}/comments", json={"author": "J Doe", "comment": "Looks reasonable"})
+    assert r.status_code == 201
+    assert len(client.get(f"/qms/change_control/{cc_id}/comments").get_json()) == 1
+
+    audit = client.get(f"/qms/change_control/{cc_id}/audit-trail").get_json()
+    assert any(a["action"] == "Change control drafted" for a in audit)

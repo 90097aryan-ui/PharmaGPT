@@ -227,14 +227,35 @@ qms_deviations ──< qms_deviation_investigation (1:1)
                ──< qms_deviation_impact
                ──< qms_deviation_capa_link >── qms_capas
 
--- Shared across all three (and future Phase 2/3 modules), keyed by
+-- Shared across all four (and future Phase 3 modules), keyed by
 -- (record_type, record_id) instead of one copy per module:
-qms_attachments   -- record_type: 'document' | 'deviation' | 'capa'
+qms_attachments   -- record_type: 'document' | 'deviation' | 'capa' | 'change_control'
 qms_comments
 qms_audit_trail
 qms_approvals     -- e-signature trail: performed_by, role, electronic_sig (typed, no PKI)
 ```
 
-`qms_documents`, `qms_deviations`, and `qms_capas` each carry a nullable
+`qms_documents`, `qms_deviations`, `qms_capas`, and `qms_change_controls` each carry a nullable
 `project_id REFERENCES projects(id) ON DELETE SET NULL` — quality records are
 not deleted when the referenced validation project is.
+
+---
+
+## Quality Management Suite (Phase 2: Change Control) — added 2026-07-05
+
+Fourth QMS module, built on the same shared polymorphic tables above via `record_type=
+'change_control'` — no new shared table added. Schema appended to the same `QMS_SCHEMA` string in
+`pharmagpt/qms_database.py`; CRUD lives in `qms_change_control_database.py`. Full reference:
+[`docs/QMS_PHASE2.md`](docs/QMS_PHASE2.md).
+
+```
+qms_change_controls ──< qms_change_control_impact
+                     ──< qms_change_control_actions
+                     ──< qms_change_control_links >── qms_deviations | qms_capas
+                                                        (linked_type discriminates which)
+```
+
+`qms_change_controls.ai_narratives` is a single JSON column (keyed by feature name: risk_summary,
+rollback_plan, regulatory_impact, justification, executive_summary, verification_summary,
+effectiveness_review) rather than one column per AI narrative feature — same pattern as
+`ai_investigation_data`/`ai_review_data` elsewhere in QMS.

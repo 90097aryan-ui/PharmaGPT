@@ -6,6 +6,130 @@
 
 ---
 
+## [Unreleased] — Quality Management Suite (Phase 2: Change Control)
+
+**Sprint Name:** QMS Phase 2 — Change Control
+**Status:** Complete in the working tree, browser-verified against the live Gemini API, **not yet
+committed to git**.
+
+**Summary:** Adds the Change Control module, following the exact Phase 1 pattern (DEC-010/DEC-011/
+DEC-012) — polymorphic shared tables via `record_type='change_control'`, no new shared
+attachment/comment/audit/approval mechanism. Covers the full GMP change-control lifecycle: Equipment,
+Facility, HVAC, Water System, Compressed Air, Steam, Electrical, Software, PLC, SCADA, MES, ERP,
+Barcode System, Vision System, BMS, LIMS, Validation, SOP, Specification, Packaging, Warehouse,
+Quality, Engineering, Production, Utilities, and IT changes; Major/Minor/Critical/Temporary/
+Permanent/Emergency change types; a 13-stage workflow (Draft → Submitted → Initial Review → Impact
+Assessment → Risk Assessment → Department Review → QA Review → Approval → Implementation →
+Verification → Effectiveness Review → Closed) with rejection supported at every stage. See
+[DECISIONS.md](DECISIONS.md) DEC-021 for full architectural detail.
+
+**Modules Added**
+- `pharmagpt/qms_change_control_database.py` — CRUD for change controls, impact assessment entries,
+  implementation plan actions, and Deviation/CAPA links; reuses `qms_database.py`'s shared
+  attachments/comments/audit-trail/approvals via `record_type='change_control'`.
+- `pharmagpt/routes/qms_change_control.py` — `/qms/change-control` blueprint (CRUD, AI-assist
+  endpoints, impact/action sub-resources, linking, approval/status-transition, report/DOCX export).
+- `pharmagpt/services/qms_change_control_service.py` — AI orchestration via the existing
+  `services/qms_shared.py::call_gemini()`/`parse_json_response()` (no new AI-calling convention);
+  markdown report builder for print/DOCX export.
+- `pharmagpt/prompts/qms_change_control_prompt.py` — 9 prompt builders (impact assessment,
+  implementation plan/checklist, risk summary, rollback plan, regulatory impact, change
+  justification, executive summary, verification summary, effectiveness review).
+- `pharmagpt/static/js/qms_change_control.js` — list/dashboard/detail/tabs/wizard frontend, reusing
+  every `qms_common.js` shared helper (fetch wrapper, badges, meta cache, shared attachments/
+  comments/audit/approval panels).
+
+**Enhancements**
+- New "Change Control" nested sidebar section and `view-qms-change-control` view, wired the same way
+  as Document Control/Deviation/CAPA.
+- Unified QMS dashboard (`qms_common.js::initQMSDashboard()`) gained a fourth stat-card pair (Open
+  Change Controls, Emergency Changes) and a fourth module section card.
+- `routes/qms_common.py`'s shared `/qms/dashboard`, `/qms/meta`, and generic attachments/comments/
+  audit-trail/approval endpoints now serve `record_type='change_control'` with zero new routes.
+
+**Bug Fixes**
+- None — this is new functionality, not a fix.
+
+**Database Changes**
+- New tables (appended to the existing `QMS_SCHEMA` in `qms_database.py`, same `init_db()` hook):
+  `qms_change_controls`, `qms_change_control_impact`, `qms_change_control_actions`,
+  `qms_change_control_links`.
+- New `QMS_META` enums: `change_types`, `change_categories`, `change_control_statuses`,
+  `change_control_impact_areas`.
+- No changes to any existing table.
+
+**API Changes**
+- New blueprint: `qms_change_control` (`/qms/change-control`). Full endpoint list documented in the
+  route module's own docstring; root-level `API.md` updated to match.
+- `routes/qms_common.py`: `VALID_RECORD_TYPES`/`_GETTERS` extended with `change_control`; `/qms/
+  dashboard` response gained a `change_control` block and four new `summary` keys (`total_changes`,
+  `open_changes`, `pending_change_approvals`, `emergency_changes`).
+
+**UI Changes**
+- New "Quality Management → Change Control" sidebar entry; new `view-qms-change-control` view.
+- `qms.css` gained badge-color variants for statuses Phase 1 didn't need (Critical, Emergency,
+  Temporary, Permanent, Submitted, Rejected, Draft, Yes, No, Potential) — no new component classes,
+  everything else reuses the existing `.qms-*` primitives.
+- `qms_common.js`'s QMS dashboard subtitle and stat grid updated to mention/include Change Control.
+
+**AI Improvements**
+- 9 new AI-assisted flows (impact assessment, implementation plan/checklist, risk summary, rollback
+  plan, regulatory impact, change justification, executive summary, verification summary,
+  effectiveness review), all optional and routed through the shared `qms_shared.py::call_gemini()`.
+
+**Performance Improvements**
+- None specific to this release.
+
+**Security Improvements**
+- None specific to this release; e-signature approach matches the existing typed-name convention.
+
+**Documentation Updates**
+- This document set (`PROJECT_STATUS.md`, `ARCHITECTURE.md`, `DECISIONS.md` DEC-021,
+  `RELEASE_NOTES.md`) plus root-level `API.md`, `DATABASE.md`, `CHANGELOG.md`.
+
+**Regression Results**
+- Full pytest suite: 101 passed (60 QMS tests including 16 new Change Control tests), 1 deselected
+  (`slow` marker), zero regressions.
+- Live browser verification (1440×900 desktop, Flask dev server, real Gemini API — not mocked):
+  created a Major/Equipment change control (auto-numbered `CC-2026-0001`); ran the live AI Impact
+  Assessment and accepted a suggestion into the record; ran the live AI Implementation Plan
+  (8 steps) and bulk-accepted them; linked an existing Deviation and CAPA; drove the full 13-stage
+  approval workflow start to finish (Draft → ... → Closed, badge updating live at each transition);
+  verified the audit trail captured all 14 entries in order; verified the compiled markdown report
+  and DOCX export (42KB, valid `.docx` MIME type); confirmed zero console errors and zero network
+  failures throughout. One AI narrative call (Risk Summary) hit a transient `503 UNAVAILABLE` from
+  the Gemini API under high demand — reproduced independently via a standalone script to confirm it
+  was an external API availability blip, not a code defect; `call_gemini()`'s existing try/except
+  handled it exactly as designed (empty string → the service's documented fallback text, no crash).
+  Tablet breakpoint (768px) checked and confirmed to behave per the existing documented limitation
+  (sidebar hides, no replacement nav).
+
+**Tests Executed**
+- 16 new tests appended to `tests/test_qms_database.py` (schema/CRUD/linkage/dashboard-stats) and
+  `tests/test_qms_routes.py` (CRUD lifecycle, AI-assist routes with mocked Gemini, linking, the full
+  approval status map including rejection, DOCX export, shared generic endpoints) — following the
+  same combined-file convention Phase 1 used rather than new per-module test files.
+
+**Deployment Notes**
+- Not yet deployed — pending git commit and version bump. No new environment variables required.
+
+**Known Issues**
+- Deviation/CAPA do not yet surface a "Related Change Controls" tab in their own detail views — the
+  reverse-lookup helper (`get_change_controls_for_record()`) exists and is queryable, but wiring it
+  into `qms_deviations.js`/`qms_capa.js` was deliberately deferred per the "don't modify completed
+  modules unless integration requires it" instruction. See DECISIONS.md DEC-021 Future Review.
+- Same pre-existing items carried over from Phase 1: Risk/URS/Qualification/Validation Report
+  sidebar navigation still unwired; exported-DOCX styling still pre-redesign navy; mobile/tablet
+  navigation still absent.
+
+**Next Sprint**
+- Commit and version this release alongside the still-uncommitted Phase 1 QMS work, Enterprise
+  Workspace layout, and Design System redesign already sitting in the working tree. Then proceed to
+  QMS Phase 3 (Audit Management, Supplier Quality, Training Management, Complaint Management) per
+  [PROJECT_STATUS.md](PROJECT_STATUS.md) → Roadmap, reusing this same pattern.
+
+---
+
 ## [Unreleased] — Pre-Deployment UI Audit
 
 **Sprint Name:** Pre-Deployment UI Audit

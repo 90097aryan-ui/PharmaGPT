@@ -790,3 +790,152 @@ still pre-redesign navy (pre-existing, DEC-018); mobile/tablet navigation is sti
 Risk/URS/Qualification/Validation Report's sidebar navigation also do one more full click-through
 of those suites now that they can be reached normally instead of via `showView()`, since a handful
 of interaction paths (e.g. deep wizard branches) were not individually exercised in this pass.
+
+---
+
+### DEC-021 — Change Control Module (QMS Phase 2), Following the Phase 1 Polymorphic-Table Pattern Exactly
+
+**Date:** 2026-07-05
+**Problem Statement:** Build the Change Control module — QMS Phase 2, per the roadmap in
+[PROJECT_STATUS.md](PROJECT_STATUS.md) — covering the full GMP change-control lifecycle (Equipment/
+Facility/Utility/Software/Process/Documentation/Specification/Engineering/Quality-System changes;
+Major/Minor/Critical/Temporary/Permanent/Emergency types; a 13-stage workflow from Draft through
+Closed with rejection supported at every stage) without redesigning any completed module.
+**Options Considered:** (a) Build Change Control as a fresh architecture (own attachment/comment/
+audit/approval tables, own AI-calling convention, own frontend shell pattern); (b) extend the exact
+QMS Phase 1 pattern established by DEC-010/DEC-011/DEC-012 — polymorphic shared tables with a new
+`record_type='change_control'`, a dedicated `qms_change_control_database.py`/`routes/
+qms_change_control.py`/`services/qms_change_control_service.py`/`prompts/
+qms_change_control_prompt.py`/`static/js/qms_change_control.js` quartet, reusing `qms.css` and
+`qms_common.js` unchanged apart from additive badge variants and a new dashboard section.
+**Decision Taken:** Option (b), with zero exceptions. New tables: `qms_change_controls`,
+`qms_change_control_impact`, `qms_change_control_actions`, `qms_change_control_links` — all added to
+the existing `QMS_SCHEMA` string in `qms_database.py` (same file, same `init_db()` hook, no new
+schema-loading mechanism). Change Control attaches to the four Phase 1 shared tables
+(`qms_attachments`/`qms_comments`/`qms_audit_trail`/`qms_approvals`) via `record_type='change_control'`
+exactly as DEC-010/DEC-011 anticipated — no new attachment/comment/audit/approval table was created.
+`generate_change_control_number()` follows the existing `_next_sequence()` helper used by
+`generate_deviation_number()`/`generate_capa_number()`, producing `CC-2026-0001`-style numbers.
+AI features (Impact Assessment, Implementation Plan/Checklist, Risk Summary, Rollback Plan,
+Regulatory Impact, Change Justification, Executive Summary, Verification Summary, Effectiveness
+Review) all route through the existing `services/qms_shared.py::call_gemini()`/
+`parse_json_response()` — no new AI-calling convention, keeping Change Control exactly as
+loosely-coupled to Gemini as every other QMS module (a future Pharma Knowledge Engine swap only
+touches `qms_shared.py`). Narrative-style AI outputs (the 7 free-text features) are persisted into a
+single new `ai_narratives` JSON column on `qms_change_controls` (keyed by feature name) rather than
+adding 7 new columns — the same one-JSON-column-per-blob approach already used for
+`ai_investigation_data`/`ai_review_data` elsewhere in QMS. Suggestion-style AI outputs (impact
+entries, implementation steps) are ephemeral and reviewed/accepted into the real tables one at a
+time or in bulk, mirroring `qms_deviation_service.py::ai_suggest_impact()`/`ai_suggest_capa()`
+exactly. The frontend (`qms_change_control.js`) reuses every `qms_common.js` helper (fetch wrapper,
+badge renderer, meta cache, shared attachments/comments/audit/approval panel renderers) with zero
+new shared helpers added — only two small additive changes were made to shared files: `qms.css`
+gained badge-color variants for statuses Phase 1 never needed (Critical/Emergency/Temporary/
+Permanent/Submitted/Rejected/Draft/Yes/No/Potential), and `qms_common.js`'s `initQMSDashboard()`
+gained a fourth stat-card pair and section card, matching the exact markup pattern of the three
+existing sections. `routes/qms_common.py` gained one `record_type` entry (`change_control` →
+`qms_change_control_database.get_change_control`) in its existing `VALID_RECORD_TYPES`/`_GETTERS`
+dicts, and its `/qms/dashboard` endpoint gained one more stats block — no new shared route was
+added. Deviation/CAPA integration is one-directional: Change Control can link to an existing
+Deviation or CAPA (`qms_change_control_links`, `linked_type ∈ {deviation, capa}`) and a reverse
+lookup helper (`get_change_controls_for_record()`) exists in the new database file for any future
+session that wants to surface "Related Change Controls" inside Deviation/CAPA's own detail views —
+but `qms_deviation_database.py`/`qms_capa_database.py`/`qms_deviations.js`/`qms_capa.js` were **not**
+modified, per the explicit "do not modify completed modules unless integration requires it"
+instruction; the link is fully queryable from the Change Control side without touching those files.
+The Enterprise Workspace shell (DEC-017) was deliberately **not** applied — Document Control/
+Deviation/CAPA never adopted it either (they use the `qms-page-header`/`qms-tabs` pattern instead,
+which predates DEC-017 and was never migrated), so applying it only to Change Control would have
+made QMS internally inconsistent; the existing QMS list/detail/tabs pattern was reused unchanged.
+**Reason:** DEC-010/DEC-011/DEC-012 explicitly designed the Phase 1 polymorphic tables and per-domain
+file convention to make Phase 2/3 modules "reuse them for free — just add a new `record_type`
+string," and explicitly named Change Control as the first Phase 2 module in the roadmap
+([PROJECT_STATUS.md](PROJECT_STATUS.md), [ARCHITECTURE.md](ARCHITECTURE.md) §14). Deviating from
+that pattern would have been exactly the kind of duplicate-architecture risk DEC-013 already flagged
+as a recurring problem in this codebase.
+**Benefits:** Zero new shared tables; zero new shared frontend helpers; zero duplicate CSS (only
+additive badge colors); the module is reachable, testable, and visually indistinguishable in quality
+from Document Control/Deviation/CAPA because it is built from the same primitives. 60 new automated
+tests (appended to the existing `test_qms_database.py`/`test_qms_routes.py`, not new files, matching
+how Phase 1 itself combined all three of its modules into two test files) all pass alongside the
+full 101-test suite with zero regressions. Live-browser verification exercised the full 13-stage
+workflow end-to-end (including rejection back to Draft) and three of the nine AI features
+end-to-end against the real Gemini API (Impact Assessment and Implementation Plan succeeded live;
+Risk Summary hit a transient upstream `503 UNAVAILABLE` from Gemini, confirmed via a standalone
+reproduction script to be an external API availability blip, not a code defect — `call_gemini()`'s
+existing try/except correctly caught it and the UI correctly rendered the designed fallback text).
+**Trade-offs:** The `ai_narratives` single-JSON-column approach means individual narrative fields
+are not independently queryable/indexable in SQL (acceptable — nothing in the current app needs to
+filter or report on narrative content, only display it on the record's own detail page). Impact
+assessment and implementation-plan AI suggestions are not deduplicated against already-accepted
+entries (a user can accept the same suggestion twice) — same limitation already accepted for
+Deviation's `ai_suggest_impact()`/`ai_suggest_capa()`, not a new gap introduced here.
+**Impact:** Any future QMS Phase 3 module (Audit, Supplier Quality, Training, Complaint Management)
+should follow this exact same reuse pattern: new `record_type` string against the four Phase 1
+shared tables, a `qms_<module>_database.py`/`routes/qms_<module>.py`/`services/
+qms_<module>_service.py`/`prompts/qms_<module>_prompt.py`/`static/js/qms_<module>.js` quartet, AI
+calls through `services/qms_shared.py`, and additive-only changes to `qms.css`/`qms_common.js`/
+`routes/qms_common.py`/`app.py`/`templates/index.html`.
+**Future Review Required:** Consider adding a "Related Change Controls" tab inside Deviation/CAPA's
+own detail views using the existing `get_change_controls_for_record()` reverse-lookup helper, once a
+session is scoped specifically to touch those modules (not done here, per the "don't modify
+completed modules" instruction). Consider unifying QMS's `qms-page-header`/`qms-tabs` pattern with
+the Enterprise Workspace shell (DEC-017) in a future dedicated design pass, rather than migrating
+one module at a time.
+
+---
+
+### DEC-022 — Documentation Versioning Reconciliation, Round Two: Committed Work Mislabeled as Uncommitted
+
+**Date:** 2026-07-05, discovered while preparing to commit the Change Control (DEC-021) work
+**Problem Statement:** Before committing the Change Control module, `git log` was checked (standard
+practice before any git write operation) and revealed that `PROJECT_STATUS.md`, at the commit this
+session started from, already described QMS Phase 1 (Document Control/Deviation/CAPA), the
+Enterprise Workspace layout, the "Executive Office"/"Premium Enterprise" v3.0 Design System
+redesign, and the Pre-Deployment UI Audit as **uncommitted working-tree state** — but `git log`
+showed two commits, `6ffaa54` ("Release v0.9.9 - QMS Phase 2", 2026-07-04) and `3a94ccf` ("PharmaGPT
+v3.0 Premium Enterprise UI completed", 2026-07-05), that already contained exactly that work.
+`git show --stat 6ffaa54` confirms its content is Document Control/Deviation/CAPA (Phase 1) despite
+the commit message saying "Phase 2" — the same class of commit-message/content drift DEC-014
+already documented once, recurring a second time. This session's own `PROJECT_STATUS.md`/
+`RELEASE_NOTES.md` edits (written before this discovery) inherited the error, describing the new
+Change Control work as sitting "alongside" other "uncommitted" work that had, in fact, already
+shipped days/hours earlier in the session's own timeline.
+**Options Considered:** (a) Leave the stale "uncommitted" framing in place and let it resolve itself
+whenever someone next reconciles the docs against `git log`; (b) fix it now, before committing,
+per [CLAUDE.md](CLAUDE.md)'s explicit rule to correct discovered memory staleness as part of the
+same task, so the commit about to be created has an accurate `PROJECT_STATUS.md` alongside it.
+**Decision Taken:** Option (b). Corrected `PROJECT_STATUS.md`'s "Current Version" section to state
+plainly that `3a94ccf` is the last committed release and enumerate what it already contains;
+removed the four now-committed items from "Current Sprint" (only Change Control remains there,
+since it's the only thing genuinely uncommitted as of this reconciliation); added corresponding rows
+to "Completed Sprints" with actual commit hashes, including a row that explicitly flags `6ffaa54`'s
+commit-message/content mismatch so a future session doesn't get confused by the same "Phase 2"
+wording. `RELEASE_NOTES.md`'s existing `[Unreleased]` entries for this already-shipped work were
+left untouched (that file is append-only; converting historical `[Unreleased]` headers to versioned
+ones is a follow-up, not done in this pass to avoid scope creep beyond what committing Change Control
+requires) — the discrepancy there is noted here so it isn't mistaken for newly-introduced drift.
+**Reason:** Same reasoning as DEC-014 — git history is the least-disputable record of what actually
+happened, and a Claude session (or human developer) reading `PROJECT_STATUS.md` cold should not be
+told a shipped feature is still sitting in the working tree uncommitted. Fixing it now, immediately
+before creating a new commit, is the cheapest point in the whole project timeline to correct it —
+the alternative (discovering it in some future session, disconnected from the context of *why* it
+drifted) is strictly more expensive.
+**Benefits:** `PROJECT_STATUS.md` now matches `git log` exactly; the next session (or this one's
+final commit) won't re-describe already-shipped work as pending. The root cause (a commit message
+that says "Phase 2" for Phase-1 content) is now explicitly documented so it can't cause a second
+round of confusion.
+**Trade-offs:** `RELEASE_NOTES.md` still has `[Unreleased]` headers for content that is, as of this
+commit, actually released — a known, explicitly-flagged inconsistency (not a new one) left for a
+dedicated future pass rather than fixed here, to keep this correction scoped to what was necessary
+before committing Change Control.
+**Impact:** Future sessions should treat `6ffaa54`'s commit message as unreliable for identifying
+its content (it says "QMS Phase 2" but contains QMS Phase 1) — rely on `git show --stat` or this
+entry, not the message, when reasoning about that commit. Any session about to run `git commit`
+should check `git log` against `PROJECT_STATUS.md`'s "Current Version" section first, exactly as
+this session did, since this is now the second time that check has caught real drift (DEC-014, then
+this entry).
+**Future Review Required:** Convert `RELEASE_NOTES.md`'s stale `[Unreleased]` headers for QMS Phase
+1 / Enterprise Workspace / Design System v2.0 / v3.0 / Pre-Deployment UI Audit into proper versioned
+entries referencing `6ffaa54`/`3a94ccf`, in a dedicated pass. Consider adopting a machine-readable
+version source (DEC-014's original recommendation) so this class of drift stops recurring entirely.

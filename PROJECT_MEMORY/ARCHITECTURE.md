@@ -75,6 +75,7 @@ D:\PharmaAgent\
 │   ├── qms_document_database.py    QMS Document Control schema + CRUD          [uncommitted]
 │   ├── qms_deviation_database.py   QMS Deviation Management schema + CRUD      [uncommitted]
 │   ├── qms_capa_database.py        QMS CAPA schema + CRUD                      [uncommitted]
+│   ├── qms_change_control_database.py  QMS Change Control schema + CRUD (Phase 2) [uncommitted]
 │   │
 │   ├── routes/                    One Flask Blueprint per domain (see §5)
 │   ├── services/                  Business logic / AI orchestration (see §6)
@@ -129,10 +130,11 @@ default. Row access uses `sqlite3.Row` (dict-like).
 | URS Management | URS projects + requirements | `urs_database.py` |
 | Qualification | IQ/OQ/PQ phase + results tables | `qual_database.py` |
 | Validation Report | report templates + completion records | `report_database.py` |
-| QMS shared *(uncommitted)* | `qms_attachments`, `qms_comments`, `qms_audit_trail`, `qms_approvals` — all polymorphic on `(record_type, record_id)`, `record_type ∈ {document, deviation, capa}` | `qms_database.py` |
+| QMS shared *(uncommitted)* | `qms_attachments`, `qms_comments`, `qms_audit_trail`, `qms_approvals` — all polymorphic on `(record_type, record_id)`, `record_type ∈ {document, deviation, capa, change_control}` | `qms_database.py` |
 | QMS Document Control *(uncommitted)* | `qms_documents`, `qms_document_versions`, `qms_document_distribution`, `qms_document_training` | `qms_document_database.py` |
 | QMS Deviation *(uncommitted)* | `qms_deviations`, `qms_deviation_investigation`, `qms_deviation_impact`, `qms_deviation_capa_link` | `qms_deviation_database.py` |
 | QMS CAPA *(uncommitted)* | `qms_capas`, `qms_capa_actions`, `qms_capa_effectiveness` | `qms_capa_database.py` |
+| QMS Change Control *(Phase 2, uncommitted)* | `qms_change_controls`, `qms_change_control_impact`, `qms_change_control_actions`, `qms_change_control_links` | `qms_change_control_database.py` |
 
 Full column-level detail lives in the root-level `DATABASE.md` — this file summarizes structure
 and relationships only.
@@ -165,6 +167,7 @@ must legally outlive the equipment/project record that originated them.
 | `routes/qms_documents.py` *(uncommitted)* | `qms_documents` | `/qms/documents` | Document Control |
 | `routes/qms_deviations.py` *(uncommitted)* | `qms_deviations` | `/qms/deviations` | Deviation Management |
 | `routes/qms_capa.py` *(uncommitted)* | `qms_capa` | `/qms/capa` | CAPA |
+| `routes/qms_change_control.py` *(Phase 2, uncommitted)* | `qms_change_control` | `/qms/change-control` | Change Control |
 
 Full endpoint-level detail (every method/path/purpose) lives in the root-level `API.md`.
 
@@ -194,8 +197,9 @@ Limitations), contrasted with QMS, which is fully wired into the sidebar.
 - `risk_service.py`, `urs_service.py` (+ `urs_requirement_library.py`), `qual_service.py`,
   `report_service.py`
 - `qms_shared.py` *(uncommitted)* — shared `call_gemini()` / `stream_gemini()` /
-  `parse_json_response()` helpers used by all three QMS services below
+  `parse_json_response()` helpers used by all four QMS services below
 - `qms_document_service.py`, `qms_deviation_service.py`, `qms_capa_service.py` *(uncommitted)*
+- `qms_change_control_service.py` *(Phase 2, uncommitted)*
 
 ---
 
@@ -208,11 +212,11 @@ both chat (`/stream`) and AI generation endpoints, with a critical implementatio
 request context is not available inside a generator function** — all `request.*` data must be
 captured in the outer function scope before `generate()` is defined.
 
-19 JS modules: `workspace.js` *(new, 2026-07-04 — shared Enterprise Workspace shell, see below)*,
+20 JS modules: `workspace.js` *(new, 2026-07-04 — shared Enterprise Workspace shell, see below)*,
 `dashboard.js`, `projects.js`, `chat.js`, `documents.js`, `insights.js`,
 `validation.js`, `validation_config.js`, `val_workspace.js`, `knowledge_base.js`,
 `gen_document.js`, `risk.js`, `urs.js`, `qual.js`, `report.js`, and *(uncommitted)* `qms_common.js`,
-`qms_documents.js`, `qms_deviations.js`, `qms_capa.js`.
+`qms_documents.js`, `qms_deviations.js`, `qms_capa.js`, `qms_change_control.js` *(Phase 2)*.
 
 **Enterprise Workspace layout (`workspace.css` + `workspace.js`, 2026-07-04).** A reusable
 full-screen "workspace" shell for any module that walks a user through a stateful, multi-step or
@@ -358,10 +362,12 @@ Two distinct, currently-coexisting mechanisms — do not conflate them:
 
 ## 12. Quality Management Suite *(uncommitted working-tree code)*
 
-PharmaGPT's second major pillar, parallel in scope to the Validation pillar. Three modules —
-Document Control, Deviation Management, CAPA — built on the shared polymorphic tables described in
-§4, with a nested "Quality Management" sidebar section (chosen over flat top-level entries because
-Phases 2/3 will add 6 more modules; a flat structure would leave 9 top-level suite sections).
+PharmaGPT's second major pillar, parallel in scope to the Validation pillar. Phase 1 shipped three
+modules — Document Control, Deviation Management, CAPA — built on the shared polymorphic tables
+described in §4, with a nested "Quality Management" sidebar section (chosen over flat top-level
+entries because Phases 2/3 will add more modules; a flat structure would leave many top-level suite
+sections). Phase 2 (Change Control) adds a fourth module to the same nested section using the
+identical pattern.
 
 - **Document Control** — lifecycle `Draft → Under Review → Pending Approval → Effective → Under
   Revision → Obsolete`; auto-numbered (`SOP-QA-0001`); version history; training tracking;
@@ -373,8 +379,24 @@ Phases 2/3 will add 6 more modules; a flat structure would leave 9 top-level sui
   draft/effectiveness suggestions, AI Quality Trend Summary across CAPAs and Deviations.
 - **Deviation ↔ CAPA linkage** — real queryable relation via `qms_deviation_capa_link`; linking
   auto-transitions the deviation to `CAPA Assigned`.
+- **Change Control** *(Phase 2)* — Equipment/Facility/HVAC/Water System/Compressed Air/Steam/
+  Electrical/Software/PLC/SCADA/MES/ERP/Barcode System/Vision System/BMS/LIMS/Validation/SOP/
+  Specification/Packaging/Warehouse/Quality/Engineering/Production/Utilities/IT categories;
+  Major/Minor/Critical/Temporary/Permanent/Emergency types; a 13-stage lifecycle `Draft → Submitted
+  → Initial Review → Impact Assessment → Risk Assessment → Department Review → QA Review → Approval
+  → Implementation → Verification → Effectiveness Review → Closed`, with rejection from any stage
+  back to `Draft`; auto-numbered (`CC-2026-0001`); AI impact assessment across 14 standard impact
+  areas (Validation, Qualification, Risk, URS, SOP, Training, Equipment, Documents, Software,
+  Utilities, Regulatory Compliance, Business Continuity, Electronic Records, Electronic Signatures),
+  AI implementation plan/checklist, and five further AI narrative features (risk summary, rollback
+  plan, regulatory impact, change justification, executive summary, verification summary,
+  effectiveness review) persisted into a single `ai_narratives` JSON column.
+- **Change Control ↔ Deviation/CAPA linkage** — `qms_change_control_links`
+  (`linked_type ∈ {deviation, capa}`), one-directional from Change Control; a reverse-lookup helper
+  (`qms_change_control_database.get_change_controls_for_record()`) exists for a future "Related
+  Change Controls" tab inside Deviation/CAPA's own views (not built — see DECISIONS.md DEC-021).
 
-Full detail lives in `docs/QMS_PHASE1.md`.
+Full detail lives in `docs/QMS_PHASE1.md` (Phase 1) and `docs/QMS_PHASE2.md` (Change Control).
 
 ---
 
@@ -425,7 +447,7 @@ Two parallel pillars share the same shared-service foundation:
               └──────────┬──────────┘
                          ▼
               ┌─────────────────────┐
-              │    Change Control     │  (planned — not yet built)
+              │    Change Control     │  (Phase 2, uncommitted — built)
               └──────────┬──────────┘
                          ▼
               ┌─────────────────────┐
@@ -443,9 +465,10 @@ Two parallel pillars share the same shared-service foundation:
 
 **Accuracy note:** this end-to-end chain represents the *intended* platform vision. In the current
 codebase, the Risk → URS → Qual → Report leg is backend-complete but not linked to Deviation/CAPA
-by any foreign key today — the only real, queryable cross-suite link that exists is
-`qms_deviation_capa_link` (Deviation ↔ CAPA). Change Control, Training, Audit, and Management
-Review do not exist in the codebase yet.
+by any foreign key today. The real, queryable cross-suite links that exist are
+`qms_deviation_capa_link` (Deviation ↔ CAPA) and `qms_change_control_links` (Change Control →
+Deviation/CAPA, one-directional — see §12). Change Control now exists (QMS Phase 2, uncommitted);
+Training, Audit, and Management Review do not exist in the codebase yet.
 
 ---
 

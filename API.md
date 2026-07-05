@@ -375,7 +375,7 @@ Each line is `data: <payload>\n\n`. The client reads with `ReadableStream` / `Te
 Full reference: [`docs/QMS_PHASE1.md`](docs/QMS_PHASE1.md). All bodies are JSON except file
 upload (multipart/form-data) and DOCX export (binary download).
 
-**Shared** (`routes/qms_common.py`) — `record_type` ∈ `document | deviation | capa`:
+**Shared** (`routes/qms_common.py`) — `record_type` ∈ `document | deviation | capa | change_control`:
 - `GET /qms/dashboard` — unified stats across all 3 modules
 - `GET /qms/meta` — enum lists (doc types, statuses, categories) for dropdowns
 - `GET|POST /qms/<record_type>/<id>/attachments`, `GET /qms/attachments/<id>/download`, `DELETE /qms/attachments/<id>`
@@ -410,3 +410,22 @@ upload (multipart/form-data) and DOCX export (binary download).
 - `GET /qms/capa/<id>/deviations` — linked deviations
 - `POST /qms/capa/<id>/approval`
 - `GET /qms/capa/<id>/report`, `POST /qms/capa/<id>/export/docx`
+
+---
+
+## Quality Management Suite (Phase 2: Change Control) — added 2026-07-05
+
+Full reference: [`docs/QMS_PHASE2.md`](docs/QMS_PHASE2.md). Follows the exact Phase 1 pattern above
+— shared endpoints now also serve `record_type='change_control'`.
+
+**Change Control** (`routes/qms_change_control.py`, prefix `/qms/change-control`):
+- `GET|POST /qms/change-control`, `GET|PUT|DELETE /qms/change-control/<id>`
+- `POST /qms/change-control/<id>/suggest-impact`, `GET|POST /qms/change-control/<id>/impact`
+- `POST /qms/change-control/<id>/suggest-implementation-plan`, `GET|POST /qms/change-control/<id>/actions`
+- `POST /qms/change-control/<id>/risk-summary`, `.../rollback-plan`, `.../regulatory-impact`,
+  `.../justification`, `.../executive-summary`, `.../verification-summary`,
+  `.../effectiveness-review` — each returns `{"text": "..."}` and persists into `ai_narratives`
+- `POST /qms/change-control/<id>/link-deviation`, `POST /qms/change-control/<id>/link-capa`
+- `GET /qms/change-control/<id>/deviations`, `GET /qms/change-control/<id>/capas`
+- `POST /qms/change-control/<id>/approval`
+- `GET /qms/change-control/<id>/report`, `POST /qms/change-control/<id>/export/docx`

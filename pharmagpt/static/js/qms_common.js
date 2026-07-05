@@ -336,7 +336,7 @@ async function initQMSDashboard() {
       <div class="qms-page-header">
         <div>
           <h2>Quality Management Suite — Dashboard</h2>
-          <p>Document Control · Deviation Management · CAPA — unified overview</p>
+          <p>Document Control · Deviation Management · CAPA · Change Control — unified overview</p>
         </div>
       </div>
       <div class="qms-body">
@@ -347,6 +347,8 @@ async function initQMSDashboard() {
           <div class="qms-stat-card info"><div class="qms-stat-value">${s.total_deviations}</div><div class="qms-stat-label">Total Deviations</div></div>
           <div class="qms-stat-card warning"><div class="qms-stat-value">${s.open_capas}</div><div class="qms-stat-label">Open CAPAs</div></div>
           <div class="qms-stat-card critical"><div class="qms-stat-value">${s.overdue_capas}</div><div class="qms-stat-label">Overdue CAPAs</div></div>
+          <div class="qms-stat-card info"><div class="qms-stat-value">${s.open_changes}</div><div class="qms-stat-label">Open Change Controls</div></div>
+          <div class="qms-stat-card critical"><div class="qms-stat-value">${s.emergency_changes}</div><div class="qms-stat-label">Emergency Changes</div></div>
         </div>
 
         <div class="qms-section-card">
@@ -374,6 +376,15 @@ async function initQMSDashboard() {
             Escalated Actions: ${stats.capa.escalated_actions || 0}
           </p>
           <button class="btn-secondary" onclick="document.getElementById('nav-qms-capa') && document.getElementById('nav-qms-capa').click()">Open CAPA &rarr;</button>
+        </div>
+
+        <div class="qms-section-card">
+          <h3><span class=\'icon\' data-lucide=\'git-pull-request\'></span> Change Control</h3>
+          <p style="font-size:12.5px;color:var(--text-muted)">
+            Open: ${stats.change_control.open} · Closed: ${stats.change_control.closed} ·
+            Pending Approvals: ${s.pending_change_approvals} · Emergency: ${stats.change_control.emergency_open}
+          </p>
+          <button class="btn-secondary" onclick="document.getElementById('nav-qms-change-control') && document.getElementById('nav-qms-change-control').click()">Open Change Control &rarr;</button>
         </div>
       </div>
     `;

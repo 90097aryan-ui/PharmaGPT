@@ -314,6 +314,18 @@
 .badge-pass             { background: #E8F2EA; color: #5F8A61; }
 .badge-fail             { background: #F7E8E7; color: #C35F5B; }
 
+/* ── Change Control status/type variants (base .badge from risk.css) ─────── */
+.badge-critical         { background: #F7E8E7; color: #A9534F; }
+.badge-emergency        { background: #F7E8E7; color: #C35F5B; }
+.badge-temporary        { background: #FFF4E5; color: #A97D2E; }
+.badge-permanent        { background: #E8F2EA; color: #5F8A61; }
+.badge-submitted        { background: #E7EEF6; color: #6E8FA5; }
+.badge-rejected         { background: #F7E8E7; color: #C35F5B; }
+.badge-draft            { background: #F1ECE6; color: #66615B; }
+.badge-yes              { background: #F7E8E7; color: #A9534F; }
+.badge-no               { background: #E8F2EA; color: #5F8A61; }
+.badge-potential        { background: #FFF4E5; color: #A97D2E; }
+
 /* ── Wizard / form modal ────────────────────────────────────────────────── */
 
 .qms-modal-lg .modal { max-width: 720px; width: 92vw; }

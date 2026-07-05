@@ -38,17 +38,19 @@ from pharmagpt import qms_database as qmsdb
 from pharmagpt import qms_document_database as qdocdb
 from pharmagpt import qms_deviation_database as qdevdb
 from pharmagpt import qms_capa_database as qcapadb
+from pharmagpt import qms_change_control_database as qccdb
 from pharmagpt.config import UPLOAD_FOLDER, ALLOWED_EXTENSIONS
 from pharmagpt.documents import get_extension, get_mime_type
 
 bp = Blueprint("qms_common", __name__, url_prefix="/qms")
 
-VALID_RECORD_TYPES = {"document", "deviation", "capa"}
+VALID_RECORD_TYPES = {"document", "deviation", "capa", "change_control"}
 
 _GETTERS = {
     "document": qdocdb.get_document,
     "deviation": qdevdb.get_deviation,
     "capa": qcapadb.get_capa,
+    "change_control": qccdb.get_change_control,
 }
 
 
@@ -61,14 +63,16 @@ def _record_exists(record_type: str, record_id: int) -> bool:
 
 @bp.route("/dashboard")
 def dashboard():
-    """Unified stats across Document Control, Deviations, and CAPA."""
+    """Unified stats across Document Control, Deviations, CAPA, and Change Control."""
     doc_stats = qdocdb.get_dashboard_stats()
     dev_stats = qdevdb.get_dashboard_stats()
     capa_stats = qcapadb.get_dashboard_stats()
+    cc_stats = qccdb.get_dashboard_stats()
     return jsonify({
         "documents": doc_stats,
         "deviations": dev_stats,
         "capa": capa_stats,
+        "change_control": cc_stats,
         "summary": {
             "total_documents": doc_stats["total"],
             "total_deviations": dev_stats["total"],
@@ -77,6 +81,10 @@ def dashboard():
             "open_capas": capa_stats["open"],
             "overdue_capas": capa_stats["overdue"],
             "docs_due_for_review": len(doc_stats.get("due_for_review", [])),
+            "total_changes": cc_stats["total"],
+            "open_changes": cc_stats["open"],
+            "pending_change_approvals": cc_stats["pending_approvals"],
+            "emergency_changes": cc_stats["emergency_open"],
         },
     })
 

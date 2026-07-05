@@ -11,6 +11,11 @@ Management, CAPA — each with its own CRUD file:
                                 qms_deviation_impact, qms_deviation_capa_link
     qms_capa_database.py       qms_capas, qms_capa_actions, qms_capa_effectiveness
 
+Phase 2 adds Change Control:
+
+    qms_change_control_database.py  qms_change_controls, qms_change_control_impact,
+                                     qms_change_control_actions, qms_change_control_links
+
 This file is the single source of truth for the QMS_SCHEMA DDL (hooked into
 database.py::init_db(), same as RISK_SCHEMA/QUAL_SCHEMA/etc.) and for the
 tables shared by every QMS module — attachments, comments, audit trail, and
@@ -20,7 +25,7 @@ the Common Features (Attachments, Comments, Audit Trail, Approval Workflow)
 required by every QMS module in one place, and extends to Phase 2/3 modules
 for free — just add a new record_type string.
 
-record_type values in use: 'document' | 'deviation' | 'capa'
+record_type values in use: 'document' | 'deviation' | 'capa' | 'change_control'
 """
 
 import sqlite3
@@ -270,6 +275,73 @@ QMS_SCHEMA = """
         FOREIGN KEY (deviation_id) REFERENCES qms_deviations(id) ON DELETE CASCADE,
         FOREIGN KEY (capa_id)      REFERENCES qms_capas(id)      ON DELETE CASCADE
     );
+
+    -- ── Change Control (Phase 2) ─────────────────────────────────────────────
+
+    CREATE TABLE IF NOT EXISTS qms_change_controls (
+        id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+        cc_number                   TEXT    NOT NULL DEFAULT '',
+        title                       TEXT    NOT NULL DEFAULT 'Untitled Change',
+        change_type                 TEXT    DEFAULT 'Minor',      -- Major, Minor, Critical, Temporary, Permanent, Emergency
+        change_category             TEXT    DEFAULT 'Equipment',  -- Equipment, Facility, HVAC, Water System, Compressed Air, Steam, Electrical, Software, PLC, SCADA, MES, ERP, Barcode System, Vision System, BMS, LIMS, Validation, SOP, Specification, Packaging, Warehouse, Quality, Engineering, Production, Utilities, IT
+        department                  TEXT    DEFAULT '',
+        area                        TEXT    DEFAULT '',
+        equipment_system            TEXT    DEFAULT '',
+        project_id                  INTEGER DEFAULT NULL,
+        requested_by                TEXT    DEFAULT '',
+        date_requested               TEXT    DEFAULT '',
+        target_implementation_date  TEXT    DEFAULT '',
+        change_description          TEXT    DEFAULT '',
+        reason_for_change           TEXT    DEFAULT '',
+        current_state               TEXT    DEFAULT '',
+        proposed_state              TEXT    DEFAULT '',
+        status                      TEXT    DEFAULT 'Draft',  -- Draft, Submitted, Initial Review, Impact Assessment, Risk Assessment, Department Review, QA Review, Approval, Implementation, Verification, Effectiveness Review, Closed, Rejected
+        risk_level                  TEXT    DEFAULT '',
+        qa_reviewer                 TEXT    DEFAULT '',
+        approver                    TEXT    DEFAULT '',
+        implementation_date         TEXT    DEFAULT '',
+        verification_date           TEXT    DEFAULT '',
+        closure_date                TEXT    DEFAULT '',
+        form_data                   TEXT    DEFAULT '{}',
+        ai_narratives                TEXT    DEFAULT '{}',  -- {risk_summary, rollback_plan, regulatory_impact, justification, executive_summary, verification_summary, effectiveness_review}
+        created_at                  TEXT    DEFAULT (datetime('now')),
+        updated_at                  TEXT    DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS qms_change_control_impact (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        cc_id            INTEGER NOT NULL,
+        impact_area      TEXT    DEFAULT '',   -- Validation, Qualification, Risk, URS, SOP, Training, Equipment, Documents, Software, Utilities, Regulatory Compliance, Business Continuity, Electronic Records, Electronic Signatures
+        impacted         TEXT    DEFAULT 'Potential',  -- Yes, No, Potential
+        extent           TEXT    DEFAULT '',
+        action_required  TEXT    DEFAULT '',
+        created_at       TEXT    DEFAULT (datetime('now')),
+        FOREIGN KEY (cc_id) REFERENCES qms_change_controls(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS qms_change_control_actions (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        cc_id             INTEGER NOT NULL,
+        step_no           INTEGER DEFAULT 0,
+        activity          TEXT    NOT NULL DEFAULT '',
+        responsible       TEXT    DEFAULT '',
+        start_date        TEXT    DEFAULT '',
+        target_date       TEXT    DEFAULT '',
+        completion_date   TEXT    DEFAULT '',
+        status            TEXT    DEFAULT 'Pending',  -- Pending, In Progress, Completed, Overdue
+        created_at        TEXT    DEFAULT (datetime('now')),
+        FOREIGN KEY (cc_id) REFERENCES qms_change_controls(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS qms_change_control_links (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        cc_id           INTEGER NOT NULL,
+        linked_type     TEXT    NOT NULL,   -- deviation, capa
+        linked_id       INTEGER NOT NULL,
+        created_at      TEXT    DEFAULT (datetime('now')),
+        FOREIGN KEY (cc_id) REFERENCES qms_change_controls(id) ON DELETE CASCADE
+    );
 """
 
 
@@ -328,6 +400,10 @@ def generate_deviation_number() -> str:
 
 def generate_capa_number() -> str:
     return _next_sequence("qms_capas", "capa_number", "CAPA")
+
+
+def generate_change_control_number() -> str:
+    return _next_sequence("qms_change_controls", "cc_number", "CC")
 
 
 # ── Attachments (shared) ──────────────────────────────────────────────────────
@@ -465,4 +541,21 @@ QMS_META = {
     ],
     "capa_action_types": ["Corrective", "Preventive"],
     "capa_action_statuses": ["Pending", "In Progress", "Completed", "Overdue", "Escalated"],
+    "change_types": ["Major", "Minor", "Critical", "Temporary", "Permanent", "Emergency"],
+    "change_categories": [
+        "Equipment", "Facility", "HVAC", "Water System", "Compressed Air", "Steam", "Electrical",
+        "Software", "PLC", "SCADA", "MES", "ERP", "Barcode System", "Vision System", "BMS", "LIMS",
+        "Validation", "SOP", "Specification", "Packaging", "Warehouse", "Quality", "Engineering",
+        "Production", "Utilities", "IT",
+    ],
+    "change_control_statuses": [
+        "Draft", "Submitted", "Initial Review", "Impact Assessment", "Risk Assessment",
+        "Department Review", "QA Review", "Approval", "Implementation", "Verification",
+        "Effectiveness Review", "Closed", "Rejected",
+    ],
+    "change_control_impact_areas": [
+        "Validation", "Qualification", "Risk", "URS", "SOP", "Training", "Equipment", "Documents",
+        "Software", "Utilities", "Regulatory Compliance", "Business Continuity",
+        "Electronic Records", "Electronic Signatures",
+    ],
 }

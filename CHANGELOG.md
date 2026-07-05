@@ -5,6 +5,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased] — 2026-07-05 — Quality Management Suite (Phase 2: Change Control)
+
+### Added
+- **Change Control** — QMS's fourth module (Phase 2), built on the exact Phase 1 shared-table
+  pattern (`record_type='change_control'`, no new shared table).
+  - Equipment/Facility/HVAC/Water System/Compressed Air/Steam/Electrical/Software/PLC/SCADA/MES/ERP/
+    Barcode System/Vision System/BMS/LIMS/Validation/SOP/Specification/Packaging/Warehouse/Quality/
+    Engineering/Production/Utilities/IT change categories; Major/Minor/Critical/Temporary/Permanent/
+    Emergency change types.
+  - 13-stage lifecycle: Draft → Submitted → Initial Review → Impact Assessment → Risk Assessment →
+    Department Review → QA Review → Approval → Implementation → Verification → Effectiveness
+    Review → Closed, with rejection supported from any stage back to Draft.
+  - AI Impact Assessment across 14 standard impact areas (Validation, Qualification, Risk, URS,
+    SOP, Training, Equipment, Documents, Software, Utilities, Regulatory Compliance, Business
+    Continuity, Electronic Records, Electronic Signatures); AI Implementation Plan/Checklist; AI
+    Risk Summary, Rollback Plan, Regulatory Impact, Change Justification, Executive Summary,
+    Verification Summary, and Effectiveness Review narratives — all optional, routed through the
+    existing shared `services/qms_shared.py::call_gemini()`.
+  - Links to existing Deviations/CAPAs (`qms_change_control_links`).
+  - Ships the full common feature set: Dashboard, List + Filters + Search, Detail View, Attachments,
+    Comments, Audit Trail, Electronic Signature/Approval Workflow, Print, DOCX Export, Status Badges.
+  - `qms_change_control_database.py`, `routes/qms_change_control.py`,
+    `services/qms_change_control_service.py`, `prompts/qms_change_control_prompt.py`,
+    `static/js/qms_change_control.js`.
+  - Additive-only changes to shared files: `qms_database.py` (new tables + `QMS_META` enums),
+    `routes/qms_common.py` (new `record_type`, dashboard stats), `qms_common.js` (dashboard card),
+    `qms.css` (new badge colors), `app.py`, `templates/index.html` (nav + view + script tag).
+  - `tests/test_qms_database.py`, `tests/test_qms_routes.py` — 16 new tests appended, all passing
+    alongside the existing 42 QMS + ~41 Document Intelligence Engine tests (101 total).
+  - Full reference: [`docs/QMS_PHASE2.md`](docs/QMS_PHASE2.md).
+
+### Fixed
+- None — new functionality only.
+
+---
+
 ## [Unreleased] — 2026-07-02 — Quality Management Suite (Phase 1)
 
 ### Added

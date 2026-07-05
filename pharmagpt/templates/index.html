@@ -140,6 +140,13 @@
               <span class='icon' data-lucide='repeat'></span> CAPA
             </div>
           </div>
+
+          <div class="qms-nav-group">
+            <div class="qms-nav-group-label">Change Control</div>
+            <div class="sidebar-item qms-sub-item" id="nav-qms-change-control" data-view="view-qms-change-control">
+              <span class='icon' data-lucide='git-pull-request'></span> Change Control
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1526,6 +1533,10 @@
     <div id="qms-capa-body"></div>
   </main>
 
+  <main class="qms-view" id="view-qms-change-control" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+    <div id="qms-cc-body"></div>
+  </main>
+
   <!-- ══ End Quality Management Suite ══════════════════════════════════════ -->
 
   </div><!-- /app-body — closes here, not after view-validation, so every module
@@ -1551,6 +1562,7 @@
   <script src="{{ url_for('static', filename='js/qms_documents.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_deviations.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_capa.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/qms_change_control.js') }}"></script>
   <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
 
   <!-- ── Validation sidebar nav items (rendered from config) ──────────────── -->
@@ -1709,6 +1721,10 @@
 
         if (targetId === "view-qms-capa") {
           if (window.initQMSCapa) window.initQMSCapa();
+        }
+
+        if (targetId === "view-qms-change-control") {
+          if (window.initQMSChangeControl) window.initQMSChangeControl();
         }
       });
     });
