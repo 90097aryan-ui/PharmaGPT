@@ -20,6 +20,10 @@ let gdEquipment = {};     // Step 3 fields
 let gdAnswers   = {};     // Step 4 questionnaire answers
 let gdDraft     = null;   // Final JSON draft object
 
+let gdGeneratedContent = null;   // AI-generated markdown (once generation completes)
+let gdIsGenerating     = false;
+let gdGenAbort         = false;  // set true to stop rendering a stale in-flight stream
+
 // ── Entry point ────────────────────────────────────────────────────────────────
 function openGenDocument() {
   if (window.Workspace) window.Workspace.enter();
@@ -30,6 +34,10 @@ function openGenDocument() {
   gdEquipment = {};
   gdAnswers   = {};
   gdDraft     = null;
+
+  gdGeneratedContent = null;
+  gdIsGenerating     = false;
+  gdGenAbort         = false;
 
   _gdUpdateHeader();
   _gdRenderStep(1);
@@ -350,6 +358,38 @@ const GD_QUESTIONS = {
     { id: "approval_levels",            label: "Approval Levels Required",         type: "text",     placeholder: "e.g. QA Head, Regulatory Affairs, Site Director" },
     { id: "implementation_plan",        label: "Implementation Plan",              type: "textarea", placeholder: "Steps and timeline to implement the change…" },
   ],
+  "IQ/OQ Combined": [
+    { id: "installation_checklist",     label: "Installation Checklist Items",     type: "textarea", placeholder: "Physical installation checks: levelling, anchoring, utility connections…" },
+    { id: "calibration_status",         label: "Calibration Status of Instruments",type: "textarea", placeholder: "List instruments and their calibration certificate numbers / due dates…" },
+    { id: "operating_parameters",       label: "Operating Parameters to Challenge", type: "textarea", placeholder: "Parameters and their operating ranges (e.g. temperature: 2–8 °C)…" },
+    { id: "test_cases",                 label: "Test Cases / Test Scripts",         type: "textarea", placeholder: "List of OQ test cases with test IDs…" },
+    { id: "acceptance_criteria",        label: "Acceptance Criteria",               type: "textarea", placeholder: "Pass / fail limits for each test…" },
+    { id: "iq_reference",               label: "Related IQ/OQ Reference",           type: "text",     placeholder: "e.g. IQ-OQ-001" },
+  ],
+  SOP: [
+    { id: "procedure_steps",            label: "Key Procedure Steps",              type: "textarea", placeholder: "Outline the main operating steps to be detailed in the SOP…" },
+    { id: "safety_precautions",         label: "Safety Precautions",               type: "textarea", placeholder: "PPE requirements, hazards, safety interlocks…" },
+    { id: "materials_equipment",        label: "Materials / Equipment Required",   type: "textarea", placeholder: "Consumables, tools, reference standards…" },
+    { id: "in_process_controls",        label: "In-Process Controls",              type: "textarea", placeholder: "Parameters monitored during the procedure and their limits…" },
+    { id: "training_requirements",      label: "Training Requirements",            type: "textarea", placeholder: "Who must be trained before executing this SOP…" },
+    { id: "records_retention",          label: "Records & Retention",              type: "text",     placeholder: "e.g. Logsheets retained for 5 years by QA" },
+  ],
+  "Validation Plan": [
+    { id: "validation_approach",        label: "Validation Approach / Strategy",   type: "textarea", placeholder: "Lifecycle stages to be followed: URS → DQ → IQ → OQ → PQ…" },
+    { id: "risk_assessment_summary",    label: "Risk Assessment Summary",          type: "textarea", placeholder: "Methodology and outcome of the risk assessment…" },
+    { id: "systems_covered",            label: "Systems / Equipment Covered",      type: "textarea", placeholder: "List all systems, equipment, and utilities in scope…" },
+    { id: "deliverables_acceptance",    label: "Deliverables & Acceptance Philosophy", type: "textarea", placeholder: "Documents produced at each stage and how acceptance is determined…" },
+    { id: "schedule_timeline",          label: "Schedule / Timeline",              type: "textarea", placeholder: "Target start/completion dates for each validation stage…" },
+    { id: "revalidation_criteria",      label: "Revalidation Criteria",            type: "textarea", placeholder: "Triggers for revalidation: relocation, major change, periodic review…" },
+  ],
+  "Validation Report": [
+    { id: "activities_summary",         label: "Summary of Activities Performed",  type: "textarea", placeholder: "URS, DQ, IQ, OQ, PQ activities completed and their outcomes…" },
+    { id: "deviations_encountered",     label: "Deviations Encountered",           type: "textarea", placeholder: "Deviations during validation execution and their resolution…" },
+    { id: "test_results_summary",       label: "Test Results Summary",             type: "textarea", placeholder: "Overall pass/fail counts across IQ/OQ/PQ…" },
+    { id: "traceability_urs",           label: "Traceability to URS",              type: "textarea", placeholder: "Confirmation that all URS requirements were tested and met…" },
+    { id: "conclusion_status",          label: "Conclusion / Validation Status",   type: "text",     placeholder: "e.g. Validated, Validated with Restrictions" },
+    { id: "periodic_review",            label: "Periodic Review Requirements",     type: "text",     placeholder: "e.g. Annual review, or upon major change" },
+  ],
 };
 
 function _gdStep4(panel) {
@@ -514,11 +554,15 @@ async function gdBuildDraft() {
   const questionnaire = {};
   qs.forEach(q => { questionnaire[q.id] = { question: q.label, answer: gdAnswers[q.id] || "" }; });
 
+  gdGeneratedContent = null;
+  gdIsGenerating     = false;
+
   gdDraft = {
     meta: {
       generator:      "PharmaGPT v0.9",
       generated_at:   now,
       status:         "draft",
+      doc_number:     _gdGenNumber(gdDocType),
     },
     project: {
       id:   gdProject?.id   || null,
@@ -531,12 +575,60 @@ async function gdBuildDraft() {
     },
     equipment: { ...gdEquipment },
     questionnaire,
-    ai_note: "AI content generation deferred to v1.0. This JSON package is ready to be submitted to the Gemini generation endpoint.",
+    ai_note: "This JSON package will be submitted to Gemini via Generate Document below to produce the full GMP-compliant document.",
   };
 
  if (btn) { btn.disabled = false; btn.textContent = "Build Draft"; }
 
   _gdRenderDraftResult(area);
+}
+
+// ── Document number generation ─────────────────────────────────────────────────
+function _gdGenNumber(docType) {
+  const docs  = window.VALIDATION_DOCS || {};
+  const short = (docs[docType]?.short || docType || "DOC").replace(/[^A-Za-z0-9]/g, "");
+  const now   = new Date();
+  const pad   = n => String(n).padStart(2, "0");
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+  return `${short}-${stamp}`;
+}
+
+// Build the form_data payload shared by /validation/generate, /validation/export/docx
+// and /validation/save — every doc-number-style key a prompt module might read
+// (doc_number / protocol_number / capa_number / …) is set to the same generated
+// number so the cover page and body stay consistent regardless of doc type.
+function _gdBuildFormData() {
+  const docNo   = gdDraft?.meta?.doc_number || _gdGenNumber(gdDocType);
+  const details = {
+    ...gdAnswers,
+    doc_number: docNo, protocol_number: docNo, capa_number: docNo,
+    deviation_number: docNo, cc_number: docNo, plan_number: docNo, report_number: docNo,
+    version: "1.0",
+  };
+  return {
+    project_name:     gdProject?.name || "",
+    project_id:       gdProject?.id   || 0,
+    equipment_name:   gdEquipment.equipment_name   || "",
+    equipment_id:     gdEquipment.equipment_id     || "",
+    manufacturer:     gdEquipment.manufacturer     || "",
+    model:            gdEquipment.model            || "",
+    serial_number:    gdEquipment.serial_number    || "",
+    department:       gdEquipment.department       || "",
+    location:         gdEquipment.location         || "",
+    product:          gdEquipment.product          || "",
+    protocol_number:  docNo,
+    revision_number:  "00",
+    document_status:  "Draft",
+    details,
+  };
+}
+
+function _gdDocTitle() {
+  const docs   = window.VALIDATION_DOCS || {};
+  const cfg    = docs[gdDocType] || {};
+  const eqName = gdEquipment.equipment_name || "Equipment";
+  const docNo  = gdDraft?.meta?.doc_number || _gdGenNumber(gdDocType);
+  return `${eqName} — ${cfg.short || gdDocType} ${docNo}`;
 }
 
 function _gdRenderDraftResult(area) {
@@ -595,13 +687,7 @@ function _gdRenderDraftResult(area) {
         <pre class="gd-draft-json" id="gd-draft-json">${_gdEsc(JSON.stringify(gdDraft, null, 2))}</pre>
       </div>
 
-      <div class="gd-ai-teaser">
-        <span class="gd-teaser-icon"><span class=\'icon\' data-lucide=\'sparkle\'></span></span>
-        <div>
-          <strong>AI Generation — Coming in v1.0</strong>
-          <p>This draft package will be submitted to Gemini to generate a full GMP-compliant document with executive summary, test protocols, acceptance criteria tables, and signature blocks.</p>
-        </div>
-      </div>
+      <div id="gd-ai-section"></div>
     </div>`;
 
   // Hide Back/Build buttons, show Start Over
@@ -609,6 +695,329 @@ function _gdRenderDraftResult(area) {
   if (nav) nav.innerHTML = `
     <button class="gd-btn-secondary" onclick="gdBack()"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Edit Inputs</button>
     <button class="gd-btn-primary" onclick="openGenDocument()"><span class=\'icon\' data-lucide=\'sparkle\'></span> New Document</button>`;
+
+  _gdRenderAISection();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AI DOCUMENT GENERATION (Gemini) — DOCX / PDF / Save to Project Documents
+// ══════════════════════════════════════════════════════════════════════════════
+
+function _gdRenderAISection() {
+  const section = document.getElementById("gd-ai-section");
+  if (!section) return;
+
+  if (!gdGeneratedContent && !gdIsGenerating) {
+    section.innerHTML = `
+      <div class="gd-ai-teaser">
+        <span class="gd-teaser-icon"><span class=\'icon\' data-lucide=\'sparkle\'></span></span>
+        <div>
+          <strong>Generate the Full GMP Document</strong>
+          <p>Submit this draft package to Gemini to generate a full GMP-compliant document with all standard sections, tables, acceptance criteria, and signature blocks.</p>
+        </div>
+      </div>
+      <div class="gd-nav-row" style="justify-content:flex-start">
+        <button class="gd-btn-generate" id="gd-generate-btn" onclick="gdGenerateDocument()">
+          <span class=\'icon\' data-lucide=\'sparkle\'></span> Generate Document
+        </button>
+      </div>`;
+    return;
+  }
+
+  section.innerHTML = `
+    <div class="val-viewer-toolbar" style="border-radius:8px;border:1px solid var(--border)">
+      <button class="val-tool-btn" onclick="gdGenerateDocument()" title="Regenerate"><span class='icon' data-lucide='refresh-cw'></span> Regenerate</button>
+      <div class="val-tool-sep"></div>
+      <button class="val-tool-btn val-tool-primary" onclick="gdExportDocx()" id="gd-btn-export-docx" disabled>
+        <span class=\'icon\' data-lucide=\'file-text\'></span> Download DOCX
+      </button>
+      <button class="val-tool-btn val-tool-primary" onclick="gdExportPdf()" id="gd-btn-export-pdf" disabled>
+        <span class=\'icon\' data-lucide=\'printer\'></span> Download PDF
+      </button>
+      <button class="val-tool-btn val-tool-save" onclick="gdSaveToProjectDocuments()" id="gd-btn-save-doc" disabled>
+        <span class=\'icon\' data-lucide=\'save\'></span> Save to Project Documents
+      </button>
+      <div class="val-tool-sep"></div>
+      <span class="val-tool-label" id="gd-gen-label"><span class="val-gen-dot"></span> Generating…</span>
+    </div>
+    <div id="gd-review-banner" style="display:none;margin-top:10px"></div>
+    <div class="val-doc-scroll" style="max-height:520px;margin-top:10px;border:1px solid var(--border);border-radius:8px">
+      <div class="val-doc-page" style="box-shadow:none">
+        <div id="gd-doc-content" class="val-doc-content"><div class="val-streaming-cursor"></div></div>
+      </div>
+    </div>`;
+}
+
+async function gdGenerateDocument() {
+  if (gdIsGenerating) return;
+  if (!gdProject) { _gdShowError("Please select a project first (Step 1)."); return; }
+
+  gdIsGenerating     = true;
+  gdGenAbort         = false;
+  gdGeneratedContent = "";
+  _gdRenderAISection();
+
+  const label = document.getElementById("gd-gen-label");
+
+  try {
+    const res = await fetch("/validation/generate", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        doc_type:   gdDocType,
+        project_id: gdProject.id,
+        form_data:  _gdBuildFormData(),
+        doc_ids:    [],
+      }),
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer    = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (gdGenAbort) return;
+
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop();
+
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith("data:")) continue;
+
+        let event;
+        try { event = JSON.parse(line.slice(5).trim()); } catch { continue; }
+
+        if (event.error) { _gdShowGenError(event.error); return; }
+
+        if (event.chunk) {
+          gdGeneratedContent += event.chunk;
+
+          // Safety net: bail out of a pathological/runaway generation instead
+          // of freezing the tab on repeated full-document re-renders.
+          if (gdGeneratedContent.length > 400000) {
+            _gdShowGenError("The AI response grew unexpectedly large and was stopped. Please try again.");
+            try { await reader.cancel(); } catch {}
+            return;
+          }
+
+          const el = document.getElementById("gd-doc-content");
+          if (el) {
+            el.innerHTML = marked.parse(gdGeneratedContent) + '<span class="val-cursor-blink">▍</span>';
+            const scroll = el.closest(".val-doc-scroll");
+            if (scroll) scroll.scrollTop = scroll.scrollHeight;
+          }
+        }
+
+        if (event.done) _gdFinalizeGeneration();
+      }
+    }
+  } catch (err) {
+    _gdShowGenError(err.message || "Generation failed.");
+  }
+}
+
+function _gdFinalizeGeneration() {
+  gdIsGenerating = false;
+
+  const el = document.getElementById("gd-doc-content");
+  if (el) el.innerHTML = marked.parse(gdGeneratedContent);
+
+  const label = document.getElementById("gd-gen-label");
+  if (label) {
+    label.innerHTML = `<span class="val-done-dot"></span> Document ready`;
+    label.className = "val-tool-label done";
+  }
+
+  ["gd-btn-export-docx", "gd-btn-export-pdf", "gd-btn-save-doc"].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = false;
+  });
+
+  _gdRunReviewBadge();
+}
+
+function _gdShowGenError(msg) {
+  gdIsGenerating = false;
+  const el = document.getElementById("gd-doc-content");
+  if (el) {
+    el.innerHTML = `<div class="val-gen-error">
+      <span class='icon' data-lucide='alert-triangle'></span> Generation failed: ${_gdEsc(msg)}
+    </div>
+    <div class="gd-nav-row" style="justify-content:flex-start;margin-top:10px">
+      <button class="gd-btn-primary" onclick="gdGenerateDocument()"><span class='icon' data-lucide='refresh-cw'></span> Retry</button>
+    </div>`;
+  }
+  const label = document.getElementById("gd-gen-label");
+  if (label) { label.innerHTML = "Generation failed"; label.className = "val-tool-label"; }
+}
+
+async function _gdRunReviewBadge() {
+  const banner = document.getElementById("gd-review-banner");
+  if (!banner) return;
+
+  banner.style.display = "block";
+  banner.innerHTML = `<div class="val-review-loading">Running QA Review…</div>`;
+
+  try {
+    const res = await fetch("/validation/review", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content:   gdGeneratedContent,
+        doc_type:  gdDocType,
+        form_data: _gdBuildFormData(),
+      }),
+    });
+    if (!res.ok) throw new Error("Review request failed");
+    const data = await res.json();
+
+    const score     = data.overall_score ?? 0;
+    const readiness = data.readiness    ?? "Unknown";
+    const summary   = data.issue_summary ?? {};
+    const badgeCls  = score >= 85 ? "val-review-badge-green"
+                    : score >= 70 ? "val-review-badge-yellow"
+                    :               "val-review-badge-red";
+
+    banner.innerHTML = `
+      <div class="val-review-banner-inner">
+        <div class="val-review-score-wrap ${badgeCls}">
+          <span class="val-review-score-num">${score.toFixed(1)}</span>
+          <span class="val-review-score-label">/ 100</span>
+        </div>
+        <div class="val-review-meta">
+          <div class="val-review-readiness">${readiness}</div>
+          <div class="val-review-counts">
+            <span class="vrc-critical">C: ${summary.critical ?? 0}</span>
+            <span class="vrc-major">M: ${summary.major ?? 0}</span>
+            <span class="vrc-minor">m: ${summary.minor ?? 0}</span>
+            <span class="vrc-obs">O: ${summary.observation ?? 0}</span>
+          </div>
+        </div>
+        <div class="val-review-hint">Review Report included in DOCX export</div>
+      </div>`;
+  } catch {
+    banner.innerHTML = `<div class="val-review-loading" style="color:#9A948C">QA review unavailable</div>`;
+  }
+}
+
+// ── Download DOCX ──────────────────────────────────────────────────────────────
+async function gdExportDocx() {
+  if (!gdGeneratedContent) return;
+  const title = _gdDocTitle();
+
+  try {
+    const res = await fetch("/validation/export/docx", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        doc_type:  gdDocType,
+        title:     title,
+        form_data: _gdBuildFormData(),
+        content:   gdGeneratedContent,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = `${title}.docx`; a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    _gdShowToast(`DOCX export failed: ${err.message}`, "error");
+  }
+}
+
+// ── Download PDF (print-to-PDF, same mechanism as the Validation wizard) ──────
+function gdExportPdf() {
+  if (!gdGeneratedContent) return;
+  const content = document.getElementById("gd-doc-content")?.innerHTML || "";
+  const win = window.open("", "_blank", "width=900,height=700");
+  if (!win) { _gdShowToast("Pop-up blocked — please allow pop-ups to download the PDF.", "error"); return; }
+
+  win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>${_gdEsc(_gdDocTitle())}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Calibri, 'Segoe UI', sans-serif; font-size: 11pt; color: #5B4C43; background: #FFF; padding: 20mm 25mm; }
+  h1 { font-size: 18pt; color: #5B4C43; text-align: center; margin: 0 0 8pt; }
+  h2 { font-size: 13pt; color: #5B4C43; border-bottom: 1.5pt solid #8A6B52; padding-bottom: 3pt; margin: 14pt 0 6pt; }
+  h3 { font-size: 11.5pt; color: #8A6B52; margin: 10pt 0 4pt; }
+  h4 { font-size: 10.5pt; margin: 8pt 0 3pt; }
+  p, li { line-height: 1.55; margin: 4pt 0; }
+  ul, ol { padding-left: 18pt; }
+  table { border-collapse: collapse; width: 100%; margin: 8pt 0; font-size: 9.5pt; }
+  th { background: #5B4C43; color: #FFF; padding: 6pt 8pt; text-align: left; font-weight: 600; }
+  td { padding: 5pt 8pt; border-bottom: 0.5pt solid #EEE7E1; }
+  tr:nth-child(even) td { background: #F1ECE6; }
+  hr { border: none; border-top: 1pt solid #EEE7E1; margin: 10pt 0; }
+  strong { color: #5B4C43; }
+  @media print { body { padding: 15mm 20mm; } }
+</style>
+</head>
+<body>${content}</body>
+</html>`);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 500);
+}
+
+// ── Save to Project Documents ──────────────────────────────────────────────────
+async function gdSaveToProjectDocuments() {
+  if (!gdGeneratedContent || !gdProject) return;
+
+  const btn = document.getElementById("gd-btn-save-doc");
+  if (btn) { btn.disabled = true; btn.innerHTML = "Saving…"; }
+
+  const title    = _gdDocTitle();
+  const formData = _gdBuildFormData();
+
+  try {
+    // 1. Build the DOCX and upload it into the project's Documents library.
+    const docxRes = await fetch("/validation/export/docx", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ doc_type: gdDocType, title, form_data: formData, content: gdGeneratedContent }),
+    });
+    if (!docxRes.ok) throw new Error(`DOCX build failed (HTTP ${docxRes.status})`);
+    const blob = await docxRes.blob();
+
+    const upload = new FormData();
+    upload.append("file", blob, `${title}.docx`);
+    const uploadRes = await fetch(`/projects/${gdProject.id}/documents`, { method: "POST", body: upload });
+    if (!uploadRes.ok) throw new Error(`Upload to Project Documents failed (HTTP ${uploadRes.status})`);
+
+    // 2. Also record it in the project's generated-documents library (powers
+    //    the "Protocols Generated" dashboard stat and Recent Activity feed).
+    await fetch("/validation/save", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: gdProject.id,
+        doc_type:   gdDocType,
+        title,
+        form_data:  formData,
+        content:    gdGeneratedContent,
+      }),
+    });
+
+    if (btn) { btn.innerHTML = `<span class='icon' data-lucide='check'></span> Saved to Project Documents`; }
+    if (window.refreshIcons) window.refreshIcons();
+    _gdShowToast("Document saved to Project Documents.", "success");
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.innerHTML = `<span class='icon' data-lucide='save'></span> Save to Project Documents`; }
+    if (window.refreshIcons) window.refreshIcons();
+    _gdShowToast(`Save failed: ${err.message}`, "error");
+  }
 }
 
 function gdCopyJson() {
@@ -801,3 +1210,7 @@ window.gdBuildDraft     = gdBuildDraft;
 window.gdCopyJson       = gdCopyJson;
 window.gdDownloadJson   = gdDownloadJson;
 window.gdHasUnsavedChanges = _gdHasProgress;
+window.gdGenerateDocument      = gdGenerateDocument;
+window.gdExportDocx            = gdExportDocx;
+window.gdExportPdf              = gdExportPdf;
+window.gdSaveToProjectDocuments = gdSaveToProjectDocuments;

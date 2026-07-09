@@ -1480,5 +1480,9 @@ window.toggleReportSection = function () {
   if (!items) return;
   const hidden = items.style.display === 'none';
   items.style.display = hidden ? 'block' : 'none';
-  if (btn) btn.textContent = hidden ? '▲' : '▼';
+  const icon = btn ? btn.querySelector('.icon') : null;
+  if (icon) {
+    icon.setAttribute('data-lucide', hidden ? 'chevron-up' : 'chevron-down');
+    if (window.lucide) window.lucide.createIcons();
+  }
 };

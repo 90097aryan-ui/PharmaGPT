@@ -204,7 +204,7 @@ def run_review(
     ]
 
     # Regulatory compliance score: PASS=full share, WARNING=half, FAIL=0
-    from review.review_models import ComplianceStatus
+    from pharmagpt.review.review_models import ComplianceStatus
     reg_max   = CategoryScores.MAX_REGULATORY
     per_item  = reg_max / max(len(compliance_list), 1)
     reg_score = sum(

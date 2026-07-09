@@ -91,20 +91,94 @@
 
       <div class="sidebar-divider"></div>
 
-      <!-- Modules (hidden sub-sections — kept for JS compatibility) -->
-      <div id="risk-nav-items" style="display:none">
-        <div class="sidebar-item risk-sub-item" id="risk-nav-dashboard" onclick="window.initRisk && window.initRisk()"></div>
-        <div class="sidebar-item risk-sub-item" id="risk-nav-new" onclick="loadAssessmentList && loadAssessmentList()"></div>
-        <div class="sidebar-item risk-sub-item" id="risk-nav-new-btn" onclick="startNewWizard && startNewWizard()"></div>
-        <div class="sidebar-item risk-sub-item" id="risk-nav-library" onclick="loadLibrary && loadLibrary()"></div>
-        <div class="sidebar-item risk-sub-item" id="risk-nav-templates" onclick="loadTemplates && loadTemplates()"></div>
-        <div class="sidebar-item risk-sub-item" id="risk-nav-reports" onclick="showRiskReports()"></div>
-        <div class="sidebar-item risk-sub-item" id="risk-nav-approval" onclick="showRiskApproval()"></div>
-        <div class="sidebar-item risk-sub-item" id="risk-nav-assistant" onclick="loadAIAssistant && loadAIAssistant()"></div>
+      <!-- Risk Management Suite -->
+      <div class="sidebar-section">
+        <div class="sidebar-label-row">
+          <span class="sidebar-label">Risk Management</span>
+          <button class="val-collapse-btn" id="risk-collapse-btn" onclick="toggleRiskSection()"><span class='icon' data-lucide='chevron-up'></span></button>
+        </div>
+        <div id="risk-nav-items">
+          <div class="sidebar-item risk-sub-item" id="risk-nav-dashboard" onclick="window.initRisk && window.initRisk()">
+            <span class='icon' data-lucide='layout-dashboard'></span> Risk Dashboard
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-new" onclick="loadAssessmentList && loadAssessmentList()">
+            <span class='icon' data-lucide='shield-alert'></span> Assessments
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-new-btn" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-new'); startNewWizard && startNewWizard()">
+            <span class='icon' data-lucide='plus-circle'></span> New Assessment
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-library" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-library'); loadLibrary && loadLibrary()">
+            <span class='icon' data-lucide='library'></span> Risk Library
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-templates" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-templates'); loadTemplates && loadTemplates()">
+            <span class='icon' data-lucide='layout-template'></span> Templates
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-reports" onclick="showRiskReports()">
+            <span class='icon' data-lucide='file-text'></span> Reports
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-approval" onclick="showRiskApproval()">
+            <span class='icon' data-lucide='check-circle'></span> Approval Queue
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-assistant" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-assistant'); loadAIAssistant && loadAIAssistant()">
+            <span class='icon' data-lucide='bot'></span> AI Assistant
+          </div>
+        </div>
       </div>
-      <div id="urs-nav-items" style="display:none"></div>
-      <div id="qual-nav-items" style="display:none"></div>
-      <div id="report-nav-items" style="display:none"></div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- URS Management Suite -->
+      <div class="sidebar-section">
+        <div class="sidebar-label-row">
+          <span class="sidebar-label">URS Management</span>
+          <button class="val-collapse-btn" id="urs-collapse-btn" onclick="toggleURSSection()"><span class='icon' data-lucide='chevron-up'></span></button>
+        </div>
+        <div id="urs-nav-items">
+          <div class="sidebar-item urs-sub-item" data-view="view-urs-dashboard">
+            <span class='icon' data-lucide='clipboard-list'></span> URS Dashboard
+          </div>
+          <div class="sidebar-item urs-sub-item" data-view="view-urs-new">
+            <span class='icon' data-lucide='plus-circle'></span> New URS
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Qualification Suite (IQ/OQ/PQ) -->
+      <div class="sidebar-section">
+        <div class="sidebar-label-row">
+          <span class="sidebar-label">Qualification</span>
+          <button class="val-collapse-btn" id="qual-collapse-btn" onclick="toggleQualSection()"><span class='icon' data-lucide='chevron-up'></span></button>
+        </div>
+        <div id="qual-nav-items">
+          <div class="sidebar-item qual-sub-item" onclick="window.initQual && window.initQual()">
+            <span class='icon' data-lucide='flask-conical'></span> IQ / OQ / PQ
+          </div>
+          <div class="sidebar-item qual-sub-item" onclick="window.showView && window.showView('view-qual'); window.qualShowNew && window.qualShowNew()">
+            <span class='icon' data-lucide='plus-circle'></span> New Qualification
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Validation Report Suite -->
+      <div class="sidebar-section">
+        <div class="sidebar-label-row">
+          <span class="sidebar-label">Validation Reports</span>
+          <button class="val-collapse-btn" id="report-collapse-btn" onclick="toggleReportSection()"><span class='icon' data-lucide='chevron-up'></span></button>
+        </div>
+        <div id="report-nav-items">
+          <div class="sidebar-item report-sub-item" onclick="window.initReport && window.initReport()">
+            <span class='icon' data-lucide='file-check'></span> Validation Reports
+          </div>
+          <div class="sidebar-item report-sub-item" onclick="window.showView && window.showView('view-report'); window.reportShowNew && window.reportShowNew()">
+            <span class='icon' data-lucide='plus-circle'></span> New Report
+          </div>
+        </div>
+      </div>
+
       <div id="val-nav-items" style="display:none"></div>
 
       <div class="sidebar-divider"></div>
@@ -1726,12 +1800,29 @@
         if (targetId === "view-qms-change-control") {
           if (window.initQMSChangeControl) window.initQMSChangeControl();
         }
+
+        if (targetId === "view-urs-dashboard") {
+          if (window.initURS) window.initURS();
+        }
+
+        if (targetId === "view-urs-new") {
+          if (window.startNewURS) window.startNewURS();
+        }
       });
     });
   </script>
 
   <!-- ── Risk Management navigation helpers ───────────────────────────────── -->
   <script>
+    // Shared: flip a collapse button's chevron icon without clobbering it
+    function _flipChevron(btn, open) {
+      const icon = btn ? btn.querySelector(".icon") : null;
+      if (icon) {
+        icon.setAttribute("data-lucide", open ? "chevron-up" : "chevron-down");
+        if (window.lucide) window.lucide.createIcons();
+      }
+    }
+
     // Collapsible Risk Management sidebar section
     let riskSectionOpen = true;
     function toggleRiskSection() {
@@ -1739,7 +1830,7 @@
       const btn   = document.getElementById("risk-collapse-btn");
       riskSectionOpen = !riskSectionOpen;
       items.style.display = riskSectionOpen ? "block" : "none";
-      btn.textContent = riskSectionOpen ? "▲" : "▼";
+      _flipChevron(btn, riskSectionOpen);
     }
     window.toggleRiskSection = toggleRiskSection;
 
@@ -1750,7 +1841,7 @@
       const btn   = document.getElementById("urs-collapse-btn");
       ursSectionOpen = !ursSectionOpen;
       items.style.display = ursSectionOpen ? "block" : "none";
-      btn.textContent = ursSectionOpen ? "▲" : "▼";
+      _flipChevron(btn, ursSectionOpen);
     }
     window.toggleURSSection = toggleURSSection;
 
@@ -1761,7 +1852,7 @@
       const btn   = document.getElementById("qual-collapse-btn");
       qualSectionOpen = !qualSectionOpen;
       items.style.display = qualSectionOpen ? "block" : "none";
-      btn.textContent = qualSectionOpen ? "▲" : "▼";
+      _flipChevron(btn, qualSectionOpen);
     }
     window.toggleQualSection = toggleQualSection;
 

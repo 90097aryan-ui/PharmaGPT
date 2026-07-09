@@ -23,19 +23,25 @@ from .fmea_prompt import get_prompt as fmea_prompt
 from .capa_prompt import get_prompt as capa_prompt
 from .deviation_prompt import get_prompt as deviation_prompt
 from .change_control_prompt import get_prompt as change_control_prompt
+from .sop_prompt import get_prompt as sop_prompt
+from .validation_plan_prompt import get_prompt as validation_plan_prompt
+from .validation_report_prompt import get_prompt as validation_report_prompt
 
 PROMPT_REGISTRY = {
-    "IQ":             iq_prompt,
-    "OQ":             oq_prompt,
-    "PQ":             pq_prompt,
-    "URS":            urs_prompt,
-    "DQ":             dq_prompt,
-    "FAT":            fat_prompt,
-    "SAT":            sat_prompt,
-    "FMEA":           fmea_prompt,
-    "CAPA":           capa_prompt,
-    "Deviation":      deviation_prompt,
-    "Change Control": change_control_prompt,
+    "IQ":               iq_prompt,
+    "OQ":               oq_prompt,
+    "PQ":               pq_prompt,
+    "URS":              urs_prompt,
+    "DQ":               dq_prompt,
+    "FAT":              fat_prompt,
+    "SAT":              sat_prompt,
+    "FMEA":             fmea_prompt,
+    "CAPA":             capa_prompt,
+    "Deviation":        deviation_prompt,
+    "Change Control":   change_control_prompt,
+    "SOP":              sop_prompt,
+    "Validation Plan":  validation_plan_prompt,
+    "Validation Report": validation_report_prompt,
 }
 
 __all__ = ["PROMPT_REGISTRY", "PHARMA_SYSTEM_PROMPT"]

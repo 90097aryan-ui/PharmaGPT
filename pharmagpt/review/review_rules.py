@@ -72,10 +72,27 @@ MANDATORY_SECTIONS: dict[str, list[str]] = {
         "purpose", "scope", "description", "impact", "implementation",
         "approval", "revision history",
     ],
+    "IQ/OQ Combined": [
+        "purpose", "scope", "responsibilities", "installation", "test",
+        "calibration", "acceptance criteria", "references", "annexure",
+        "approval", "revision history",
+    ],
+    "SOP": [
+        "purpose", "scope", "responsibilities", "procedure", "safety",
+        "records", "training", "approval", "revision history",
+    ],
+    "Validation Plan": [
+        "purpose", "scope", "responsibilities", "risk", "approach",
+        "schedule", "references", "approval", "revision history",
+    ],
+    "Validation Report": [
+        "purpose", "scope", "summary", "deviation", "conclusion",
+        "traceability", "approval", "revision history",
+    ],
 }
 
 # Sections required for IQ/OQ/PQ that are not always present in other types
-_IQ_OQ_PQ_TYPES = {"IQ", "OQ", "PQ"}
+_IQ_OQ_PQ_TYPES = {"IQ", "OQ", "PQ", "IQ/OQ Combined"}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Markdown parsing helpers
@@ -300,7 +317,7 @@ def check_missing_footer_header_markers(content: str, **_) -> List[ReviewIssue]:
 
 def check_missing_acceptance_criteria(content: str, doc_type: str, **_) -> List[ReviewIssue]:
     """TEC-001: Acceptance criteria are mandatory for most document types."""
-    skip_types = {"Deviation", "Change Control", "FMEA"}
+    skip_types = {"Deviation", "Change Control", "FMEA", "SOP", "Validation Plan"}
     if doc_type in skip_types:
         return []
     cl = _content_lower(content)
@@ -317,7 +334,7 @@ def check_missing_acceptance_criteria(content: str, doc_type: str, **_) -> List[
 
 def check_missing_test_cases(content: str, doc_type: str, **_) -> List[ReviewIssue]:
     """TEC-002: Test protocols require defined test cases."""
-    test_types = {"IQ", "OQ", "PQ", "FAT", "SAT"}
+    test_types = {"IQ", "OQ", "PQ", "FAT", "SAT", "IQ/OQ Combined"}
     if doc_type not in test_types:
         return []
     cl = _content_lower(content)
@@ -491,7 +508,7 @@ def check_missing_equipment_info(content: str, form_data: dict, **_) -> List[Rev
 
 def check_missing_utilities(content: str, doc_type: str, **_) -> List[ReviewIssue]:
     """EQP-002: Utilities (power, water, compressed air) must be listed for IQ/OQ."""
-    if doc_type not in {"IQ", "OQ"}:
+    if doc_type not in {"IQ", "OQ", "IQ/OQ Combined"}:
         return []
     cl = _content_lower(content)
     if _has_keyword(cl, "utilities", "electrical", "compressed air", "water supply", "drainage", "hvac"):
@@ -620,7 +637,7 @@ def evaluate_compliance(content: str, doc_type: str) -> list[dict]:
     Evaluate document against each regulatory framework.
     Returns list of dicts ready to build ComplianceCheck objects.
     """
-    from review.review_models import ComplianceStatus
+    from pharmagpt.review.review_models import ComplianceStatus
 
     cl      = _content_lower(content)
     results = []

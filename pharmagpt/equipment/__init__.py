@@ -87,14 +87,43 @@ def get_equipment_profile(equipment_name: str) -> EquipmentProfile | None:
 
 # ─── Prompt Formatter ─────────────────────────────────────────────────────────
 
-def format_profile_for_prompt(profile: EquipmentProfile) -> str:
+_MAX_BULLET_ITEMS = 6   # cap per category — a longer, denser profile block combined with an
+                        # already-long doc-type prompt was found to occasionally push
+                        # gemini-2.5-flash into degenerate repetitive output for some
+                        # heavily-documented equipment types (e.g. HPLC, tablet presses)
+
+
+def format_profile_for_prompt(profile: EquipmentProfile, qualification_doc: bool = True) -> str:
     """
     Render an EquipmentProfile as a structured text block to be injected into
     the Gemini prompt before the retrieved document context.
+
+    qualification_doc
+        True  — full profile including IQ/OQ/PQ checklists (for IQ/OQ/PQ/DQ/
+                FAT/SAT and combined qualification protocols, where those
+                checklists are directly relevant).
+        False — a lighter profile that omits the IQ/OQ/PQ checklist sections.
+                Injecting IQ/OQ/PQ-labelled checklists into the prompt for a
+                non-qualification document (SOP, Validation Plan, Validation
+                Report) was found to occasionally push gemini-2.5-flash into
+                degenerate repetitive output, likely from the thematic
+                mismatch between "this is an SOP" and "here are IQ/OQ/PQ test
+                checklists" in the same prompt.
     """
 
     def bullet(items: List[str]) -> str:
-        return "\n".join(f"  • {item}" for item in items)
+        return "\n".join(f"  • {item}" for item in items[:_MAX_BULLET_ITEMS])
+
+    qualification_section = f"""
+IQ CHECKLIST (Installation Qualification):
+{bullet(profile.iq_checklist)}
+
+OQ TESTS (Operational Qualification):
+{bullet(profile.oq_tests)}
+
+PQ TESTS (Performance Qualification):
+{bullet(profile.pq_tests)}
+""" if qualification_doc else ""
 
     return f"""
 ═══════════════════════════════════════════════════════════════════════
@@ -113,16 +142,7 @@ REQUIRED UTILITIES:
 
 CRITICAL COMPONENTS:
 {bullet(profile.critical_components)}
-
-IQ CHECKLIST (Installation Qualification):
-{bullet(profile.iq_checklist)}
-
-OQ TESTS (Operational Qualification):
-{bullet(profile.oq_tests)}
-
-PQ TESTS (Performance Qualification):
-{bullet(profile.pq_tests)}
-
+{qualification_section}
 CALIBRATION POINTS:
 {bullet(profile.calibration_points)}
 
@@ -139,8 +159,9 @@ COMMON DEVIATIONS (address proactively in protocols):
 {bullet(profile.common_deviations)}
 
 ═══════════════════════════════════════════════════════════════════════
-Use all profile data above to generate equipment-specific, complete,
-and GMP-compliant protocol sections. Do not rely on generic templates.
+Use the profile data above as reference to make the protocol sections
+equipment-specific. Keep to the section structure and length already
+specified in the main instructions below.
 ═══════════════════════════════════════════════════════════════════════
 """
 

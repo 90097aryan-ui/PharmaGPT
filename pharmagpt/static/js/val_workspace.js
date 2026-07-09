@@ -128,14 +128,14 @@
 
   function openCreateModal() {
     $("vw-create-form").reset();
-    $("vw-modal-overlay").classList.add("active");
-    $("vw-create-modal").classList.add("active");
+    $("vw-modal-overlay").classList.add("open");
+    $("vw-create-modal").classList.add("open");
     $("vw-name").focus();
   }
 
   function closeCreateModal() {
-    $("vw-modal-overlay").classList.remove("active");
-    $("vw-create-modal").classList.remove("active");
+    $("vw-modal-overlay").classList.remove("open");
+    $("vw-create-modal").classList.remove("open");
   }
 
   async function submitCreateForm(e) {

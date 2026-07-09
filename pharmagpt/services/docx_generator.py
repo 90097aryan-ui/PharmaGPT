@@ -898,7 +898,7 @@ class DocxGenerator:
 
     def _add_review_report(self, review_result) -> None:
         """Append the Validation Review Report as the final document section."""
-        from review.review_formatter import format_docx_sections
+        from pharmagpt.review.review_formatter import format_docx_sections
 
         T    = self.T
         data = format_docx_sections(review_result)
@@ -1414,6 +1414,9 @@ _DOC_TYPE_LABELS = {
     "CAPA":           "Corrective and Preventive Action Report",
     "Deviation":      "Deviation Report",
     "Change Control": "Change Control Record",
+    "IQ/OQ Combined":    "Combined Installation and Operational Qualification Protocol",
+    "Validation Plan":   "Validation Plan",
+    "Validation Report": "Validation Summary Report",
 
     # ── Quality Management Suite — Document Control doc_type values ──────────
     "SOP":              "Standard Operating Procedure",

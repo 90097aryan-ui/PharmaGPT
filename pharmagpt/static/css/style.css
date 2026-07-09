@@ -1630,6 +1630,8 @@ button:has(> .icon) {
 .val-nav-item .val-nav-label { display: inline; }
 .val-nav-item .val-nav-sub   { display: none; }   /* keep sidebar compact */
 
+.risk-sub-item, .qual-sub-item, .report-sub-item { padding-left: 24px !important; }
+
 .val-collapse-btn {
   background: rgba(255,255,255,0.06);
   border: 1px solid rgba(255,255,255,0.10);

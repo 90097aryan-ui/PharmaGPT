@@ -4,7 +4,7 @@ services:
     runtime: python
     plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn pharmagpt.app:app --workers=2 --threads=4 --timeout=60
+    startCommand: gunicorn pharmagpt.app:app --workers=2 --threads=4 --timeout=60 --worker-tmp-dir /dev/shm --keep-alive=5
     disk:
       name: pharmagpt-data
       mountPath: /var/data

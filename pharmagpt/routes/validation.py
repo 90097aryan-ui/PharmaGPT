@@ -81,18 +81,37 @@ def validation_generate():
     form_data["project_name"] = project["name"]
     prompt = build_generation_prompt(doc_type, form_data, doc_context, project["name"])
 
+    # Most doc types generate from a single prompt. A few (see
+    # doc_generator.COMBINED_DOC_TYPES) are assembled from more than one
+    # proven single-purpose prompt, each generated in its own Gemini call and
+    # streamed back-to-back — see build_generation_prompt() docstring.
+    prompt_parts = prompt if isinstance(prompt, list) else [prompt]
+
     def generate():
         try:
-            for chunk in gemini_client.models.generate_content_stream(
-                model=GEMINI_MODEL,
-                contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
-                config=types.GenerateContentConfig(
-                    system_instruction=PHARMA_SYSTEM_PROMPT,
-                    temperature=0.3,   # lower temperature for consistent document structure
-                ),
-            ):
-                if chunk.text:
-                    yield f"data: {json.dumps({'chunk': chunk.text})}\n\n"
+            for i, part in enumerate(prompt_parts):
+                if i > 0:
+                    yield f"data: {json.dumps({'chunk': chr(10) + chr(10) + '---' + chr(10) + chr(10)})}\n\n"
+
+                for chunk in gemini_client.models.generate_content_stream(
+                    model=GEMINI_MODEL,
+                    contents=[types.Content(role="user", parts=[types.Part(text=part)])],
+                    config=types.GenerateContentConfig(
+                        system_instruction=PHARMA_SYSTEM_PROMPT,
+                        temperature=0.3,   # lower temperature for consistent document structure
+                        max_output_tokens=12000,   # bound worst-case output; full protocols normally run 3-8K tokens
+                        # Low-temperature decoding on long, table-heavy structured
+                        # documents was found to occasionally fall into a
+                        # degenerate repetition loop (the model reinforcing its
+                        # own highest-probability continuation indefinitely).
+                        # A frequency penalty directly discourages repeating the
+                        # same tokens and is the standard mitigation for exactly
+                        # this failure mode.
+                        frequency_penalty=0.4,
+                    ),
+                ):
+                    if chunk.text:
+                        yield f"data: {json.dumps({'chunk': chunk.text})}\n\n"
 
             yield f"data: {json.dumps({'done': True})}\n\n"
 

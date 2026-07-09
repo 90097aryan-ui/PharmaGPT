@@ -158,11 +158,64 @@ const VALIDATION_DOCS = {
     ],
   },
 
+  "IQ/OQ Combined": {
+    label: "Combined Installation & Operational Qualification",
+    short: "IQ/OQ",
+    icon: "<span class=\'icon\' data-lucide=\'wrench\'></span>",
+    color: "#4C7A4E",
+    step2: [
+      { id: "protocol_number", label: "Protocol Number",        placeholder: "IQ-OQ-001", required: true },
+      { id: "version",         label: "Version",                placeholder: "1.0",       required: true },
+      { id: "po_number",       label: "Purchase Order Number",  placeholder: "PO-2026-001" },
+      { id: "urs_reference",   label: "URS Reference",          placeholder: "URS-001" },
+    ],
+  },
+
+  SOP: {
+    label: "Standard Operating Procedure",
+    short: "SOP",
+    icon: "<span class=\'icon\' data-lucide=\'file-text\'></span>",
+    color: "#3D6140",
+    step2: [
+      { id: "doc_number",        label: "Document Number",     placeholder: "SOP-001", required: true },
+      { id: "version",           label: "Version",             placeholder: "1.0",     required: true },
+      { id: "sop_title",         label: "SOP Title",           placeholder: "e.g. Operation and Use of HPLC System" },
+      { id: "department_owner",  label: "Owning Department",   placeholder: "e.g. Quality Control" },
+    ],
+  },
+
+  "Validation Plan": {
+    label: "Validation Plan",
+    short: "VMP",
+    icon: "<span class=\'icon\' data-lucide=\'list-checks\'></span>",
+    color: "#8A6B52",
+    step2: [
+      { id: "plan_number",       label: "Plan Number",          placeholder: "VMP-001", required: true },
+      { id: "version",           label: "Version",              placeholder: "1.0",     required: true },
+      { id: "validation_scope",  label: "Validation Scope",     placeholder: "e.g. HPLC System and associated systems", type: "textarea" },
+      { id: "risk_category",     label: "Risk Category",        placeholder: "e.g. High / Medium / Low" },
+    ],
+  },
+
+  "Validation Report": {
+    label: "Validation Summary Report",
+    short: "VSR",
+    icon: "<span class=\'icon\' data-lucide=\'bar-chart-3\'></span>",
+    color: "#5B4C43",
+    step2: [
+      { id: "report_number",       label: "Report Number",        placeholder: "VSR-001", required: true },
+      { id: "version",             label: "Version",              placeholder: "1.0",     required: true },
+      { id: "plan_reference",      label: "Validation Plan Reference", placeholder: "VMP-001" },
+      { id: "activities_covered",  label: "Activities Covered",   placeholder: "e.g. URS, DQ, IQ, OQ, PQ" },
+    ],
+  },
+
 };
 
 // Ordered list for the sidebar (controls display order)
 const VALIDATION_DOC_ORDER = [
-  "URS", "DQ", "FAT", "SAT", "IQ", "OQ", "PQ",
+  "URS", "DQ", "FAT", "SAT", "IQ", "OQ", "IQ/OQ Combined", "PQ",
+  "SOP", "Validation Plan", "Validation Report",
   "FMEA", "CAPA", "Deviation", "Change Control",
 ];
 
