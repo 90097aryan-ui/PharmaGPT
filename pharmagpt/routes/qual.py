@@ -589,7 +589,9 @@ def export_traceability_docx(qid):
             pass
 
     md_content = svc.build_traceability_markdown(matrix, urs_reqs, risk_items)
+    title = f"Traceability Matrix — {qual.get('equipment_name', '')}"
     form_data = {
+        "title": title,
         "equipment_name": qual.get("equipment_name", ""),
         "department": qual.get("department", ""),
         "revision": qual.get("revision", "A"),
@@ -598,8 +600,7 @@ def export_traceability_docx(qid):
         "approved_by": qual.get("approved_by", ""),
         "effective_date": qual.get("effective_date", ""),
     }
-    title = f"Traceability Matrix — {qual.get('equipment_name', '')}"
-    docx_bytes = markdown_to_docx(md_content, form_data, "Traceability Matrix", title)
+    docx_bytes = markdown_to_docx(md_content, "Traceability Matrix", form_data)
     safe_name = f"TraceMatrix_{qual.get('qual_number', qid)}.docx".replace(" ", "_")
 
     return send_file(
@@ -628,6 +629,7 @@ def export_protocol_docx(qid, pid):
     ptype = protocol.get("protocol_type", "IQ")
     title = protocol.get("title", f"{ptype} Protocol")
     form_data = {
+        "title": title,
         "protocol_number": protocol.get("protocol_number", ""),
         "equipment_name": qual.get("equipment_name", ""),
         "department": qual.get("department", ""),
@@ -637,7 +639,7 @@ def export_protocol_docx(qid, pid):
         "approved_by": qual.get("approved_by", ""),
         "effective_date": qual.get("effective_date", ""),
     }
-    docx_bytes = markdown_to_docx(md_content, form_data, ptype, title)
+    docx_bytes = markdown_to_docx(md_content, ptype, form_data)
     safe_name = f"{ptype}_{protocol.get('protocol_number', pid)}.docx".replace(" ", "_")
 
     return send_file(

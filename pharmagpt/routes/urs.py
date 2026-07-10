@@ -34,6 +34,7 @@ GET    /urs/library/types                    list equipment types in library
 """
 
 import json
+import logging
 from flask import Blueprint, jsonify, request, Response, stream_with_context
 
 from pharmagpt import urs_database as udb
@@ -48,6 +49,8 @@ from pharmagpt.config import GEMINI_MODEL
 from pharmagpt.prompts import PHARMA_SYSTEM_PROMPT
 from pharmagpt.services.doc_exporter import markdown_to_docx
 from google.genai import types
+
+logger = logging.getLogger(__name__)
 
 bp = Blueprint("urs", __name__, url_prefix="/urs")
 
@@ -252,7 +255,8 @@ def generate_requirements(uid):
                 udb.save_requirements(uid, merged)
                 yield f"data: {json.dumps({'done': True, 'count': len(numbered)})}\n\n"
             except Exception as parse_err:
-                yield f"data: {json.dumps({'done': True, 'parse_error': str(parse_err)})}\n\n"
+                logger.exception("Failed to parse AI-generated requirements for URS %s", uid)
+                yield f"data: {json.dumps({'done': True, 'count': 0, 'parse_error': str(parse_err)})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
@@ -397,6 +401,7 @@ def export_docx(uid):
     markdown_content = svc.build_urs_markdown(urs, requirements)
     title = urs.get("title", "URS Document")
     form_data = {
+        "title": title,
         "urs_number": urs.get("urs_number", ""),
         "doc_number": urs.get("doc_number", ""),
         "revision": urs.get("revision", "A"),
@@ -408,7 +413,7 @@ def export_docx(uid):
         "effective_date": urs.get("effective_date", ""),
     }
 
-    docx_bytes = markdown_to_docx(markdown_content, form_data, "URS", title)
+    docx_bytes = markdown_to_docx(markdown_content, "URS", form_data)
     safe_name = f"URS_{urs.get('urs_number', uid)}.docx".replace(" ", "_")
 
     return send_file(

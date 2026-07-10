@@ -433,7 +433,19 @@ def export_docx(rid):
     sections = rdb.get_sections(rid)
     markdown_content = svc.build_docx_markdown(report, sections)
 
-    docx_bytes = markdown_to_docx(markdown_content)
+    doc_type = report.get("report_type", "Validation Report")
+    form_data = {
+        "title": report.get("title", doc_type),
+        "doc_number": report.get("report_number", ""),
+        "equipment_name": report.get("equipment_name", ""),
+        "department": report.get("department", ""),
+        "revision": report.get("revision", "A"),
+        "prepared_by": report.get("prepared_by", ""),
+        "reviewed_by": report.get("reviewed_by", ""),
+        "approved_by": report.get("approved_by", ""),
+        "effective_date": report.get("effective_date", ""),
+    }
+    docx_bytes = markdown_to_docx(markdown_content, doc_type, form_data)
     filename = f"{report.get('report_number','VR') or 'VR'}_{report.get('equipment_name','Report').replace(' ','_')}_Rev{report.get('revision','A')}.docx"
 
     return send_file(

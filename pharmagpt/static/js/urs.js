@@ -763,6 +763,8 @@ window.runAIGeneration = async function () {
     const decoder = new TextDecoder();
     let buffer = "";
     let reqCount = 0;
+    let parseError = null;
+    let streamError = null;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -780,10 +782,12 @@ window.runAIGeneration = async function () {
           }
           if (msg.done) {
             reqCount = msg.count || 0;
+            parseError = msg.parse_error || null;
             genCount.textContent = `${reqCount} requirements generated`;
-            genText.textContent = "Generation complete!";
+            genText.textContent = parseError ? "Generation finished, but parsing failed." : "Generation complete!";
           }
           if (msg.error) {
+            streamError = msg.error;
             genText.textContent = `Error: ${msg.error}`;
           }
         } catch (e) {}
@@ -791,8 +795,17 @@ window.runAIGeneration = async function () {
     }
 
     ursState.requirements = await fetch(`/urs/${ursState.currentURS.id}/requirements`).then(r => r.json());
- ursToast(`${reqCount} requirements generated`, "success");
-    setTimeout(() => wizardGoTo(4), 800);
+
+    if (streamError) {
+      ursToast(`Generation error: ${streamError}`, "error");
+      genBtn.disabled = false;
+    } else if (parseError || reqCount === 0) {
+      ursToast(`AI returned no usable requirements (${parseError || "empty result"}). Try again, or add requirements manually / from the library.`, "error");
+      genBtn.disabled = false;
+    } else {
+      ursToast(`${reqCount} requirements generated`, "success");
+      setTimeout(() => wizardGoTo(4), 800);
+    }
   } catch (e) {
     genText.textContent = `Error: ${e.message}`;
     ursToast(`Generation error: ${e.message}`, "error");
