@@ -76,6 +76,8 @@ D:\PharmaAgent\
 │   ├── qms_deviation_database.py   QMS Deviation Management schema + CRUD      [uncommitted]
 │   ├── qms_capa_database.py        QMS CAPA schema + CRUD                      [uncommitted]
 │   ├── qms_change_control_database.py  QMS Change Control schema + CRUD (Phase 2) [uncommitted]
+│   ├── equipment_database.py       Equipment entity schema + CRUD (PharmaGPT v1.0 Module 2)
+│   │                              [uncommitted]
 │   │
 │   ├── routes/                    One Flask Blueprint per domain (see §5)
 │   ├── services/                  Business logic / AI orchestration (see §6)
@@ -124,7 +126,7 @@ default. Row access uses `sqlite3.Row` (dict-like).
 | Family | Tables | Owner file |
 |---|---|---|
 | Core | `projects`, `messages`, `documents`, `document_text`, `generated_documents` | `database.py` |
-| Validation Workspace (v0.8, partial) | `val_projects`, `val_audit_trail` | `database.py` |
+| Validation Workspace (v0.8) — **retired, read-only history** (DEC-024) | `val_projects`, `val_audit_trail` | `database.py` |
 | Knowledge Base | `kb_documents` | `database.py` |
 | Risk Management | risk assessment tables (hazard/likelihood/severity/mitigation) | `risk_database.py` |
 | URS Management | URS projects + requirements | `urs_database.py` |
@@ -135,6 +137,7 @@ default. Row access uses `sqlite3.Row` (dict-like).
 | QMS Deviation *(uncommitted)* | `qms_deviations`, `qms_deviation_investigation`, `qms_deviation_impact`, `qms_deviation_capa_link` | `qms_deviation_database.py` |
 | QMS CAPA *(uncommitted)* | `qms_capas`, `qms_capa_actions`, `qms_capa_effectiveness` | `qms_capa_database.py` |
 | QMS Change Control *(Phase 2, uncommitted)* | `qms_change_controls`, `qms_change_control_impact`, `qms_change_control_actions`, `qms_change_control_links` | `qms_change_control_database.py` |
+| Equipment *(v1.0 Module 2, uncommitted)* | `equipment`, `equipment_documents` (polymorphic link to `kb_documents`/`documents`) | `equipment_database.py` |
 
 Full column-level detail lives in the root-level `DATABASE.md` — this file summarizes structure
 and relationships only.
@@ -157,7 +160,6 @@ must legally outlive the equipment/project record that originated them.
 | `routes/docs.py` | `documents` | (none) | Document upload/view/download/delete, extraction status |
 | `routes/validation.py` | `validation` | (none) | One-shot validation document generator (wizard) |
 | `routes/knowledge_base.py` | `knowledge_base` | (none) | Global Knowledge Base CRUD/search |
-| `routes/workspace.py` | `workspace` | (none) | Validation Workspace projects, audit trail (v0.8) |
 | `routes/dashboard.py` | `dashboard` | (none) | Home dashboard stats |
 | `routes/risk.py` | `risk` | `/risk` | Risk Management Suite |
 | `routes/urs.py` | `urs` | `/urs` | URS Management Suite |
@@ -168,14 +170,17 @@ must legally outlive the equipment/project record that originated them.
 | `routes/qms_deviations.py` *(uncommitted)* | `qms_deviations` | `/qms/deviations` | Deviation Management |
 | `routes/qms_capa.py` *(uncommitted)* | `qms_capa` | `/qms/capa` | CAPA |
 | `routes/qms_change_control.py` *(Phase 2, uncommitted)* | `qms_change_control` | `/qms/change-control` | Change Control |
+| `routes/equipment.py` *(v1.0 Module 2, uncommitted)* | `equipment` | (none) | Equipment CRUD, search, document links, AI-context bundle |
 
 Full endpoint-level detail (every method/path/purpose) lives in the root-level `API.md`.
 
-**Known gap:** the Risk, URS, Qualification, and Validation Report suites' sidebar navigation
-containers exist in `templates/index.html` but are `display:none` with no wired toggle — they are
-functionally complete on the backend but have no live entry point in the current UI. This is a
-pre-existing, explicitly-flagged gap (see [PROJECT_STATUS.md](PROJECT_STATUS.md) → Known
-Limitations), contrasted with QMS, which is fully wired into the sidebar.
+**Known gap (partially addressed by Module 3):** the Risk, URS, Qualification, and Validation Report
+suites' own sidebar navigation containers still exist in `templates/index.html` but remain
+`display:none` with no wired toggle. PharmaGPT v1.0 Module 3 gave all four a *different* live entry
+point — a tab inside the Project Workspace (`view-project-workspace`) that calls the existing generic
+`window.showView()` + each suite's `initX()` bootstrap — but this is not project-filtered (none of
+these four tables have a `project_id` column) and does not re-enable their own sidebar sections. See
+[PROJECT_STATUS.md](PROJECT_STATUS.md) → Known Issues and [DECISIONS.md](DECISIONS.md) DEC-025.
 
 ---
 
@@ -200,6 +205,9 @@ Limitations), contrasted with QMS, which is fully wired into the sidebar.
   `parse_json_response()` helpers used by all four QMS services below
 - `qms_document_service.py`, `qms_deviation_service.py`, `qms_capa_service.py` *(uncommitted)*
 - `qms_change_control_service.py` *(Phase 2, uncommitted)*
+- `equipment_service.py` *(v1.0 Module 2, uncommitted)* — `get_equipment_context_bundle()`
+  (architecture-only AI-context data assembly, not yet called from `doc_generator.py`) and
+  `get_equipment_type_catalog()` (autocomplete against `pharmagpt/equipment/`)
 
 ---
 
@@ -212,11 +220,16 @@ both chat (`/stream`) and AI generation endpoints, with a critical implementatio
 request context is not available inside a generator function** — all `request.*` data must be
 captured in the outer function scope before `generate()` is defined.
 
-20 JS modules: `workspace.js` *(new, 2026-07-04 — shared Enterprise Workspace shell, see below)*,
+20 JS modules: `workspace.js` *(2026-07-04 — shared Enterprise Workspace shell, see below)*,
 `dashboard.js`, `projects.js`, `chat.js`, `documents.js`, `insights.js`,
-`validation.js`, `validation_config.js`, `val_workspace.js`, `knowledge_base.js`,
+`validation.js`, `validation_config.js`, `knowledge_base.js`,
 `gen_document.js`, `risk.js`, `urs.js`, `qual.js`, `report.js`, and *(uncommitted)* `qms_common.js`,
-`qms_documents.js`, `qms_deviations.js`, `qms_capa.js`, `qms_change_control.js` *(Phase 2)*.
+`qms_documents.js`, `qms_deviations.js`, `qms_capa.js`, `qms_change_control.js` *(Phase 2)*,
+`equipment.js` *(v1.0 Module 2 — Equipment list/CRUD + Enterprise-Workspace-based Equipment Profile
+page; all top-level functions `eq`-prefixed per the DEC-020 collision lesson)*,
+`project_workspace.js` *(v1.0 Module 3 — the unified Project Workspace shell; `pw`-prefixed
+functions; replaces the deleted `val_workspace.js`)*. `val_workspace.js` (legacy Validation Workspace)
+was deleted by Module 3 — see DEC-024.
 
 **Enterprise Workspace layout (`workspace.css` + `workspace.js`, 2026-07-04).** A reusable
 full-screen "workspace" shell for any module that walks a user through a stateful, multi-step or
@@ -248,6 +261,17 @@ view opens and `Workspace.exit()` when leaving it, and use `Workspace.confirmDia
 URS, Qualification, Validation Report, and future QMS Phase 2/3 modules (Change Control,
 Non-Conformance, OOS/OOT, Audit, Supplier Quality, Training, Complaint Management) are expected to
 adopt this same shell once their sidebar navigation is wired up, instead of each building its own.
+The Equipment Profile page (v1.0 Module 2, `view-equipment-profile`) is the shell's second live
+consumer — reachable from the Equipment tab rather than a sidebar nav item, so
+`window.__ws_setActiveView()` was generalized from a single hardcoded `"view-gen-doc"` string
+comparison to a `Set` of workspace view IDs (`equipment.js`'s `eqOpenProfile()`/`eqBackToList()`
+call the same `enter()`/`exit()` contract as Generate Document). The Project Workspace (v1.0 Module
+3, `view-project-workspace`) is the third — opened directly when a project is selected, and itself
+the new home for the Equipment tab (`eqBackToList()` now calls `project_workspace.js`'s
+`window.pwShowTab('equipment')` instead of referencing a since-deleted standalone view). It
+introduces a new generic `.ws-tabs`/`.ws-tab` tab-strip component in `workspace.css`, visually
+identical to `.eq-tabs`/`.eq-tab` (Equipment Profile) and `.qms-tabs`/`.qms-tab` (QMS), kept as its
+own name so any future Enterprise Workspace consumer can reuse one shared tab-strip component.
 
 ---
 
@@ -349,14 +373,16 @@ Two distinct, currently-coexisting mechanisms — do not conflate them:
   (URS, DQ, FAT, SAT, IQ, OQ, PQ, FMEA, CAPA, Deviation, Change Control) via a 4-step form,
   config-driven (`validation_config.js`), saved to `generated_documents`. This is a quick draft
   tool, not a stateful workflow.
-- **Validation Workspace (v0.8, partial)** — stateful, full-lifecycle validation projects
-  (`val_projects`, `val_audit_trail`) with owner/approver/target-date/risk-category fields and an
-  audit trail. Backend + initial UI exist; full workflow (electronic signatures, approval states)
-  is still on the roadmap.
+- **Validation Workspace (v0.8) — retired (DEC-024)**. Its owner/approver/target-date/risk-category
+  fields were merged onto the unified `projects` table by Module 1 ("Phase 2 Module 1"); its own
+  separate `val_projects`-based dashboard/create-flow/tabbed detail view was deleted outright by
+  Module 3 after being found still live and writable, duplicating the now-unified Project entity.
+  `val_projects`/`val_audit_trail` remain as read-only history.
 - **Risk / URS / Qualification / Validation Report suites** — dedicated, fully-built backend
   modules (each with its own database file, routes, service, prompts, CSS, JS) added in a single
-  commit on 2026-06-30. Backend-complete; **sidebar navigation is not yet wired** (see §5 Known
-  gap).
+  commit on 2026-06-30. Backend-complete; their own sidebar navigation is still not wired (see §5
+  Known gap), but Module 3 gave all four a live entry point via a Project Workspace tab (unfiltered
+  — see DEC-025).
 
 ---
 

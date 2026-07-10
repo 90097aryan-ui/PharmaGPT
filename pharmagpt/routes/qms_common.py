@@ -39,18 +39,24 @@ from pharmagpt import qms_document_database as qdocdb
 from pharmagpt import qms_deviation_database as qdevdb
 from pharmagpt import qms_capa_database as qcapadb
 from pharmagpt import qms_change_control_database as qccdb
+from pharmagpt import database as db
 from pharmagpt.config import UPLOAD_FOLDER, ALLOWED_EXTENSIONS
 from pharmagpt.documents import get_extension, get_mime_type
 
 bp = Blueprint("qms_common", __name__, url_prefix="/qms")
 
-VALID_RECORD_TYPES = {"document", "deviation", "capa", "change_control"}
+# "project" was added for the PharmaGPT v1.0 Module 3 Project Workspace History
+# tab — routes/projects.py now calls qmsdb.add_audit_entry("project", ...) on
+# create/update/delete, reusing the shared polymorphic audit trail (DEC-010)
+# instead of a project-specific table.
+VALID_RECORD_TYPES = {"document", "deviation", "capa", "change_control", "project"}
 
 _GETTERS = {
     "document": qdocdb.get_document,
     "deviation": qdevdb.get_deviation,
     "capa": qcapadb.get_capa,
     "change_control": qccdb.get_change_control,
+    "project": db.get_project,
 }
 
 

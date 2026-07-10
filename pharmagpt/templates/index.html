@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/qual.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/report.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/qms.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/equipment.css') }}" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 </head>
@@ -71,22 +72,6 @@
           <button class="btn-new-project" id="btn-new-project">+ New</button>
         </div>
         <div id="project-list"></div>
-      </div>
-
-      <div class="sidebar-divider"></div>
-
-      <!-- Documents & Insights -->
-      <div class="sidebar-section">
-        <div class="sidebar-label">Documents</div>
-        <div class="sidebar-item" id="nav-documents" data-view="view-documents">
-          <span class='icon' data-lucide='folder-open'></span> Project Documents
-        </div>
-        <div class="sidebar-item" id="nav-insights" data-view="view-insights">
-          <span class='icon' data-lucide='bar-chart-3'></span> Document Insights
-        </div>
-        <div class="sidebar-item" id="nav-val-workspace" data-view="view-val-workspace">
-          <span class='icon' data-lucide='clipboard-check'></span> Validation Workspace
-        </div>
       </div>
 
       <div class="sidebar-divider"></div>
@@ -401,53 +386,173 @@
       </div>
     </main>
 
-    <!-- ── Documents view ───────────────────────────────────────────────────── -->
-    <main class="documents-container" id="view-documents" style="display:none">
-
-      <!-- Documents header bar -->
-      <div class="doc-header">
-        <div>
-          <h2 class="doc-title">Documents</h2>
-          <p class="doc-subtitle" id="doc-project-subtitle">Select a project to manage its documents.</p>
+    <!-- ── Project Workspace (PharmaGPT v1.0 Module 3 — "One Project = One Workspace") ── -->
+    <main class="ent-workspace" id="view-project-workspace" style="display:none">
+      <div class="ent-ws-header">
+        <div class="ent-ws-header-left">
+          <span class='icon ent-ws-icon' data-lucide='layout-dashboard'></span>
+          <div>
+            <h1 class="ent-ws-title" id="pw-title">Project</h1>
+            <p class="ent-ws-sub" id="pw-sub">—</p>
+          </div>
+        </div>
+        <div class="ent-ws-tags" id="pw-tags"></div>
+      </div>
+      <div class="ent-ws-toolbar">
+        <div class="ent-ws-breadcrumb" id="pw-breadcrumb"></div>
+        <div class="ent-ws-actions">
+          <button class="ent-ws-btn" id="pw-back-btn"><span class='icon' data-lucide='arrow-left'></span> Back to Dashboard</button>
         </div>
       </div>
+      <div class="ent-ws-body">
+        <div class="ent-ws-content" style="max-width:1400px">
+          <div class="ws-tabs" id="pw-tabs"></div>
 
-      <!-- Upload zone -->
-      <div class="doc-upload-section">
-        <div class="doc-drop-zone" id="doc-drop-zone">
-          <div class="drop-icon" data-lucide="upload-cloud"></div>
-          <p class="drop-label">Drag &amp; drop a file here</p>
-          <p class="drop-sub">PDF, DOCX, XLSX, TXT &nbsp;·&nbsp; Max 50 MB</p>
-          <button class="btn-upload" id="doc-upload-btn">Choose File</button>
-          <input type="file" id="doc-file-input" accept=".pdf,.docx,.xlsx,.txt" style="display:none" />
+          <!-- Overview -->
+          <div class="pw-tab-panel" data-pw-tab="overview">
+            <div class="eq-detail-grid" id="pw-overview-grid"></div>
+          </div>
+
+          <!-- Equipment (PharmaGPT v1.0 Module 2, embedded) -->
+          <div class="pw-tab-panel" data-pw-tab="equipment">
+            <div class="eq-header" style="background:none;border:none;padding:0 0 14px">
+              <div>
+                <p class="eq-subtitle" id="eq-project-subtitle">Select a project to manage its equipment.</p>
+              </div>
+              <div class="eq-header-actions">
+                <button class="btn-primary" id="eq-add-btn"><span class='icon' data-lucide='plus'></span> Add Equipment</button>
+              </div>
+            </div>
+            <div class="eq-import-banner" id="eq-import-banner" style="display:none"></div>
+            <div class="eq-list-header">
+              <span>Equipment Records</span>
+              <span id="eq-count" class="eq-count"></span>
+            </div>
+            <div class="eq-empty" id="eq-empty">
+              <span class='icon' data-lucide='cog' style="width:40px;height:40px;opacity:0.5"></span>
+              <p>No equipment recorded yet.</p>
+              <p style="font-size:12px">Add your first Equipment record using the button above.</p>
+            </div>
+            <div id="eq-list"></div>
+          </div>
+
+          <!-- Documents (+ Insights strip) -->
+          <div class="pw-tab-panel" data-pw-tab="documents">
+            <div id="insights-panel" style="margin-bottom:20px">
+              <div class="insights-empty">
+                <div class="insights-empty-icon" data-lucide="bar-chart-3"></div>
+                <p>Select a project to view its Document Insights.</p>
+              </div>
+            </div>
+            <p class="doc-subtitle" id="doc-project-subtitle" style="margin-bottom:12px">Select a project to manage its documents.</p>
+            <div class="doc-upload-section" style="padding:0">
+              <div class="doc-drop-zone" id="doc-drop-zone">
+                <div class="drop-icon" data-lucide="upload-cloud"></div>
+                <p class="drop-label">Drag &amp; drop a file here</p>
+                <p class="drop-sub">PDF, DOCX, XLSX, TXT &nbsp;·&nbsp; Max 50 MB</p>
+                <button class="btn-upload" id="doc-upload-btn">Choose File</button>
+                <input type="file" id="doc-file-input" accept=".pdf,.docx,.xlsx,.txt" style="display:none" />
+              </div>
+              <div class="doc-status" id="doc-upload-status" style="display:none"></div>
+            </div>
+            <div class="doc-list-section" style="padding:16px 0 0">
+              <div class="doc-list-header">
+                <span>Uploaded Files</span>
+                <span id="doc-count" class="doc-count"></span>
+              </div>
+              <div class="doc-empty" id="doc-empty">
+                <div class="icon" style="width:40px;height:40px;margin:0 auto 12px" data-lucide="folder-open"></div>
+                <p>No documents uploaded yet.</p>
+                <p style="font-size:12px;margin-top:4px">Upload your first file using the area above.</p>
+              </div>
+              <div id="doc-list"></div>
+            </div>
+          </div>
+
+          <!-- Risk Assessment / URS / Qualification / Validation Report — entry points.
+               These suites carry no project_id column yet, so these are live entry
+               points into their existing (previously unwired) dashboards, not
+               project-filtered views — see PROJECT_MEMORY/DECISIONS.md DEC-025. -->
+          <div class="pw-tab-panel" data-pw-tab="risk">
+            <div class="eq-future-card" style="max-width:420px;text-align:left;padding:20px">
+              <div class="eq-future-card-name" style="font-size:14px;margin-bottom:6px">Risk Assessment</div>
+              <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:14px">Open the Risk Management Suite. Not yet filtered to this project — see Known Issues.</p>
+              <button class="btn-secondary" onclick="window.showView && window.showView('view-risk-dashboard'); window.initRisk && window.initRisk();">Open Risk Management</button>
+            </div>
+          </div>
+          <div class="pw-tab-panel" data-pw-tab="urs">
+            <div class="eq-future-card" style="max-width:420px;text-align:left;padding:20px">
+              <div class="eq-future-card-name" style="font-size:14px;margin-bottom:6px">URS</div>
+              <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:14px">Open the URS Management Suite. Not yet filtered to this project — see Known Issues.</p>
+              <button class="btn-secondary" onclick="window.showView && window.showView('view-urs-dashboard'); window.initURS && window.initURS();">Open URS Suite</button>
+            </div>
+          </div>
+          <div class="pw-tab-panel" data-pw-tab="qualification">
+            <div class="eq-future-card" style="max-width:420px;text-align:left;padding:20px">
+              <div class="eq-future-card-name" style="font-size:14px;margin-bottom:6px">Qualification</div>
+              <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:14px">Open the Qualification (IQ/OQ/PQ) Suite. Not yet filtered to this project — see Known Issues.</p>
+              <button class="btn-secondary" onclick="window.showView && window.showView('view-qual'); window.initQual && window.initQual();">Open Qualification Suite</button>
+            </div>
+          </div>
+          <div class="pw-tab-panel" data-pw-tab="report">
+            <div class="eq-future-card" style="max-width:420px;text-align:left;padding:20px">
+              <div class="eq-future-card-name" style="font-size:14px;margin-bottom:6px">Validation Report</div>
+              <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:14px">Open the Validation Report Suite. Not yet filtered to this project — see Known Issues.</p>
+              <button class="btn-secondary" onclick="window.showView && window.showView('view-report'); window.initReport && window.initReport();">Open Validation Report Suite</button>
+            </div>
+          </div>
+
+          <!-- Tasks / Approvals — placeholders (architecture only, Module 3 scope) -->
+          <div class="pw-tab-panel" data-pw-tab="tasks">
+            <div class="eq-future-grid">
+              <div class="eq-future-card">
+                <span class='icon' data-lucide='list-checks'></span>
+                <div class="eq-future-card-name">Tasks</div>
+                <div class="eq-future-card-tag">Planned</div>
+              </div>
+            </div>
+          </div>
+          <div class="pw-tab-panel" data-pw-tab="approvals">
+            <div class="eq-future-grid">
+              <div class="eq-future-card">
+                <span class='icon' data-lucide='stamp'></span>
+                <div class="eq-future-card-name">Approvals</div>
+                <div class="eq-future-card-tag">Planned</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- History (shared qms_audit_trail, record_type='project') -->
+          <div class="pw-tab-panel" data-pw-tab="history">
+            <div id="pw-history-list"></div>
+          </div>
+
         </div>
-        <div class="doc-status" id="doc-upload-status" style="display:none"></div>
       </div>
-
-      <!-- Document list -->
-      <div class="doc-list-section">
-        <div class="doc-list-header">
-          <span>Uploaded Files</span>
-          <span id="doc-count" class="doc-count"></span>
-        </div>
-
-        <div class="doc-empty" id="doc-empty">
-          <div class="icon" style="width:40px;height:40px;margin:0 auto 12px" data-lucide="folder-open"></div>
-          <p>No documents uploaded yet.</p>
-          <p style="font-size:12px;margin-top:4px">Upload your first file using the area above.</p>
-        </div>
-
-        <div id="doc-list"></div>
-      </div>
-
     </main>
 
-    <!-- ── Insights view ─────────────────────────────────────────────────────── -->
-    <main class="insights-container" id="view-insights" style="display:none">
-      <div id="insights-panel">
-        <div class="insights-empty">
-          <div class="insights-empty-icon" data-lucide="bar-chart-3"></div>
-          <p>Select a project to view its Document Insights.</p>
+    <!-- ── Equipment Profile view (Enterprise Workspace) ─────────────────────── -->
+    <main class="ent-workspace" id="view-equipment-profile" style="display:none">
+      <div class="ent-ws-header">
+        <div class="ent-ws-header-left">
+          <span class='icon ent-ws-icon' data-lucide='cog'></span>
+          <div>
+            <h1 class="ent-ws-title" id="eq-profile-title">Equipment</h1>
+            <p class="ent-ws-sub" id="eq-profile-sub">—</p>
+          </div>
+        </div>
+        <div class="ent-ws-tags" id="eq-profile-tags"></div>
+      </div>
+      <div class="ent-ws-toolbar">
+        <div class="ent-ws-breadcrumb" id="eq-profile-breadcrumb"></div>
+        <div class="ent-ws-actions">
+          <button class="ent-ws-btn" id="eq-profile-back-btn"><span class='icon' data-lucide='arrow-left'></span> Back to Project Workspace</button>
+        </div>
+      </div>
+      <div class="ent-ws-body">
+        <div class="ent-ws-content">
+          <div class="eq-tabs" id="eq-tabs"></div>
+          <div id="eq-profile-body"></div>
         </div>
       </div>
     </main>
@@ -521,173 +626,6 @@
         <div class="kb-detail-panel" id="kb-detail-panel" style="display:none"></div>
 
       </div>
-    </main>
-
-    <!-- ── Validation Workspace — Dashboard ──────────────────────────────────── -->
-    <main class="vw-container" id="view-val-workspace" style="display:none">
-
-      <!-- Dashboard header -->
-      <div class="vw-dash-header">
-        <div class="vw-dash-header-left">
-          <span class="vw-dash-icon" data-lucide="hard-hat"></span>
-          <div>
-            <h2 class="vw-dash-title">Validation Workspace</h2>
-            <p class="vw-dash-sub">Manage equipment qualification &amp; validation projects end-to-end</p>
-          </div>
-        </div>
-        <button class="vw-btn-create" id="vw-btn-create"><span class='icon' data-lucide='plus'></span> New Validation Project</button>
-      </div>
-
-      <!-- Stats bar -->
-      <div class="vw-stats-bar" id="vw-stats-bar">
-        <div class="vw-stat-card">
-          <div class="vw-stat-value" id="vw-stat-total">—</div>
-          <div class="vw-stat-label">Total Projects</div>
-        </div>
-        <div class="vw-stat-card">
-          <div class="vw-stat-value" id="vw-stat-inprogress">—</div>
-          <div class="vw-stat-label">In Progress</div>
-        </div>
-        <div class="vw-stat-card">
-          <div class="vw-stat-value" id="vw-stat-completed">—</div>
-          <div class="vw-stat-label">Completed</div>
-        </div>
-        <div class="vw-stat-card">
-          <div class="vw-stat-value" id="vw-stat-onhold">—</div>
-          <div class="vw-stat-label">On Hold</div>
-        </div>
-      </div>
-
-      <!-- Project grid -->
-      <div class="vw-project-grid" id="vw-project-grid">
-        <!-- populated by val_workspace.js -->
-      </div>
-
-      <!-- Empty state -->
-      <div class="vw-empty" id="vw-empty" style="display:none">
-        <div class="vw-empty-icon" data-lucide="hard-hat"></div>
-        <p class="vw-empty-title">No validation projects yet</p>
-        <p class="vw-empty-sub">Click <strong>New Validation Project</strong> to get started.</p>
-      </div>
-
-    </main>
-
-    <!-- ── Validation Workspace — Project Workspace ────────────────────────── -->
-    <main class="vw-workspace" id="view-val-project" style="display:none">
-
-      <!-- Workspace top bar -->
-      <div class="vw-ws-topbar">
-        <button class="vw-ws-back" id="vw-ws-back"><span class='icon' data-lucide='arrow-left'></span> Dashboard</button>
-        <div class="vw-ws-title-block">
-          <h2 class="vw-ws-name" id="vw-ws-proj-name">—</h2>
-          <span class="vw-ws-meta" id="vw-ws-proj-meta">—</span>
-        </div>
-        <span class="vw-ws-status-badge" id="vw-ws-status-badge">In Progress</span>
-      </div>
-
-      <!-- Tab bar -->
-      <div class="vw-tab-bar" id="vw-tab-bar">
-        <button class="vw-tab active" data-tab="overview">Overview</button>
-        <button class="vw-tab" data-tab="equipment">Equipment</button>
-        <button class="vw-tab" data-tab="urs">URS</button>
-        <button class="vw-tab" data-tab="dq">DQ</button>
-        <button class="vw-tab" data-tab="fat">FAT</button>
-        <button class="vw-tab" data-tab="sat">SAT</button>
-        <button class="vw-tab" data-tab="iq">IQ</button>
-        <button class="vw-tab" data-tab="oq">OQ</button>
-        <button class="vw-tab" data-tab="pq">PQ</button>
-        <button class="vw-tab" data-tab="traceability">Traceability</button>
-        <button class="vw-tab" data-tab="risk">Risk Assessment</button>
-        <button class="vw-tab" data-tab="attachments">Attachments</button>
-        <button class="vw-tab" data-tab="audit">Audit Trail</button>
-      </div>
-
-      <!-- Tab panels -->
-      <div class="vw-tab-content" id="vw-tab-content">
-
-        <!-- Overview -->
-        <div class="vw-panel active" id="vw-panel-overview">
-          <div class="vw-panel-inner">
-            <div class="vw-overview-grid" id="vw-overview-grid">
-              <!-- populated by JS -->
-            </div>
-          </div>
-        </div>
-
-        <!-- Equipment -->
-        <div class="vw-panel" id="vw-panel-equipment">
-          <div class="vw-panel-inner">
-            <div class="vw-section-header">
-              <h3>Equipment Details</h3>
-              <p class="vw-section-sub">Technical specifications for the equipment under validation</p>
-            </div>
-            <div class="vw-info-grid" id="vw-equipment-grid"><!-- populated by JS --></div>
-          </div>
-        </div>
-
-        <!-- Phase tabs: URS / DQ / FAT / SAT / IQ / OQ / PQ -->
-        <div class="vw-panel" id="vw-panel-urs"><div class="vw-panel-inner"><div class="vw-phase-placeholder" data-phase="URS" data-full="User Requirement Specification"></div></div></div>
-        <div class="vw-panel" id="vw-panel-dq"><div class="vw-panel-inner"><div class="vw-phase-placeholder" data-phase="DQ" data-full="Design Qualification"></div></div></div>
-        <div class="vw-panel" id="vw-panel-fat"><div class="vw-panel-inner"><div class="vw-phase-placeholder" data-phase="FAT" data-full="Factory Acceptance Testing"></div></div></div>
-        <div class="vw-panel" id="vw-panel-sat"><div class="vw-panel-inner"><div class="vw-phase-placeholder" data-phase="SAT" data-full="Site Acceptance Testing"></div></div></div>
-        <div class="vw-panel" id="vw-panel-iq"><div class="vw-panel-inner"><div class="vw-phase-placeholder" data-phase="IQ" data-full="Installation Qualification"></div></div></div>
-        <div class="vw-panel" id="vw-panel-oq"><div class="vw-panel-inner"><div class="vw-phase-placeholder" data-phase="OQ" data-full="Operational Qualification"></div></div></div>
-        <div class="vw-panel" id="vw-panel-pq"><div class="vw-panel-inner"><div class="vw-phase-placeholder" data-phase="PQ" data-full="Performance Qualification"></div></div></div>
-
-        <!-- Traceability -->
-        <div class="vw-panel" id="vw-panel-traceability">
-          <div class="vw-panel-inner">
-            <div class="vw-section-header">
-              <h3>Traceability Matrix</h3>
-              <p class="vw-section-sub">Map requirements through qualification phases</p>
-            </div>
-            <div class="vw-coming-soon">
-              <span class="vw-cs-icon" data-lucide="link-2"></span>
-              <p>Traceability matrix builder — coming in v0.8 Step 2</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Risk Assessment -->
-        <div class="vw-panel" id="vw-panel-risk">
-          <div class="vw-panel-inner">
-            <div class="vw-section-header">
-              <h3>Risk Assessment</h3>
-              <p class="vw-section-sub">Risk register and FMEA for this validation project</p>
-            </div>
-            <div class="vw-coming-soon">
-              <span class="vw-cs-icon" data-lucide="alert-triangle"></span>
-              <p>Risk register — coming in v0.8 Step 2</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Attachments -->
-        <div class="vw-panel" id="vw-panel-attachments">
-          <div class="vw-panel-inner">
-            <div class="vw-section-header">
-              <h3>Attachments</h3>
-              <p class="vw-section-sub">Supporting files, signed protocols, and raw data</p>
-            </div>
-            <div class="vw-coming-soon">
-              <span class="vw-cs-icon" data-lucide="paperclip"></span>
-              <p>File attachments — coming in v0.8 Step 2</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Audit Trail -->
-        <div class="vw-panel" id="vw-panel-audit">
-          <div class="vw-panel-inner">
-            <div class="vw-section-header">
-              <h3>Audit Trail</h3>
-              <p class="vw-section-sub">Immutable record of all actions on this validation project</p>
-            </div>
-            <div class="vw-audit-list" id="vw-audit-list"><!-- populated by JS --></div>
-          </div>
-        </div>
-
-      </div><!-- /vw-tab-content -->
     </main>
 
     <!-- ── Validation Document Generator view ───────────────────────────────── -->
@@ -1290,120 +1228,203 @@
     </form>
   </div>
 
-  <!-- ── Create Validation Project Modal ─────────────────────────────────── -->
-  <div class="modal-overlay" id="vw-modal-overlay"></div>
-  <div class="modal vw-create-modal" id="vw-create-modal">
+  <!-- ── Equipment Add/Edit Modal (PharmaGPT v1.0 Module 2) ────────────────── -->
+  <datalist id="eq-type-catalog"></datalist>
+  <div class="modal-overlay" id="eq-modal-overlay"></div>
+  <div class="modal eq-modal" id="eq-modal">
     <div class="modal-header">
-      <h2>New Validation Project</h2>
-      <button class="modal-close" id="vw-modal-close"><span class='icon' data-lucide='x'></span></button>
+      <h2 id="eq-modal-title">Add Equipment</h2>
+      <button class="modal-close" id="eq-modal-close"><span class='icon' data-lucide='x'></span></button>
     </div>
-    <form id="vw-create-form" class="modal-body" autocomplete="off">
+    <form id="eq-form" class="modal-body" autocomplete="off">
 
+      <div class="eq-form-section-label">Basic Information</div>
       <div class="form-group">
-        <label for="vw-name">Project Name <span class="required">*</span></label>
-        <input id="vw-name" type="text" placeholder="e.g. HPLC IQ/OQ/PQ — QC Lab" required />
+        <label for="eq-f-name">Equipment Name <span class="required">*</span></label>
+        <input id="eq-f-name" type="text" placeholder="e.g. Agilent HPLC 1260" required />
       </div>
-
       <div class="form-row">
         <div class="form-group">
-          <label for="vw-equipment-name">Equipment Name</label>
-          <input id="vw-equipment-name" type="text" placeholder="e.g. Agilent 1260 HPLC" />
+          <label for="eq-f-equipment_code">Equipment ID</label>
+          <input id="eq-f-equipment_code" type="text" placeholder="e.g. EQ-1001" />
         </div>
         <div class="form-group">
-          <label for="vw-equipment-id">Equipment ID</label>
-          <input id="vw-equipment-id" type="text" placeholder="e.g. EQ-0042" />
+          <label for="eq-f-category">Equipment Category</label>
+          <input id="eq-f-category" type="text" placeholder="e.g. Analytical" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="eq-f-equipment_type">Equipment Type</label>
+          <input id="eq-f-equipment_type" type="text" list="eq-type-catalog" placeholder="e.g. HPLC" />
+        </div>
+        <div class="form-group">
+          <label for="eq-f-tag_number">Equipment Tag Number</label>
+          <input id="eq-f-tag_number" type="text" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="eq-f-model">Equipment Model</label>
+          <input id="eq-f-model" type="text" />
+        </div>
+        <div class="form-group">
+          <label for="eq-f-manufacturer">Manufacturer</label>
+          <input id="eq-f-manufacturer" type="text" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="eq-f-vendor">Vendor</label>
+          <input id="eq-f-vendor" type="text" />
+        </div>
+        <div class="form-group">
+          <label for="eq-f-serial_number">Serial Number</label>
+          <input id="eq-f-serial_number" type="text" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="eq-f-asset_number">Asset Number</label>
+        <input id="eq-f-asset_number" type="text" />
+      </div>
+
+      <div class="eq-form-section-label">Installation Information</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="eq-f-plant">Plant</label>
+          <input id="eq-f-plant" type="text" />
+        </div>
+        <div class="form-group">
+          <label for="eq-f-block">Block</label>
+          <input id="eq-f-block" type="text" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="eq-f-department">Department</label>
+          <input id="eq-f-department" type="text" />
+        </div>
+        <div class="form-group">
+          <label for="eq-f-area">Area</label>
+          <input id="eq-f-area" type="text" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="eq-f-room">Room</label>
+          <input id="eq-f-room" type="text" />
+        </div>
+        <div class="form-group">
+          <label for="eq-f-line">Line</label>
+          <input id="eq-f-line" type="text" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="eq-f-installation_date">Installation Date</label>
+          <input id="eq-f-installation_date" type="date" />
+        </div>
+        <div class="form-group">
+          <label for="eq-f-commissioning_date">Commissioning Date</label>
+          <input id="eq-f-commissioning_date" type="date" />
         </div>
       </div>
 
+      <div class="eq-form-section-label">Qualification Information</div>
       <div class="form-row">
         <div class="form-group">
-          <label for="vw-department">Department</label>
-          <input id="vw-department" type="text" placeholder="e.g. Quality Control" />
-        </div>
-        <div class="form-group">
-          <label for="vw-manufacturer">Manufacturer</label>
-          <input id="vw-manufacturer" type="text" placeholder="e.g. Agilent Technologies" />
-        </div>
-      </div>
-
-      <div class="form-row">
-        <div class="form-group">
-          <label for="vw-model">Model</label>
-          <input id="vw-model" type="text" placeholder="e.g. G1312B" />
-        </div>
-        <div class="form-group">
-          <label for="vw-location">Location</label>
-          <input id="vw-location" type="text" placeholder="e.g. Building A, Room 204" />
-        </div>
-      </div>
-
-      <div class="form-row">
-        <div class="form-group">
-          <label for="vw-validation-type">Validation Type</label>
-          <select id="vw-validation-type">
+          <label for="eq-f-qualification_status">Qualification Status</label>
+          <select id="eq-f-qualification_status">
             <option value="">— Select —</option>
-            <option value="IQ/OQ/PQ">IQ / OQ / PQ</option>
-            <option value="IQ/OQ">IQ / OQ</option>
-            <option value="OQ/PQ">OQ / PQ</option>
-            <option value="IQ">IQ — Installation Qualification</option>
-            <option value="OQ">OQ — Operational Qualification</option>
-            <option value="PQ">PQ — Performance Qualification</option>
-            <option value="DQ">DQ — Design Qualification</option>
-            <option value="FAT">FAT — Factory Acceptance Testing</option>
-            <option value="SAT">SAT — Site Acceptance Testing</option>
-            <option value="CSV">CSV — Computer System Validation</option>
-            <option value="Process Validation">Process Validation</option>
-            <option value="Cleaning Validation">Cleaning Validation</option>
-            <option value="Other">Other</option>
+            <option>Not Started</option><option>In Progress</option>
+            <option>Qualified</option><option>Requalification Due</option>
           </select>
         </div>
         <div class="form-group">
-          <label for="vw-risk-category">Risk Category</label>
-          <select id="vw-risk-category">
+          <label for="eq-f-validation_status">Validation Status</label>
+          <select id="eq-f-validation_status">
             <option value="">— Select —</option>
-            <option value="Critical">Critical</option>
-            <option value="High">High</option>
-            <option value="Medium">Medium</option>
-            <option value="Low">Low</option>
+            <option>Not Started</option><option>In Progress</option><option>Validated</option>
           </select>
         </div>
       </div>
-
       <div class="form-row">
         <div class="form-group">
-          <label for="vw-protocol-number">Protocol Number</label>
-          <input id="vw-protocol-number" type="text" placeholder="e.g. PROT-2024-001" />
+          <label for="eq-f-qualification_type">Qualification Type</label>
+          <input id="eq-f-qualification_type" type="text" placeholder="e.g. DQ/IQ/OQ/PQ" />
         </div>
         <div class="form-group">
-          <label for="vw-report-number">Report Number</label>
-          <input id="vw-report-number" type="text" placeholder="e.g. REP-2024-001" />
+          <label for="eq-f-criticality">Criticality</label>
+          <select id="eq-f-criticality">
+            <option value="">— Select —</option>
+            <option>Critical</option><option>Major</option><option>Minor</option>
+          </select>
         </div>
       </div>
-
-      <div class="form-row">
-        <div class="form-group">
-          <label for="vw-owner">Owner</label>
-          <input id="vw-owner" type="text" placeholder="e.g. Dr. Priya Sharma" />
-        </div>
-        <div class="form-group">
-          <label for="vw-approver">Approver</label>
-          <input id="vw-approver" type="text" placeholder="e.g. QA Head" />
-        </div>
+      <div class="form-group">
+        <label for="eq-f-gmp_impact">GMP Impact</label>
+        <select id="eq-f-gmp_impact">
+          <option value="">— Select —</option>
+          <option>Direct</option><option>Indirect</option><option>No Impact</option>
+        </select>
       </div>
-
-      <div class="form-row">
-        <div class="form-group">
-          <label for="vw-target-date">Target Date</label>
-          <input id="vw-target-date" type="date" />
-        </div>
+      <div class="form-group">
+        <label for="eq-f-notes">Notes</label>
+        <textarea id="eq-f-notes" rows="2" placeholder="Optional notes"></textarea>
       </div>
 
       <div class="modal-footer">
-        <button type="button" class="btn-secondary" id="vw-modal-cancel">Cancel</button>
-        <button type="submit" class="btn-primary">Create Project</button>
+        <button type="button" class="btn-secondary" id="eq-modal-cancel">Cancel</button>
+        <button type="submit" class="btn-primary" id="eq-modal-save">Add Equipment</button>
       </div>
     </form>
   </div>
+
+  <!-- ── Equipment: Link Document Modal ─────────────────────────────────────── -->
+  <div class="modal-overlay" id="eq-link-doc-overlay"></div>
+  <div class="modal" id="eq-link-doc-modal">
+    <div class="modal-header">
+      <h2>Link Document</h2>
+      <button class="modal-close" id="eq-link-doc-close"><span class='icon' data-lucide='x'></span></button>
+    </div>
+    <form id="eq-link-doc-form" class="modal-body" autocomplete="off">
+      <input type="hidden" id="eq-link-doc-equipment-id" />
+      <div class="form-row">
+        <div class="form-group">
+          <label for="eq-link-role">Document Role <span class="required">*</span></label>
+          <select id="eq-link-role" required>
+            <option value="user_manual">User Manual</option>
+            <option value="vendor_manual">Vendor Manual</option>
+            <option value="sop">SOP</option>
+            <option value="drawing">Drawing</option>
+            <option value="pnid">P&amp;ID</option>
+            <option value="electrical_drawing">Electrical Drawing</option>
+            <option value="pneumatic_drawing">Pneumatic Drawing</option>
+            <option value="fat">FAT</option>
+            <option value="sat">SAT</option>
+            <option value="urs">URS</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="eq-link-source-type">Source</label>
+          <select id="eq-link-source-type">
+            <option value="kb">Knowledge Base</option>
+            <option value="project">Project Documents</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="eq-link-source-id">Document <span class="required">*</span></label>
+        <select id="eq-link-source-id" required></select>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" id="eq-link-doc-cancel">Cancel</button>
+        <button type="submit" class="btn-primary">Link Document</button>
+      </div>
+    </form>
+  </div>
+
 
   <!-- ── Knowledge Base Upload Modal ──────────────────────────────────────── -->
   <div class="modal-overlay" id="kb-modal-overlay"></div>
@@ -1617,17 +1638,18 @@
              (Generate Document, Risk, URS, Qual, Report, QMS) renders inside the
              sidebar + content flex layout instead of full-width below it -->
 
-  <!-- Load order: workspace (shared shell) <span class='icon' data-lucide='arrow-right'></span> dashboard <span class='icon' data-lucide='arrow-right'></span> projects <span class='icon' data-lucide='arrow-right'></span> documents <span class='icon' data-lucide='arrow-right'></span> insights <span class='icon' data-lucide='arrow-right'></span> validation_config <span class='icon' data-lucide='arrow-right'></span> validation <span class='icon' data-lucide='arrow-right'></span> knowledge_base <span class='icon' data-lucide='arrow-right'></span> val_workspace <span class='icon' data-lucide='arrow-right'></span> chat -->
+  <!-- Load order: workspace (shared shell) -> dashboard -> projects -> documents -> insights -> validation_config -> validation -> knowledge_base -> chat -->
   <script src="{{ url_for('static', filename='js/workspace.js') }}"></script>
   <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
   <script src="{{ url_for('static', filename='js/projects.js') }}"></script>
   <script src="{{ url_for('static', filename='js/documents.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/equipment.js') }}"></script>
   <script src="{{ url_for('static', filename='js/insights.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/project_workspace.js') }}"></script>
   <script src="{{ url_for('static', filename='js/validation_config.js') }}"></script>
   <script src="{{ url_for('static', filename='js/validation.js') }}"></script>
   <script src="{{ url_for('static', filename='js/gen_document.js') }}"></script>
   <script src="{{ url_for('static', filename='js/knowledge_base.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/val_workspace.js') }}"></script>
   <script src="{{ url_for('static', filename='js/risk.js') }}"></script>
   <script src="{{ url_for('static', filename='js/urs.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qual.js') }}"></script>
@@ -1712,11 +1734,12 @@
     // react correctly regardless of whether navigation happens via the
     // sidebar or a workspace's own "Back to Project"/"Cancel" buttons.
     let __activeViewId = "view-dashboard";
+    const __WORKSPACE_VIEW_IDS = new Set(["view-gen-doc", "view-equipment-profile", "view-project-workspace"]);
     window.__ws_setActiveView = function (targetId) {
-      if (__activeViewId === "view-gen-doc" && targetId !== "view-gen-doc" && window.Workspace) {
+      if (__WORKSPACE_VIEW_IDS.has(__activeViewId) && !__WORKSPACE_VIEW_IDS.has(targetId) && window.Workspace) {
         window.Workspace.exit();
       }
-      if (targetId === "view-gen-doc" && window.Workspace) {
+      if (__WORKSPACE_VIEW_IDS.has(targetId) && window.Workspace) {
         window.Workspace.enter();
       }
       __activeViewId = targetId;
@@ -1751,26 +1774,8 @@
           v.style.display = v.id === targetId ? "flex" : "none";
         });
 
-        if (targetId === "view-documents") {
-          const subtitle = document.getElementById("doc-project-subtitle");
-          if (window.activeProject) {
-            subtitle.textContent = `Project: ${window.activeProject.name}`;
-            if (window.loadDocuments) window.loadDocuments();
-          } else {
-            subtitle.textContent = "Select a project to manage its documents.";
-          }
-        }
-
-        if (targetId === "view-insights") {
-          if (window.loadInsights) window.loadInsights();
-        }
-
         if (targetId === "view-kb") {
           if (window.initKB) window.initKB();
-        }
-
-        if (targetId === "view-val-workspace") {
-          if (window.initVW) window.initVW();
         }
 
         if (targetId === "view-dashboard") {

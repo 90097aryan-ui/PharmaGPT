@@ -375,7 +375,9 @@ Each line is `data: <payload>\n\n`. The client reads with `ReadableStream` / `Te
 Full reference: [`docs/QMS_PHASE1.md`](docs/QMS_PHASE1.md). All bodies are JSON except file
 upload (multipart/form-data) and DOCX export (binary download).
 
-**Shared** (`routes/qms_common.py`) — `record_type` ∈ `document | deviation | capa | change_control`:
+**Shared** (`routes/qms_common.py`) — `record_type` ∈ `document | deviation | capa | change_control |
+project` (`project` added by PharmaGPT v1.0 Module 3 for the Project Workspace's History tab —
+`routes/projects.py` writes to it, not a QMS route):
 - `GET /qms/dashboard` — unified stats across all 3 modules
 - `GET /qms/meta` — enum lists (doc types, statuses, categories) for dropdowns
 - `GET|POST /qms/<record_type>/<id>/attachments`, `GET /qms/attachments/<id>/download`, `DELETE /qms/attachments/<id>`
@@ -429,3 +431,25 @@ Full reference: [`docs/QMS_PHASE2.md`](docs/QMS_PHASE2.md). Follows the exact Ph
 - `GET /qms/change-control/<id>/deviations`, `GET /qms/change-control/<id>/capas`
 - `POST /qms/change-control/<id>/approval`
 - `GET /qms/change-control/<id>/report`, `POST /qms/change-control/<id>/export/docx`
+
+## Equipment (PharmaGPT v1.0 Module 2) — added 2026-07-10
+
+`routes/equipment.py`. Equipment is a first-class entity owned by a Project — see
+[DATABASE.md](DATABASE.md) for the schema and PROJECT_MEMORY/DECISIONS.md DEC-023 for the
+architecture rationale.
+
+- `GET|POST /projects/<id>/equipment` — list / create Equipment for a project
+- `POST /projects/<id>/equipment/import-legacy` — create an Equipment record pre-filled from the
+  project's legacy `equipment_name`/`manufacturer`/`model`/`equipment_id` fields (400 if none set)
+- `GET /equipment/search?q=&project_id=` — keyword search, optionally scoped to a project
+- `GET /equipment/types` — canonical equipment-type catalog (from `pharmagpt/equipment/`) for
+  autocomplete
+- `GET|PUT|DELETE /equipment/<id>` — single-record CRUD
+- `GET|POST /equipment/<id>/documents` — list / link a document reference
+  (`{document_role, source_type: "kb"|"project", source_id}` — 400 on invalid role/source, 404 if
+  the referenced document doesn't exist)
+- `DELETE /equipment/<id>/documents/<link_id>` — unlink
+- `GET /equipment/<id>/ai-context` — assembled AI-context bundle (equipment + intelligence profile
+  match + linked documents by role + project's validation history). **Architecture only** — not
+  yet called from `services/doc_generator.py` or any prompt-building path; this is a data-assembly
+  seam for a future module to wire in, the same pattern as the vector-RAG stubs (DEC-008).

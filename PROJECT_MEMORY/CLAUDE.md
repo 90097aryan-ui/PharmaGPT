@@ -42,10 +42,14 @@ Excellence Platform.
 
 **Before writing any code, ALWAYS read, in this order:**
 
-1. [PROJECT_STATUS.md](PROJECT_STATUS.md) — what exists today, what's in progress, what's known-broken
-2. [ARCHITECTURE.md](ARCHITECTURE.md) — how the system is structured, where new code belongs
-3. [DECISIONS.md](DECISIONS.md) — why the system is built the way it is, so you don't re-litigate settled decisions
-4. [RELEASE_NOTES.md](RELEASE_NOTES.md) — what shipped most recently, for continuity with the last session
+1. [../FOUNDATION_ARCHITECTURE.md](../FOUNDATION_ARCHITECTURE.md) — the frozen capstone architecture
+   as of `Foundation v1.0` (2026-07-10, PharmaGPT v1.0 Modules 1–3). Read this first for the
+   authoritative shape of the Project/Equipment entities and the Project Workspace navigation model.
+   Do not restructure anything it describes unless a critical defect is found.
+2. [PROJECT_STATUS.md](PROJECT_STATUS.md) — what exists today, what's in progress, what's known-broken
+3. [ARCHITECTURE.md](ARCHITECTURE.md) — how the system is structured, where new code belongs
+4. [DECISIONS.md](DECISIONS.md) — why the system is built the way it is, so you don't re-litigate settled decisions
+5. [RELEASE_NOTES.md](RELEASE_NOTES.md) — what shipped most recently, for continuity with the last session
 
 **Only inspect the source files required for the requested task.** Do not recursively scan the
 repository (`pharmagpt/`, `tests/`, etc.) unless the task is explicitly a repo-wide audit, or the

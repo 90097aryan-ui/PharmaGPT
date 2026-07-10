@@ -141,3 +141,33 @@ body.ent-ws-active > header { display: none; }
   .ent-ws-toolbar { flex-direction: column; align-items: flex-start; }
   .ent-ws-actions { width: 100%; justify-content: flex-end; }
 }
+
+/* ── Generic tab strip (reusable by any ent-workspace consumer) ─────────────
+   Introduced for the Project Workspace (PharmaGPT v1.0 Module 3); visually
+   identical to .eq-tabs/.eq-tab (Equipment Profile, equipment.css) and
+   .qms-tabs/.qms-tab (qms.css) — kept as its own generic name here so future
+   ent-workspace consumers can reuse one shared tab-strip component instead of
+   each suite defining its own. */
+.ws-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.ws-tab {
+  padding: 10px 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ws-tab:hover  { color: var(--navy); }
+.ws-tab.active { color: var(--navy); border-bottom-color: var(--accent); }
+
+.pw-tab-panel { display: none; }
+.pw-tab-panel.active { display: block; }

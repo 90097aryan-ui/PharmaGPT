@@ -229,11 +229,18 @@ qms_deviations ──< qms_deviation_investigation (1:1)
 
 -- Shared across all four (and future Phase 3 modules), keyed by
 -- (record_type, record_id) instead of one copy per module:
-qms_attachments   -- record_type: 'document' | 'deviation' | 'capa' | 'change_control'
+qms_attachments   -- record_type: 'document' | 'deviation' | 'capa' | 'change_control' | 'project'
 qms_comments
 qms_audit_trail
 qms_approvals     -- e-signature trail: performed_by, role, electronic_sig (typed, no PKI)
 ```
+
+`record_type='project'` was added by PharmaGPT v1.0 Module 3 (2026-07-10) — not a QMS module, but
+`qms_audit_trail` is generically reusable, and `record_type='project'` rows already existed from the
+one-time `_migrate_val_projects()` copy. `routes/projects.py` now calls
+`qms_database.add_audit_entry("project", ...)` on create/update/delete going forward, so the Project
+Workspace's History tab shows live history, not just the migrated snapshot. See
+[DECISIONS.md](DECISIONS.md) DEC-025.
 
 `qms_documents`, `qms_deviations`, `qms_capas`, and `qms_change_controls` each carry a nullable
 `project_id REFERENCES projects(id) ON DELETE SET NULL` — quality records are
@@ -259,3 +266,42 @@ qms_change_controls ──< qms_change_control_impact
 rollback_plan, regulatory_impact, justification, executive_summary, verification_summary,
 effectiveness_review) rather than one column per AI narrative feature — same pattern as
 `ai_investigation_data`/`ai_review_data` elsewhere in QMS.
+
+## Equipment (PharmaGPT v1.0 Module 2) — added 2026-07-10
+
+Equipment as a first-class business entity, owned by a Project. Schema + CRUD live in
+`pharmagpt/equipment_database.py` (new file, per the one-domain-one-file convention, DEC-012).
+Two new tables, both additive:
+
+```
+projects ──< equipment ──< equipment_documents >── kb_documents | documents
+                                                     (source_type discriminates which)
+```
+
+- **`equipment`** — one row per physical equipment record. `project_id` is `NOT NULL` with
+  `ON DELETE CASCADE` (equipment is a project sub-entity, not a standalone quality record, unlike
+  the QMS master tables' nullable `project_id`/`ON DELETE SET NULL` pattern). Carries Basic
+  Information (equipment_code/name/category/equipment_type/tag_number/model/manufacturer/vendor/
+  serial_number/asset_number), Installation Information (plant/block/department/area/room/line/
+  installation_date/commissioning_date), and Qualification Information (qualification_status/
+  validation_status/qualification_type/criticality/gmp_impact). Designed as the stable parent row
+  future modules (Calibration, Preventive Maintenance, Breakdown History, Spare Parts, Vendor
+  Qualification, Environmental Monitoring, Utilities, Asset Management) will FK against — none of
+  those tables are created by this module (architecture only).
+- **`equipment_documents`** — polymorphic link table (`source_type ∈ {kb, project}`, `source_id`)
+  connecting an Equipment record to an existing `kb_documents` or `documents` row. Never copies
+  file content, mirroring the "no duplicate documents" requirement and the QMS shared-table
+  polymorphic-reference precedent (DEC-010/DEC-011), applied here to a link table rather than an
+  owned attachment. `title_snapshot` is denormalized at link time so a broken link (source later
+  deleted) still displays a readable label instead of failing silently.
+
+Relationship to `pharmagpt/equipment/` (the pre-existing static Equipment Intelligence Engine
+profile registry — HPLC/GC/Autoclave/etc. reference checklists): unchanged, and not merged with
+this entity. An `equipment.equipment_type` value may match a catalog entry by string, used only for
+AI-context assembly (`services/equipment_service.py`) — no FK or enum constraint ties them together.
+
+`projects.equipment_name`/`manufacturer`/`model`/`equipment_id` (free-text, pre-existing) are
+untouched for backward compatibility with existing consumers (chat, validation wizard, prompts).
+`POST /projects/<id>/equipment/import-legacy` offers a one-click migration path from those fields
+into a real Equipment record, so existing projects can adopt the new entity without duplicate data
+entry.

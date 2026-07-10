@@ -137,6 +137,12 @@ async function selectProject(project) {
 
   // Show the "Use Project Documents" toggle and update its hint count
   _updateUseDocsRow(project.id);
+
+  // PharmaGPT v1.0 Module 3 — "One Project = One Workspace": selecting a
+  // project opens its unified Project Workspace directly (Equipment,
+  // Documents, Risk/URS/Qualification/Report entry points, Tasks, Approvals,
+  // History all live inside it now — see project_workspace.js).
+  if (window.pwOpenWorkspace) window.pwOpenWorkspace(project);
 }
 
 async function loadProjectHistory(projectId) {
@@ -253,6 +259,10 @@ async function _updateUseDocsRow(projectId) {
     hint.textContent = "";
   }
 }
+
+// Exposed so dashboard.js's "Recent Projects" cards can select + open the
+// same Project Workspace a sidebar click would (see switchToProject()).
+window.selectProject = selectProject;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 

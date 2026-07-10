@@ -939,3 +939,267 @@ this entry).
 1 / Enterprise Workspace / Design System v2.0 / v3.0 / Pre-Deployment UI Audit into proper versioned
 entries referencing `6ffaa54`/`3a94ccf`, in a dedicated pass. Consider adopting a machine-readable
 version source (DEC-014's original recommendation) so this class of drift stops recurring entirely.
+
+---
+
+### DEC-023 — Equipment as a First-Class Entity (PharmaGPT v1.0 Module 2)
+
+**Date:** 2026-07-10
+**Problem Statement:** Equipment existed only as free-text fields on `projects`
+(`equipment_name`/`manufacturer`/`model`/`equipment_id`, the last three added by "Phase 2 Module 1")
+plus a static, name-matched reference catalog (`pharmagpt/equipment/profiles/*.py`, an
+`EquipmentProfile` dataclass registry used only to enrich AI prompts). Neither is a real business
+entity: there is no stable row a future Calibration/Preventive Maintenance/Asset Management module
+could reference, no way to attach a manual/SOP/drawing without re-uploading it, and every validation
+document re-collects the same equipment details by hand. Module 2 required promoting Equipment to a
+first-class entity owned by a Project, without duplicating either existing mechanism.
+**Options Considered:** (a) Extend the static `pharmagpt/equipment/` catalog itself into an instance
+store; (b) add more free-text columns to `projects`; (c) a new `equipment` table (one row per
+physical instance, FK to `projects`) plus a polymorphic `equipment_documents` link table referencing
+existing `kb_documents`/`documents` rows.
+**Decision Taken:** Option (c). `pharmagpt/equipment_database.py` (new file, per the one-domain-one-
+file convention, DEC-012) owns `equipment` (`project_id NOT NULL`, `ON DELETE CASCADE` — equipment
+is a project sub-entity, not a standalone GxP record like the QMS master tables, so the nullable/
+`SET NULL` pattern of DEC-011 does not apply here) and `equipment_documents` (polymorphic on
+`(source_type, source_id)` against `kb_documents`/`documents`, mirroring the QMS shared-table
+polymorphic-reference precedent of DEC-010/DEC-011 but applied to a link table rather than an owned
+attachment — no file is ever copied). `pharmagpt/equipment/` (the static profile catalog) was left
+completely untouched; an Equipment row's `equipment_type` free-text field may *match* a catalog
+entry by string (used only for AI-context assembly), with no FK or enum coupling the two systems.
+`projects.equipment_name/manufacturer/model/equipment_id` were left untouched for backward
+compatibility — every existing reader (chat context, validation wizard, prompts) keeps working
+unmodified. A `POST /projects/<id>/equipment/import-legacy` endpoint was added so an existing project
+can promote its free-text info into a real Equipment record in one click, addressing the "avoid
+duplicate Equipment data" requirement without a forced migration.
+**Reason:** A new FK'd table is the only option that gives future modules (Calibration, Preventive
+Maintenance, Breakdown History, Spare Parts, Vendor Qualification, Environmental Monitoring,
+Utilities, Asset Management — none built here, architecture only) a stable parent row to attach to.
+Reusing the QMS polymorphic-link pattern for `equipment_documents` was chosen over either duplicating
+file content or inventing a new attachment mechanism, consistent with the project's existing
+anti-duplication convention (DEC-010/DEC-011/DEC-012 precedent) and the Module 2 requirement that the
+same manual be reusable across multiple Equipment records/Projects without copying it.
+**Benefits:** Additive-only (two new tables, zero existing tables/columns modified); one stable
+`equipment.id` future modules can FK against; documents are referenced, never duplicated; existing
+free-text-based features keep working with no code changes; a low-friction path (`import-legacy`)
+for existing projects to adopt the new entity instead of leaving two parallel, drifting sources of
+equipment truth.
+**Trade-offs:** `equipment_documents.source_id` cannot carry a real SQL foreign key (it's polymorphic
+across two distinct tables) — integrity is enforced at the application layer (`link_equipment_document`
+validates the source exists before inserting) rather than the database layer, same trade-off already
+accepted for `equipment_documents`'s QMS-table precedent. Risk/URS/Qualification/Validation Report/
+`generated_documents` do not yet FK to `equipment.id` — the Equipment Profile's "Validation History"
+tab currently shows the *project's* generated-document history as an approximation, not a precise
+per-equipment list, and "Related Risk Assessments" is a placeholder empty state; wiring those suites
+to Equipment directly is explicitly out of scope for Module 2 (architecture and core functionality
+only, per the module's own stated scope) and is left for a future module.
+**Impact:** Any future module that needs an equipment parent row (Calibration, PM, etc.) should add a
+new table with `equipment_id INTEGER NOT NULL REFERENCES equipment(id) ON DELETE CASCADE`, following
+the same per-domain-file convention, rather than re-deriving equipment identity from `projects`'
+free-text fields. `services/equipment_service.py::get_equipment_context_bundle()` is a data-assembly
+seam (equipment + intelligence-profile match + linked documents by role + project's validation
+history) for a future AI-generation integration to call before asking the user questions — it is not
+yet called from `services/doc_generator.py` or any prompt-building path, the same "ship the seam, wire
+it up later" pattern as the vector-RAG stubs (DEC-008).
+**Future Review Required:** Add `equipment_id` FKs to Risk/URS/Qualification/Validation Report/
+`generated_documents` once those suites are updated to collect it, so the Profile page's Validation
+History and Related Risk Assessments tabs can show precise per-equipment data instead of
+project-level approximations/placeholders. Wire `get_equipment_context_bundle()` into actual AI
+document generation once that integration is scoped as its own module.
+
+---
+
+### DEC-024 — Retire the Legacy Validation Workspace (`val_projects`) Entity and Flow
+
+**Date:** 2026-07-10, PharmaGPT v1.0 Module 3
+**Problem Statement:** While reviewing the navigation architecture ahead of Module 3 ("Project
+Workspace & Navigation Refactoring"), discovered that the sidebar's "Validation Workspace" item
+(`view-val-workspace`/`view-val-project`, `val_workspace.js`, `routes/workspace.py`) was still a
+fully live, writable feature built on a separate `val_projects` entity — not the unified `projects`
+table Module 1 ("Phase 2 Module 1") consolidated everything onto. Concretely: `POST /val-projects`
+still created new rows in `val_projects` today, meaning two parallel, independently growing "project"
+concepts coexisted — the real one (`projects`, used by Chat/Documents/Equipment) and a legacy one
+(`val_projects`, its own dashboard/grid/create-modal/tabbed detail view) — directly contradicting
+`database.py`'s own docstring claim that `val_projects` was "kept, read-only, for historical data —
+nothing writes to it anymore" (a claim that was aspirational, not actually enforced in code, until
+this decision). This is exactly the kind of duplicate-entity problem the project's anti-duplication
+convention (DEC-010/DEC-011/DEC-012 precedent, and the Equipment module's own DEC-023 "one Equipment
+architecture" mandate) exists to prevent, and it directly blocked Module 3's "One Project = One
+Workspace" goal — that goal only makes sense if there is exactly one Project Workspace, not two.
+**Options Considered:** (a) Leave the legacy Validation Workspace flow live alongside a new Project
+Workspace, deferring reconciliation; (b) retire the legacy flow now — delete `routes/workspace.py`,
+`static/js/val_workspace.js`, the `vw-*` CSS, and the `view-val-workspace`/`view-val-project`/
+`vw-create-modal` markup, remove the now-dead `create_val_project`/`get_all_val_projects`/
+`get_val_project`/`update_val_project`/`delete_val_project`/`add_val_audit_entry`/
+`get_val_audit_trail` functions from `database.py` (their only caller was the deleted route file),
+while keeping the `val_projects`/`val_audit_trail` **tables** untouched (no destructive schema
+change) so historical data and the existing `_migrate_val_projects()` one-time migration path remain
+intact and auditable.
+**Decision Taken:** Option (b), per explicit user approval before starting Module 3. The user was
+presented with this finding (surfaced during the "review the approved navigation architecture" step
+Module 3 required before coding) and explicitly chose to retire the flow rather than keep two
+parallel entities.
+**Reason:** A navigation refactor whose stated goal is "One Project = One Workspace" cannot
+coherently fold Equipment/Documents/Risk/etc. into a *single* workspace while a second, independent
+project-creation flow keeps producing rows the unified `projects` table never sees. Deleting the
+dead CRUD functions (rather than leaving them unreferenced) follows the project's existing
+"if you are certain something is unused, delete it completely" convention — their only caller no
+longer exists.
+**Benefits:** Exactly one Project entity and one Project Workspace going forward; the
+`database.py` docstring's "nothing writes to it anymore" claim about `val_projects` is now actually
+true, closing a real (if low-traffic) drift between documentation and code; removes ~550 lines of
+now-redundant JS/CSS/routes/schema-adjacent code without any data loss.
+**Trade-offs:** Anyone who had bookmarked or scripted against `/val-projects` loses that endpoint —
+acceptable since it was never documented as a stable public API and its own UI entry point
+(`view-val-workspace`) is being removed in the same change. Historical `val_projects`/
+`val_audit_trail` rows remain queryable only via direct SQL or the existing `_migrate_val_projects()`
+path, not through any HTTP route — acceptable since this was already true in practice for any
+`val_project` migrated into `projects` (the whole point of Phase 2 Module 1).
+**Impact:** No future code should reintroduce a project-like entity outside the unified `projects`
+table. The `qms_audit_trail` migration performed by `_migrate_val_projects()` remains the historical
+record of what value a given migrated project's now-removed `val_projects` row once had.
+**Future Review Required:** None currently planned — this closes the loop Phase 2 Module 1 opened.
+
+---
+
+### DEC-025 — Project Workspace: "One Project = One Workspace" (PharmaGPT v1.0 Module 3)
+
+**Date:** 2026-07-10
+**Problem Statement:** Module 3's stated objective was that all project-related activities
+(Equipment, Validation, Documents, Tasks, Approvals, History) should be accessed from within a
+single per-project workspace, rather than as separate, permanent, project-scoped sidebar nav items
+(the pattern Module 2 had just added for Equipment, alongside the pre-existing standalone Documents/
+Insights items and the now-retired Validation Workspace — see DEC-024). A partial precedent already
+existed in the codebase: the legacy `view-val-project` tabbed shell had Overview/Equipment/URS/DQ/
+FAT/SAT/IQ/OQ/PQ/Traceability/Risk Assessment/Attachments/Audit Trail tabs — but its "phase" tabs
+(URS/DQ/FAT/SAT/IQ/OQ/PQ/Traceability/Risk/Attachments) were all static placeholder text ("coming in
+v0.8 Step 2"), never implemented, and its Equipment tab only echoed the free-text
+`project.equipment_name` fields, not a real entity.
+**Options Considered:** (a) Rebuild a tabbed shell from scratch, bespoke to the Project Workspace;
+(b) build the Project Workspace on the existing, documented Enterprise Workspace shell
+(`ent-workspace`/`ent-ws-header`/`ent-ws-toolbar`/`ent-ws-body`, DEC-017), which Generate Document and
+the Equipment Profile (DEC-023) already use, adding a new generic `.ws-tabs`/`.ws-tab` tab-strip
+component to `workspace.css` for any current or future Enterprise Workspace consumer to reuse.
+**Decision Taken:** Option (b). New `view-project-workspace` (`static/js/project_workspace.js`,
+`pw`-prefixed functions per the DEC-020 collision lesson) opens directly when a project is selected
+(`projects.js::selectProject()` now calls `window.pwOpenWorkspace(project)`; the Dashboard's Recent
+Projects cards were fixed to do the same — see below). Ten tabs: **Overview** (project info, reusing
+Equipment Profile's `.eq-detail-grid`/`.eq-detail-field` presentational classes rather than
+reinventing a key-value grid), **Equipment** (the Module 2 list view's markup was moved verbatim into
+this tab's panel, keeping every element ID `equipment.js` already targets — zero changes to
+`equipment.js`'s list-rendering code were needed, only to its two navigation functions, see below),
+**Documents** (the standalone Documents view's markup moved in the same way, with the Document
+Insights panel folded in as a stats strip at the top rather than kept as a separate tab, since the
+Module 3 brief named "Documents" as one item, not two), **Risk Assessment / URS / Qualification /
+Validation Report** (entry-point cards — see caveat below), **Tasks** and **Approvals** (placeholder
+cards, matching the Equipment Profile's existing "Future Modules" placeholder pattern — no new
+schema, per the user's explicit choice when asked), and **History** (the shared `qms_audit_trail`
+table, `record_type='project'` — see below).
+**Equipment/Documents navigation follow-through:** `equipment.js::eqBackToList()` (previously
+navigated to the now-deleted standalone `view-equipment`) now calls a new
+`window.pwShowTab('equipment')` helper in `project_workspace.js` instead; `eqOpenProfile()` needed no
+change since it already hid *all* `main[id^='view-']` elements generically rather than referencing
+`view-equipment` by name. `window.__ws_setActiveView()`'s workspace-view tracking (a `Set`,
+generalized in Module 2/DEC-023 from a single `"view-gen-doc"` string) now also includes
+`"view-project-workspace"`, so opening the Equipment Profile *from inside* the Project Workspace
+transitions between two Enterprise Workspace views without flickering the global header off and back
+on (both are members of the same tracked set).
+**Project History via the shared audit trail, not a new table:** `routes/projects.py`'s
+create/update/delete now call `qms_database.add_audit_entry("project", ...)` (previously this
+logging simply didn't happen for the unified `projects` table — only the retired `val_projects` flow
+had ever called an audit-logging function, and only for itself). `routes/qms_common.py`'s
+`VALID_RECORD_TYPES`/`_GETTERS` gained a `"project": db.get_project` entry so the existing generic
+`GET /qms/<record_type>/<id>/audit-trail` endpoint (and, incidentally, its attachments/comments/
+approval siblings) now recognize `record_type='project'` — the same polymorphic-audit-trail reuse
+principle as DEC-010, just applied to a record type outside the QMS suite proper. One consequence,
+verified by test (`test_project_workspace.py::test_delete_project_logs_audit_entry_before_removal`):
+because `projects` rows are hard-deleted (`DELETE FROM projects`, unlike QMS master records' nullable
+`project_id`/`ON DELETE SET NULL` pattern), the audit-trail *rows* survive a project's deletion (no
+FK ties them together) but the generic read endpoint 404s afterward, since its `_record_exists` check
+correctly finds no such project. This was judged acceptable rather than a defect: a deleted project
+has no reachable Project Workspace UI to view History from in the first place.
+**Known limitation, deliberately not solved here:** Risk, URS, Qualification, and Validation Report
+have **no `project_id` (or `equipment_id`) column at all** — they are, and remain, fully global
+lists. The user was asked directly whether to (a) leave them unwired for a future module or (b) bring
+them into the Project Workspace tab set, and chose (b) — but with that data-model gap disclosed
+up front. The four new tabs are therefore genuine **entry points** (`window.showView('view-risk-
+dashboard'); window.initRisk();` and the equivalent for URS/`initURS`/Qualification/`initQual`/
+Report/`initReport` — reusing the pre-existing generic `window.showView()` helper and each suite's
+existing `initX()` bootstrap function, the same convention the Qualification/Report sidebar items
+already used), not project-filtered views. Navigating from Project Workspace into one of these suites
+correctly exits Enterprise Workspace mode (restoring the global header, since none of the four suite
+views are members of `__WORKSPACE_VIEW_IDS`); there is currently no "back to project" affordance
+inside those suites themselves (out of scope — modifying their own internal navigation was
+explicitly avoided to honor "never redesign completed architecture, extend it"), so returning to a
+Project Workspace today means reselecting the project from the sidebar.
+**Sidebar simplification:** Removed the "Documents & Insights" sidebar section (`nav-equipment`,
+`nav-documents`, `nav-insights` — all three now unreachable standalone, folded into the Project
+Workspace) entirely, alongside the Validation Workspace item removed by DEC-024. `dashboard.js`'s
+Recent Projects cards called `window.switchToProject(id)`, which itself called `window.selectProject`
+— a function `projects.js` never actually exposed on `window` (a pre-existing, silently-broken no-op,
+predating this module). Fixed as part of this same change (`projects.js` now sets
+`window.selectProject = selectProject`; `dashboard.js::switchToProject` now fetches the full project
+record by ID and calls it) so Dashboard-initiated navigation reaches the same Project Workspace a
+sidebar click does, rather than leaving a second, silently-dead navigation path in the code.
+**Reason:** Reusing the Enterprise Workspace shell (rather than the legacy `vw-*` one-off shell or a
+third bespoke shell) keeps exactly one "workspace chrome" component in the codebase, per DEC-017's
+own stated intent ("future modules must reuse this layout") and the adoption-contract note already
+recorded in ARCHITECTURE.md §7. Moving Equipment/Documents markup verbatim (same element IDs) instead
+of rewriting `equipment.js`/`documents.js`/`insights.js` avoided touching three already-shipped,
+already-tested modules' internal logic — consistent with "never redesign completed architecture."
+Disclosing the Risk/URS/Qualification/Report data-model gap up front, rather than silently building
+"tabs" that looked project-scoped but weren't, avoided shipping a misleading UI.
+**Benefits:** Exactly one workspace shell, one Project entity, one navigation path per feature; two
+real (if minor and pre-existing) bugs fixed as a side effect of the same investigation (the
+`val_projects` write-path drift, DEC-024; the dead `window.selectProject` Dashboard-card path); zero
+changes required to `equipment.js`/`documents.js`/`insights.js`'s own rendering logic.
+**Trade-offs:** The Risk/URS/Qualification/Validation Report tabs are entry points, not integrations
+— a real Known Issue, not silently glossed over (see PROJECT_STATUS.md). No "back to project" link
+exists inside those four suites yet.
+**Impact:** Any future module needing a full-screen, multi-tab, per-project (or per-record) view
+should adopt `.ent-workspace`/`.ws-tabs`/`.ws-tab` rather than inventing new shell/tab-strip CSS.
+Adding `project_id`/`equipment_id` FKs to Risk/URS/Qualification/Validation Report/
+`generated_documents` (already flagged once in DEC-023) would upgrade the four entry-point tabs into
+true project-filtered views without further navigation-architecture changes.
+**Future Review Required:** Add `project_id`/`equipment_id` FKs to Risk/URS/Qualification/Validation
+Report so their Project Workspace tabs can filter instead of merely linking out. Consider a
+lightweight "back to project" affordance inside those four suites once that FK work lands. Build the
+real Tasks entity and a real cross-suite Approvals aggregation as their own future modules (both are
+placeholder-only here, per explicit user choice).
+
+---
+
+### DEC-026 — Documentation Reconciliation: QMS Phase 2 (Change Control) and RC1 Were Already
+Committed (Meta-Decision, same class as DEC-014/DEC-022)
+
+**Date:** 2026-07-10, discovered while preparing the Foundation v1.0 commit
+**Problem Statement:** While preparing to commit the Foundation Refactoring (Modules 1–3) and freeze
+it as `Foundation v1.0`, `git log`/`git status` were checked to confirm exactly which files were
+part of this session's uncommitted work. This surfaced the same class of drift DEC-014 and DEC-022
+already documented twice: `PROJECT_STATUS.md`'s "Current Version" section still stated the last
+committed release was `3a94ccf` (2026-07-05) with QMS Phase 2 (Change Control) sitting uncommitted in
+the working tree — but `git log` shows two newer commits already exist: `24c808b` ("Add Quality
+Management Suite Phase 2 - Change Control", 2026-07-05) and `c995049` ("Release v1.0 RC1 - Document
+Generation and Validation Workspace Fixes", 2026-07-09, confirmed via `git show --stat` to touch
+`gen_document.js`/`doc_generator.py`/prompt files/testing docs — unrelated to this Foundation
+Refactoring). `git status`/`git diff --stat` against `HEAD` confirmed zero pending changes to any
+`qms_change_control_*` file, i.e., that work is fully committed, not "the only uncommitted work" as
+`PROJECT_STATUS.md` claimed.
+**Decision Taken:** Same resolution pattern as DEC-014/DEC-022 — trust `git log` over hand-maintained
+version prose. Updated `PROJECT_STATUS.md`'s "Current Version" section to state the last committed
+release is `c995049`; moved the QMS Phase 2 (Change Control) description from "Current Sprint" to
+"Completed Sprints" with its real commit hash.
+**Reason:** Same as DEC-014/DEC-022 — git history cannot drift the way hand-edited Markdown can, and
+this is now the *third* time this exact class of staleness has been caught in this repository (each
+time immediately before a git commit was about to be made, which is not a coincidence — that is
+precisely the moment `PROJECT_STATUS.md`'s claims get checked against reality).
+**Benefits:** `FOUNDATION_ARCHITECTURE.md` and the `Foundation v1.0` tag being created in this same
+pass describe an accurate baseline instead of inheriting stale "uncommitted work" framing for
+already-shipped functionality.
+**Trade-offs:** None beyond the ones already accepted in DEC-014/DEC-022.
+**Impact:** Reinforces the lesson from DEC-022: **before creating any commit or tag, diff
+`PROJECT_STATUS.md`'s "Current Version" claims against `git log` first.** Three occurrences of the
+same drift class strongly suggests adopting DEC-014's original recommendation (a single
+machine-readable version source) would be worthwhile — see Future Review.
+**Future Review Required:** Adopt a machine-readable `VERSION` file or `__version__` string
+referenced by all docs instead of hand-typed commit hashes/version numbers, per DEC-014's original
+(still unactioned) recommendation — now overdue given three recurrences.

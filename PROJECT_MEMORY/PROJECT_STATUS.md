@@ -2,11 +2,12 @@
 
 > Part of the permanent [PROJECT_MEMORY](CLAUDE.md) set. A new developer or a new Claude session
 > should be able to understand what PharmaGPT actually does today from this file alone, without
-> reading source code. Last synchronized against the repository: **2026-07-05** (last commit
-> `3a94ccf`, plus the uncommitted Change Control working-tree state described below). See
-> [DECISIONS.md](DECISIONS.md) DEC-022 — this file, at commit `3a94ccf`, still described QMS Phase 1
-> and the "Executive Office"/v3.0 redesign as uncommitted working-tree state when they had, in fact,
-> already been committed (`6ffaa54`, `3a94ccf`); that drift is reconciled as of this sync.
+> reading source code. Last synchronized against the repository: **2026-07-10** (last commit
+> `c995049`, plus the Foundation Refactoring — Modules 1–3 — about to be committed and tagged
+> `Foundation v1.0`, described below). See [DECISIONS.md](DECISIONS.md) DEC-022 and DEC-026 — this
+> file has now drifted from `git log` three times (QMS Phase 1/Executive Office redesign; then QMS
+> Phase 2 Change Control/RC1; reconciled each time) — see DEC-026's Future Review for the proposed
+> fix (a machine-readable version source).
 
 ---
 
@@ -23,20 +24,21 @@ Deviation Management, CAPA).
 
 ## Current Version
 
-**Last committed release: commit `3a94ccf`, 2026-07-05, "PharmaGPT v3.0 Premium Enterprise UI
-completed."** That commit (and `6ffaa54`, 2026-07-04, "Release v0.9.9 - QMS Phase 2" — the commit
-message says "Phase 2" but its actual content is QMS Phase 1: Document Control, Deviation
-Management, CAPA) already include everything this document previously described as "uncommitted
-working-tree state": QMS Phase 1, the Enterprise Workspace layout, the "Executive Office"/v3.0
-Design System redesign, and the Pre-Deployment UI Audit. See [DECISIONS.md](DECISIONS.md) DEC-022
-for the reconciliation and DEC-014 for the original version-numbering discrepancy pattern this
-repeats (commit messages/version strings drifting from actual content/commit state).
+**Last committed release: commit `c995049`, 2026-07-09, "Release v1.0 RC1 - Document Generation and
+Validation Workspace Fixes."** `git log` shows this supersedes `3a94ccf` (2026-07-05) via two
+commits this document had, until now, still described as uncommitted: `24c808b` ("Add Quality
+Management Suite Phase 2 - Change Control", 2026-07-05) and `c995049` itself (Document Generation/
+`gen_document.js` improvements, testing docs — unrelated to Change Control despite the commit
+message grouping them). See [DECISIONS.md](DECISIONS.md) DEC-026 for this reconciliation (the third
+occurrence of this drift class — see DEC-014, DEC-022).
 
-On top of `3a94ccf`, the working tree now contains **Quality Management Suite Phase 2 (Change
-Control)** (6 new files, 16 modified files — all additive, no completed module's business logic
-touched — 16 new tests, browser-verified against the live Gemini API) — **not yet committed to
-git**. This is the only uncommitted work as of this sync. See [ARCHITECTURE.md](ARCHITECTURE.md)
-§12 and [DECISIONS.md](DECISIONS.md) DEC-021 for the Change Control architecture.
+**On top of `c995049`, the working tree contains the Foundation Refactoring — PharmaGPT v1.0
+Modules 1–3** (Project/Validation-Workspace merge, Equipment as a first-class entity, Project
+Workspace navigation refactoring) — functionally complete, browser-verified, 148 tests passing,
+about to be committed as a single milestone and tagged **`Foundation v1.0`**. See
+[FOUNDATION_ARCHITECTURE.md](../FOUNDATION_ARCHITECTURE.md) for the frozen capstone architecture and
+[DECISIONS.md](DECISIONS.md) DEC-023/DEC-024/DEC-025 for the three modules' individual rationale.
+Module 4 (AI Intelligence Integration) is next — see Upcoming Sprint.
 
 ---
 
@@ -124,9 +126,15 @@ replaced).
 
 - Framework: pytest 8.3.4, config in `pytest.ini` (`testpaths = tests`, `slow` marker excluded by
   default for 1000-page stress tests).
-- **101 tests total** across the committed Document Intelligence Engine suite (~41 tests) and the
+- **148 tests total** across the committed Document Intelligence Engine suite (~41 tests), the
   uncommitted QMS suite (60 tests: 42 from Phase 1 Document Control/Deviation/CAPA + 16 new from
-  Phase 2 Change Control).
+  Phase 2 Change Control), the uncommitted Module 1 Validation Workspace/`projects` merge
+  (`test_projects_merge.py`), the Module 2 Equipment suite (33 tests: `test_equipment_database.py` +
+  `test_equipment_routes.py`), and the new Module 3 suite (6 tests: `test_project_workspace.py` —
+  project audit-trail logging, the `project` QMS record type, confirming `/val-projects` is gone).
+  One pre-existing timing-sensitive test (`test_document_processor.py::test_small_pdf`, an absolute
+  wall-clock assertion) is occasionally flaky under system load — confirmed unrelated to Module 3 by
+  re-running it in isolation, where it passes.
 - **Known collection issue:** running `pytest --collect-only` in a fresh environment currently
   fails to collect 4 modules (`test_document_processor.py`, `test_job_runner.py`,
   `test_pdf_engines.py`, `test_pipeline.py`) due to `ModuleNotFoundError` (`docx`, `dotenv`) — this
@@ -157,32 +165,52 @@ between `send_file` and `os.remove()` (fixed test-side).
 
 ## Current Sprint
 
-**Quality Management Suite — Phase 2: Change Control** (uncommitted working-tree code, functionally
-complete, browser-verified against the live Gemini API): full GMP change-control lifecycle covering
-Equipment/Facility/HVAC/Water System/Compressed Air/Steam/Electrical/Software/PLC/SCADA/MES/ERP/
-Barcode System/Vision System/BMS/LIMS/Validation/SOP/Specification/Packaging/Warehouse/Quality/
-Engineering/Production/Utilities/IT changes; Major/Minor/Critical/Temporary/Permanent/Emergency
-types; a 13-stage workflow (Draft → Submitted → Initial Review → Impact Assessment → Risk
-Assessment → Department Review → QA Review → Approval → Implementation → Verification →
-Effectiveness Review → Closed) with rejection supported at every stage back to Draft. Nine optional
-AI features (impact assessment, implementation plan/checklist, risk summary, rollback plan,
-regulatory impact, change justification, executive summary, verification summary, effectiveness
-review), all routed through the existing shared `services/qms_shared.py::call_gemini()` — no new
-AI-calling convention. Built entirely on the Phase 1 polymorphic shared tables
-(`qms_attachments`/`qms_comments`/`qms_audit_trail`/`qms_approvals`, `record_type='change_control'`)
-— no new shared table, no duplicated attachment/comment/audit/approval logic. See
-[ARCHITECTURE.md](ARCHITECTURE.md) §12 and [DECISIONS.md](DECISIONS.md) DEC-021 for full detail.
-Linking to an existing Deviation or CAPA is supported (one-directional; a reverse-lookup helper
-exists for a future "Related Change Controls" tab inside those modules' own detail views, not built
-here — see Known Issues). 16 new automated tests appended to the existing `test_qms_database.py`/
-`test_qms_routes.py`; full 101-test suite passes with zero regressions. Live-browser verification
-drove the complete lifecycle end-to-end including two AI features succeeding against the real
-Gemini API (one hit a transient upstream `503`, confirmed external, not a defect). Next action for
-this sprint is a git commit + version bump, not further feature work.
+**Foundation Refactoring (PharmaGPT v1.0 Modules 1–3) — approved and frozen, being committed as
+`Foundation v1.0`.** The three sub-sprints below (Module 3, Module 2, and the underlying Module 1
+merge) are being committed together as the first architectural milestone; per instruction, no
+further navigation or structural refactoring should follow unless a critical defect is found. Module
+4 (AI Intelligence Integration) is next — see Upcoming Sprint.
+
+**PharmaGPT v1.0 Module 3 — Project Workspace & Navigation Refactoring** (functionally complete,
+browser-verified end-to-end, full 148-test regression suite passing):
+establishes "One Project = One Workspace" — Equipment, Documents (+ Insights), Risk Assessment, URS,
+Qualification, Validation Report, Tasks, Approvals, and History are all reached from a single
+unified Project Workspace (`view-project-workspace`, `project_workspace.js`, built on the Enterprise
+Workspace shell) opened by selecting a project, replacing the standalone Equipment/Documents/
+Insights sidebar items Module 2 had just added. Retired the legacy Validation Workspace entirely
+(`routes/workspace.py`, `val_workspace.js`, `vw-*` CSS/markup, and the dead `val_projects` CRUD in
+`database.py`) after discovering — during the navigation-architecture review required before this
+module began — that it was still a fully live, writable flow on a separate `val_projects` entity,
+contradicting the unified `projects` table from Module 1. Risk/URS/Qualification/Validation Report
+got their first live entry points (as Project Workspace tabs) since those suites' sidebar sections
+were added, though not yet project-filtered (see Known Issues). Also fixed two small pre-existing
+bugs found along the way: `window.selectProject` was never exposed on `window`, silently breaking
+the Dashboard's "Recent Projects" card navigation. See [ARCHITECTURE.md](ARCHITECTURE.md) and
+[DECISIONS.md](DECISIONS.md) DEC-024 (retiring `val_projects`)/DEC-025 (Project Workspace
+architecture) for full detail. This completes the Foundation Refactoring (Modules 1–3).
+
+**PharmaGPT v1.0 Module 2 — Equipment as a First-Class Entity** (functionally complete,
+browser-verified end-to-end, full 142-test regression suite passing at the time):
+promotes Equipment from free-text project fields + a static per-type reference catalog into a real
+database entity owned by a Project — `equipment` + `equipment_documents` tables
+(`pharmagpt/equipment_database.py`), a full REST API (`routes/equipment.py`), and a project-scoped
+list view + Enterprise-Workspace-based Equipment Profile page (`equipment.js`/`equipment.css`) with
+Overview/Specifications/Documentation/Qualification/Validation History/Related Documents/Related
+Risk Assessments/Future Modules (placeholder) tabs. Documents are referenced from the Knowledge Base
+or a Project's own Documents, never duplicated. `projects.equipment_name/manufacturer/model/
+equipment_id` (free text) and `pharmagpt/equipment/` (the static Intelligence Engine profile
+catalog) are both left untouched — this is purely additive. A `POST /projects/<id>/equipment/
+import-legacy` endpoint lets an existing project promote its legacy free-text info into a real
+Equipment record in one click. An AI-context-bundle endpoint
+(`services/equipment_service.py::get_equipment_context_bundle()`) is architecture-only — assembled
+but not yet wired into actual document generation. See [ARCHITECTURE.md](ARCHITECTURE.md) and
+[DECISIONS.md](DECISIONS.md) DEC-023 for full detail. Follows Module 1 (the "Phase 2 Module 1"
+Validation Workspace/`projects` merge — see `routes/projects.py`/`test_projects_merge.py`).
 
 All other work previously tracked here (Pre-Deployment UI Audit, "Executive Office"/v3.0 Design
-System Redesign, Enterprise Workspace layout, QMS Phase 1) is now committed — see Completed Sprints
-below for each, and DEC-022 for how this file's earlier "uncommitted" framing was reconciled.
+System Redesign, Enterprise Workspace layout, QMS Phase 1, QMS Phase 2 Change Control, RC1 document-
+generation fixes) is now committed — see Completed Sprints below for each, and DEC-022/DEC-026 for
+how this file's earlier "uncommitted" framing was reconciled each time.
 
 ---
 
@@ -210,14 +238,21 @@ below for each, and DEC-022 for how this file's earlier "uncommitted" framing wa
 | 2026-07-05 | "Premium Enterprise" Palette v3.0 + Lucide Icons | Exact business-attire hex palette refinement, sidebar Regulatory Scope section removed, Unicode emoji → Lucide icon library (see DEC-019) |
 | 2026-07-05 | Pre-Deployment UI Audit | Completed the Lucide icon sweep (0 emoji remain codebase-wide); fixed a cross-suite JS function-name collision (`risk.js`/`urs.js`), a `.urs-empty` layout bug, and the Validation Report suite's dark-theme/width leftovers (see DEC-020) |
 | 2026-07-05, commit `3a94ccf` | "PharmaGPT v3.0 Premium Enterprise UI completed" | Single commit bundling the three rows immediately above (Executive Office redesign, Premium Enterprise v3.0/Lucide icons, Pre-Deployment UI Audit) |
+| 2026-07-05, commit `24c808b` | Quality Management Suite — Phase 2: Change Control | 26 change categories, 6 change types, 13-stage workflow, 9 optional AI features, built on the Phase 1 polymorphic shared tables (`record_type='change_control'`); 16 tests. See [DECISIONS.md](DECISIONS.md) DEC-021/DEC-026 |
+| 2026-07-09, commit `c995049` | "Release v1.0 RC1 - Document Generation and Validation Workspace Fixes" | Generate Document (`gen_document.js`/`doc_generator.py`) improvements, new prompt modules, testing/validation docs. Unrelated to Change Control despite the commit grouping — see DEC-026 |
+| 2026-07-10 | **Foundation Refactoring — PharmaGPT v1.0 Modules 1–3, tagged `Foundation v1.0`** | Module 1: unified `projects` table (Validation Workspace fields merged in). Module 2: Equipment as a first-class entity (DEC-023). Module 3: Project Workspace navigation refactoring, legacy Validation Workspace retired (DEC-024/DEC-025). See [FOUNDATION_ARCHITECTURE.md](../FOUNDATION_ARCHITECTURE.md) |
 
 ---
 
 ## Upcoming Sprint
 
-Commit and version the Quality Management Suite Phase 2 (Change Control) work (see Current Sprint
-above), then proceed per the Roadmap below (Non-Conformance / OOS-OOT to complete QMS Phase 2, or
-QMS Phase 3).
+**PharmaGPT v1.0 Module 4 — AI Intelligence Integration** (per explicit instruction: focuses
+exclusively on AI integration; no further navigation or structural refactoring unless a critical
+defect is discovered). Candidate work already seeded as architecture-only stubs by prior modules:
+`services/equipment_service.py::get_equipment_context_bundle()` (Module 2, DEC-023) and the
+long-standing vector-RAG stubs in `document_search.py` (DEC-008) are the most likely integration
+points. Then proceed per the Roadmap below (QMS Non-Conformance/OOS-OOT to complete Phase 2, or
+Phase 3).
 
 ---
 
@@ -226,7 +261,8 @@ QMS Phase 3).
 | Target | Theme | Key items |
 |---|---|---|
 | v0.8 (remainder) | Validation Workspace & Signatures | Full Validation Workspace UI, electronic signatures, 21 CFR Part 11 audit trail (`audit_log`, `signatures` tables), Vector RAG upgrade (Gemini embeddings + vector store), dashboard enhancement |
-| QMS Phase 2 | Change Control (done, uncommitted — see Current Sprint), Non-Conformance, OOS/OOT | Reuse the existing polymorphic shared tables (attachments/comments/audit/approvals) |
+| QMS Phase 2 | Change Control (done, committed `24c808b`), Non-Conformance, OOS/OOT | Reuse the existing polymorphic shared tables (attachments/comments/audit/approvals) |
+| PharmaGPT v1.0 Module 4 | AI Intelligence Integration (next — see Upcoming Sprint) | Wire the Equipment AI-context bundle (DEC-023) and/or the vector-RAG stubs (DEC-008) into real generation |
 | QMS Phase 3 | Audit Management, Supplier Quality, Training Management, Complaint Management | Same shared-table reuse pattern |
 | v0.9 | Multi-User & RBAC | User accounts, roles, project-level permissions, `users`/`project_members` tables, admin panel, activity notifications |
 | v1.0 | Production Hardening | Server-side PDF export, SOP/MVP template library, Audit Prep AI assistant, Docker packaging, PostgreSQL migration, rate limiting, HTTPS, security headers |
@@ -238,6 +274,32 @@ the current, authoritative roadmap. See [DECISIONS.md](DECISIONS.md) DEC-014.
 ---
 
 ## Completed Modules
+
+### Project Workspace (PharmaGPT v1.0 Module 3)
+Live and wired. "One Project = One Workspace" — Equipment, Documents (+ Insights), Risk Assessment,
+URS, Qualification, Validation Report, Tasks (placeholder), Approvals (placeholder), and History are
+all reached from a single unified Project Workspace (`view-project-workspace`,
+`project_workspace.js`) opened by selecting a project, built on the Enterprise Workspace shell
+(DEC-017). Replaces the standalone Equipment/Documents/Insights sidebar items and the retired legacy
+Validation Workspace (see below). Risk/URS/Qualification/Validation Report tabs are live entry
+points, not yet project-filtered (see Known Issues). See [ARCHITECTURE.md](ARCHITECTURE.md) and
+[DECISIONS.md](DECISIONS.md) DEC-025.
+
+### Equipment (PharmaGPT v1.0 Module 2)
+Live and wired — now embedded as a tab inside the Project Workspace (Module 3) rather than a
+standalone sidebar item. Equipment as a first-class entity owned by a Project — `equipment` +
+`equipment_documents` tables, full CRUD/search/document-link REST API, and an Enterprise-Workspace-
+based Equipment Profile page (Overview/Specifications/Documentation/Qualification/Validation
+History/Related Documents/Related Risk Assessments/Future Modules tabs), reachable from the
+Equipment tab. Architecture-only for now — Calibration/Preventive Maintenance/Breakdown History/
+Spare Parts/Vendor Qualification/Environmental Monitoring/Utilities/Asset Management are not built,
+only prepared for (future tables would FK to `equipment.id`). See
+[ARCHITECTURE.md](ARCHITECTURE.md) and [DECISIONS.md](DECISIONS.md) DEC-023.
+
+### Validation Workspace (v0.8) — RETIRED
+Removed entirely by Module 3 (DEC-024) — was found to still be a live, writable flow on a separate
+`val_projects` entity, contradicting the unified `projects` table from Module 1. `val_projects`/
+`val_audit_trail` tables remain as read-only history; no route or UI reaches them anymore.
 
 ### Validation Management Suite
 - **Validation Document Generator (wizard, v0.6)** — live, wired into the UI. 11 doc types
@@ -326,6 +388,16 @@ See Quality Management Suite above.
 | Supplier Quality | QMS Phase 3 | Not started |
 | Training | QMS Phase 3 | Not started |
 | Complaint Management | QMS Phase 3 | Not started |
+| Equipment as a First-Class Entity | PharmaGPT v1.0 Module 2 | **Done** (uncommitted — see Completed Modules) |
+| Project Workspace & Navigation Refactoring | PharmaGPT v1.0 Module 3 | **Done** (uncommitted — see Current Sprint / Completed Modules). Completes the Foundation Refactoring (Modules 1–3). |
+| Calibration | Equipment sub-module (future) | Not started — architecture prepared (FK to `equipment.id`) |
+| Preventive Maintenance | Equipment sub-module (future) | Not started — architecture prepared |
+| Breakdown History | Equipment sub-module (future) | Not started — architecture prepared |
+| Spare Parts | Equipment sub-module (future) | Not started — architecture prepared |
+| Vendor Qualification | Equipment sub-module (future) | Not started — architecture prepared |
+| Environmental Monitoring | Equipment sub-module (future) | Not started — architecture prepared |
+| Utilities | Equipment sub-module (future) | Not started — architecture prepared |
+| Asset Management | Equipment sub-module (future) | Not started — architecture prepared |
 
 ### Manufacturing Excellence Suite
 | Module | Status |
@@ -361,6 +433,20 @@ From the repository's own code review (`docs/CODE_REVIEW.md`, scope v0.7, findin
   (`qms_change_control_database.get_change_controls_for_record()`) is queryable, but
   `qms_deviations.js`/`qms_capa.js` were not modified to surface it — deferred per the "don't modify
   completed modules unless integration requires it" instruction. See DECISIONS.md DEC-021.
+- **Risk Assessment/URS/Qualification/Validation Report Project Workspace tabs are live entry
+  points, not project-filtered views (introduced by Module 3, 2026-07-10):** those four tables have
+  no `project_id` (or `equipment_id`) column at all — clicking through from the Project Workspace
+  opens the suite's existing global dashboard, unfiltered, with no "back to project" link inside the
+  suite itself (returning today means reselecting the project from the sidebar). See
+  [DECISIONS.md](DECISIONS.md) DEC-025 Future Review — fix by adding `project_id`/`equipment_id` FKs
+  to those tables.
+- **Equipment Profile "Validation History" and "Related Risk Assessments" are approximations/
+  placeholders (introduced by Module 2, 2026-07-10):** Risk/URS/Qualification/Validation Report and
+  `generated_documents` do not yet carry an `equipment_id` FK, so the Profile page's Validation
+  History tab shows the *project's* generated-document history (not filtered to this specific
+  Equipment record) and Related Risk Assessments is an empty-state placeholder. See
+  [DECISIONS.md](DECISIONS.md) DEC-023 Future Review — fix by adding `equipment_id` to those tables
+  once their wizards are updated to collect it.
 - **Visual parity gap (introduced 2026-07-05):** `docx_generator.py`/`doc_exporter.py` still emit
   the pre-redesign navy heading/table styling in exported `.docx` files — the on-screen "Executive
   Office" redesign (DEC-018) deliberately did not touch Python-generated document styling (UI-only

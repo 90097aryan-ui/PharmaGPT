@@ -189,19 +189,18 @@
   }
 
   // ── Navigate to project from Recent Projects card ────────────────────────────
+  // PharmaGPT v1.0 Module 3: opens the same unified Project Workspace a
+  // sidebar click would (window.selectProject fetches nothing itself, so we
+  // fetch the full project record by ID first — the Dashboard card only
+  // carries the ID).
 
-  window.switchToProject = function (projectId) {
-    // Select the project in the sidebar and switch to Chat view
-    if (window.selectProject) {
-      window.selectProject(projectId);
-    }
-    // Switch to chat view
-    document.querySelectorAll(".sidebar-item[data-view]").forEach(n => n.classList.remove("active"));
-    const chatNav = document.getElementById("nav-chat");
-    if (chatNav) chatNav.classList.add("active");
-    document.querySelectorAll("main[id^='view-']").forEach(v => {
-      v.style.display = v.id === "view-chat" ? "flex" : "none";
-    });
+  window.switchToProject = async function (projectId) {
+    try {
+      const res = await fetch(`/projects/${projectId}`);
+      if (!res.ok) return;
+      const project = await res.json();
+      if (window.selectProject) window.selectProject(project);
+    } catch { /* project fetch failed — stay on Dashboard */ }
   };
 
   // ── Load ─────────────────────────────────────────────────────────────────────

@@ -13,11 +13,21 @@ document_text       : Extracted plain text for each uploaded document. Used by
                       embeddings in v0.8.
 generated_documents : AI-generated validation documents saved to a project.
                       Stored as markdown; exported to DOCX/PDF on demand.
-val_projects        : Validation Workspace projects (v0.8) with full equipment,
-                      personnel, schedule, and risk-tier metadata.
-val_audit_trail     : Immutable log of every action within a validation project.
+val_projects        : SUPERSEDED (Phase 2 Module 1) — Validation Workspace projects
+                      (v0.8). Its owner/approver/target_date/risk_category/status/
+                      model/location/protocol_number/report_number fields now live
+                      directly on `projects` (see `_migrate_val_projects()`). This
+                      table is kept, read-only, for historical data — nothing
+                      writes to it anymore. There is now only one Project entity.
+val_audit_trail     : SUPERSEDED (Phase 2 Module 1) — superseded by `qms_audit_trail`
+                      with record_type='project'. Kept, read-only, for history.
 kb_documents        : Global Knowledge Base — permanent document library not
                       tied to any project. Supports folder, tag, and full-text search.
+equipment           : PharmaGPT v1.0 Module 2 — Equipment as a first-class entity,
+                      owned by a Project. See equipment_database.py.
+equipment_documents : Module 2 — polymorphic links from an Equipment record to
+                      existing kb_documents/documents rows (no file duplication).
+                      See equipment_database.py.
 
 All tables are created automatically on first startup via init_db().
 Database file: pharmagpt/pharmagpt.db
@@ -258,19 +268,111 @@ def init_db() -> None:
     conn.executescript(QMS_SCHEMA)
     conn.commit()
 
+    # ── Equipment entity (PharmaGPT v1.0 Module 2) ─────────────────────────────
+    from pharmagpt.equipment_database import EQUIPMENT_SCHEMA
+    conn.executescript(EQUIPMENT_SCHEMA)
+    conn.commit()
+
+    # ── Phase 2 Module 1 — merge Validation Workspace fields into projects ────
+    # Additive columns only; val_projects/val_audit_trail are never dropped or
+    # written to going forward, only read once by _migrate_val_projects().
+    for _col, _ddl in (
+        ("owner",                        "TEXT DEFAULT ''"),
+        ("approver",                      "TEXT DEFAULT ''"),
+        ("target_date",                   "TEXT DEFAULT NULL"),
+        ("risk_category",                 "TEXT DEFAULT ''"),
+        ("status",                        "TEXT DEFAULT 'In Progress'"),
+        ("model",                         "TEXT DEFAULT ''"),
+        ("location",                      "TEXT DEFAULT ''"),
+        ("protocol_number",               "TEXT DEFAULT ''"),
+        ("report_number",                 "TEXT DEFAULT ''"),
+        ("equipment_id",                  "TEXT DEFAULT ''"),
+        ("migrated_from_val_project_id",  "INTEGER DEFAULT NULL"),
+    ):
+        _add_column_if_missing(conn, "projects", _col, _ddl)
+    conn.commit()
+
+    _migrate_val_projects(conn)
+
     conn.close()
+
+
+def _migrate_val_projects(conn: sqlite3.Connection) -> None:
+    """
+    One-time, idempotent copy of legacy Validation Workspace rows into the
+    unified `projects` table (Phase 2 Module 1: there is now only one Project
+    entity — see PROJECT_MEMORY/DECISIONS.md). Guarded by
+    `projects.migrated_from_val_project_id` so a val_project already copied is
+    never re-copied. `val_projects`/`val_audit_trail` are left physically
+    unchanged — no destructive migration, no data loss if this needs to be
+    re-run or audited later.
+    """
+    already_migrated = {
+        row["migrated_from_val_project_id"]
+        for row in conn.execute(
+            "SELECT migrated_from_val_project_id FROM projects "
+            "WHERE migrated_from_val_project_id IS NOT NULL"
+        ).fetchall()
+    }
+    for vp in conn.execute("SELECT * FROM val_projects").fetchall():
+        if vp["id"] in already_migrated:
+            continue
+        cur = conn.execute(
+            """INSERT INTO projects
+               (name, equipment_name, manufacturer, department, validation_type,
+                owner, approver, target_date, risk_category, status, model,
+                location, protocol_number, report_number, equipment_id,
+                migrated_from_val_project_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                vp["name"], vp["equipment_name"], vp["manufacturer"], vp["department"],
+                vp["validation_type"], vp["owner"], vp["approver"], vp["target_date"],
+                vp["risk_category"], vp["status"], vp["model"], vp["location"],
+                vp["protocol_number"], vp["report_number"], vp["equipment_id"], vp["id"],
+            ),
+        )
+        new_project_id = cur.lastrowid
+        for entry in conn.execute(
+            "SELECT * FROM val_audit_trail WHERE val_proj_id = ? ORDER BY created_at ASC",
+            (vp["id"],),
+        ).fetchall():
+            conn.execute(
+                """INSERT INTO qms_audit_trail
+                   (record_type, record_id, action, detail, performed_by, created_at)
+                   VALUES ('project', ?, ?, ?, '', ?)""",
+                (new_project_id, entry["action"], entry["user_note"], entry["created_at"]),
+            )
+    conn.commit()
 
 
 # ── Project CRUD ──────────────────────────────────────────────────────────────
 
 def create_project(name: str, equipment_name: str, manufacturer: str,
-                   department: str, validation_type: str) -> dict:
-    """Insert a new project row and return the full project dict."""
+                   department: str, validation_type: str, *,
+                   owner: str = "", approver: str = "", target_date: str | None = None,
+                   risk_category: str = "", status: str = "In Progress",
+                   model: str = "", location: str = "",
+                   protocol_number: str = "", report_number: str = "") -> dict:
+    """
+    Insert a new project row and return the full project dict.
+
+    The keyword-only fields (owner, approver, target_date, risk_category,
+    status, model, location, protocol_number, report_number) were formerly
+    exclusive to the separate Validation Workspace project entity
+    (val_projects) — Phase 2 Module 1 merged that entity into this one, so
+    every project can now carry them. All are optional so existing callers
+    that only pass the original five positional fields keep working.
+    """
     conn = get_connection()
     cur = conn.execute(
-        """INSERT INTO projects (name, equipment_name, manufacturer, department, validation_type)
-           VALUES (?, ?, ?, ?, ?)""",
-        (name, equipment_name, manufacturer, department, validation_type),
+        """INSERT INTO projects
+           (name, equipment_name, manufacturer, department, validation_type,
+            owner, approver, target_date, risk_category, status, model,
+            location, protocol_number, report_number)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (name, equipment_name, manufacturer, department, validation_type,
+         owner, approver, target_date, risk_category, status, model,
+         location, protocol_number, report_number),
     )
     conn.commit()
     project = dict(conn.execute(
@@ -296,6 +398,45 @@ def get_project(project_id: int) -> dict | None:
     row = conn.execute(
         "SELECT * FROM projects WHERE id = ?", (project_id,)
     ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def update_project(project_id: int, data: dict) -> dict | None:
+    """
+    Update a project's mutable fields, including the Validation-Workspace
+    fields merged in by Phase 2 Module 1 (owner/approver/target_date/
+    risk_category/status/model/location/protocol_number/report_number).
+    Replaces the old, now-retired PUT /val-projects/<id> (workspace.py).
+    """
+    conn = get_connection()
+    existing = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+    if not existing:
+        conn.close()
+        return None
+    existing = dict(existing)
+
+    def _field(key: str, strip: bool = True) -> object:
+        val = data.get(key, existing.get(key) or "")
+        return val.strip() if strip and isinstance(val, str) else val
+
+    conn.execute(
+        """UPDATE projects SET
+           name=?, equipment_name=?, manufacturer=?, department=?, validation_type=?,
+           owner=?, approver=?, target_date=?, risk_category=?, status=?, model=?,
+           location=?, protocol_number=?, report_number=?
+           WHERE id=?""",
+        (
+            _field("name"), _field("equipment_name"), _field("manufacturer"),
+            _field("department"), _field("validation_type"), _field("owner"),
+            _field("approver"), data.get("target_date", existing.get("target_date")) or None,
+            _field("risk_category"), _field("status") or "In Progress",
+            _field("model"), _field("location"), _field("protocol_number"),
+            _field("report_number"), project_id,
+        ),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
 
@@ -613,131 +754,14 @@ def delete_generated_document(doc_id: int) -> None:
     conn.close()
 
 
-# ── Validation Workspace CRUD (v0.8) ─────────────────────────────────────────
-
-def create_val_project(data: dict) -> dict:
-    """Insert a new validation project and return the full row."""
-    conn = get_connection()
-    cur = conn.execute(
-        """INSERT INTO val_projects
-           (name, equipment_name, equipment_id, department, manufacturer,
-            model, location, validation_type, protocol_number, report_number,
-            owner, approver, target_date, risk_category)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (
-            data.get("name", "").strip(),
-            data.get("equipment_name", "").strip(),
-            data.get("equipment_id", "").strip(),
-            data.get("department", "").strip(),
-            data.get("manufacturer", "").strip(),
-            data.get("model", "").strip(),
-            data.get("location", "").strip(),
-            data.get("validation_type", "").strip(),
-            data.get("protocol_number", "").strip(),
-            data.get("report_number", "").strip(),
-            data.get("owner", "").strip(),
-            data.get("approver", "").strip(),
-            data.get("target_date") or None,
-            data.get("risk_category", "").strip(),
-        ),
-    )
-    conn.commit()
-    row = dict(conn.execute(
-        "SELECT * FROM val_projects WHERE id = ?", (cur.lastrowid,)
-    ).fetchone())
-    conn.close()
-    return row
-
-
-def get_all_val_projects() -> list[dict]:
-    """Return all validation projects, newest first."""
-    conn = get_connection()
-    rows = conn.execute(
-        "SELECT * FROM val_projects ORDER BY created_at DESC"
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-def get_val_project(val_proj_id: int) -> dict | None:
-    """Return a single validation project, or None."""
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT * FROM val_projects WHERE id = ?", (val_proj_id,)
-    ).fetchone()
-    conn.close()
-    return dict(row) if row else None
-
-
-def update_val_project(val_proj_id: int, data: dict) -> dict | None:
-    """Update mutable fields on a validation project."""
-    conn = get_connection()
-    conn.execute(
-        """UPDATE val_projects SET
-           name=?, equipment_name=?, equipment_id=?, department=?,
-           manufacturer=?, model=?, location=?, validation_type=?,
-           protocol_number=?, report_number=?, owner=?, approver=?,
-           target_date=?, risk_category=?, status=?
-           WHERE id=?""",
-        (
-            data.get("name", "").strip(),
-            data.get("equipment_name", "").strip(),
-            data.get("equipment_id", "").strip(),
-            data.get("department", "").strip(),
-            data.get("manufacturer", "").strip(),
-            data.get("model", "").strip(),
-            data.get("location", "").strip(),
-            data.get("validation_type", "").strip(),
-            data.get("protocol_number", "").strip(),
-            data.get("report_number", "").strip(),
-            data.get("owner", "").strip(),
-            data.get("approver", "").strip(),
-            data.get("target_date") or None,
-            data.get("risk_category", "").strip(),
-            data.get("status", "In Progress").strip(),
-            val_proj_id,
-        ),
-    )
-    conn.commit()
-    row = conn.execute(
-        "SELECT * FROM val_projects WHERE id = ?", (val_proj_id,)
-    ).fetchone()
-    conn.close()
-    return dict(row) if row else None
-
-
-def delete_val_project(val_proj_id: int) -> None:
-    """Delete a validation project (audit trail cascades)."""
-    conn = get_connection()
-    conn.execute("DELETE FROM val_projects WHERE id = ?", (val_proj_id,))
-    conn.commit()
-    conn.close()
-
-
-def add_val_audit_entry(val_proj_id: int, action: str, user_note: str = "") -> dict:
-    """Append an audit trail entry and return the inserted row."""
-    conn = get_connection()
-    cur = conn.execute(
-        "INSERT INTO val_audit_trail (val_proj_id, action, user_note) VALUES (?,?,?)",
-        (val_proj_id, action, user_note),
-    )
-    conn.commit()
-    row = dict(conn.execute(
-        "SELECT * FROM val_audit_trail WHERE id = ?", (cur.lastrowid,)
-    ).fetchone())
-    conn.close()
-    return row
-
-
-def get_val_audit_trail(val_proj_id: int) -> list[dict]:
-    """Return all audit entries for a validation project, oldest first."""
-    conn = get_connection()
-    rows = conn.execute(
-        "SELECT * FROM val_audit_trail WHERE val_proj_id = ? ORDER BY created_at ASC",
-        (val_proj_id,),
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+# ── Validation Workspace CRUD (v0.8) — RETIRED (PharmaGPT v1.0 Module 3) ─────
+# create_val_project/get_all_val_projects/get_val_project/update_val_project/
+# delete_val_project/add_val_audit_entry/get_val_audit_trail were removed —
+# their only caller (routes/workspace.py) was deleted when the legacy
+# Validation Workspace was retired in favor of the unified Project Workspace.
+# val_projects/val_audit_trail remain as read-only historical tables (see
+# _migrate_val_projects() above); nothing writes to them anymore. See
+# PROJECT_MEMORY/DECISIONS.md DEC-024.
 
 
 # ── Knowledge Base CRUD ───────────────────────────────────────────────────────
@@ -914,7 +938,9 @@ def get_dashboard_stats() -> dict:
     counts = conn.execute("""
         SELECT
             (SELECT COUNT(*) FROM projects)                                   AS projects,
-            (SELECT COUNT(*) FROM val_projects)                               AS val_projects,
+            (SELECT COUNT(*) FROM projects
+               WHERE target_date IS NOT NULL
+                  OR migrated_from_val_project_id IS NOT NULL)                AS val_projects,
             (SELECT COUNT(*) FROM kb_documents)                               AS kb_documents,
             (SELECT COUNT(*) FROM generated_documents)                        AS protocols_generated,
             (SELECT COUNT(*) FROM qms_capas WHERE status NOT IN ('Closed','Rejected'))      AS pending_capas,
@@ -936,8 +962,9 @@ def get_dashboard_stats() -> dict:
     ).fetchall()
 
     recent_activity = conn.execute(
-        """SELECT 'audit'    AS type, vat.action  AS title, vp.name  AS context, vat.created_at
-           FROM val_audit_trail vat JOIN val_projects vp ON vp.id = vat.val_proj_id
+        """SELECT 'audit'    AS type, qat.action  AS title, p.name   AS context, qat.created_at
+           FROM qms_audit_trail qat JOIN projects p ON p.id = qat.record_id
+           WHERE qat.record_type = 'project'
            UNION ALL
            SELECT 'document' AS type, d.original_name AS title, p.name AS context, d.upload_date AS created_at
            FROM documents d JOIN projects p ON p.id = d.project_id
@@ -959,7 +986,7 @@ def get_dashboard_stats() -> dict:
 
     upcoming_val = conn.execute(
         """SELECT name, equipment_name, target_date, status, validation_type
-           FROM val_projects
+           FROM projects
            WHERE target_date IS NOT NULL AND target_date >= date('now') AND status != 'Completed'
            ORDER BY target_date ASC LIMIT 5"""
     ).fetchall()
@@ -970,7 +997,7 @@ def get_dashboard_stats() -> dict:
             (SELECT COUNT(*) FROM document_text WHERE extraction_status = 'ok')     AS extracted_ok,
             (SELECT COUNT(*) FROM document_text WHERE extraction_status = 'error')  AS extracted_error,
             (SELECT COUNT(*) FROM messages)                                         AS total_messages,
-            (SELECT COUNT(*) FROM val_audit_trail)                                  AS audit_entries,
+            (SELECT COUNT(*) FROM qms_audit_trail WHERE record_type = 'project')    AS audit_entries,
             (SELECT COUNT(*) FROM kb_documents WHERE extraction_status = 'ok')      AS kb_extracted_ok
     """).fetchone()
 

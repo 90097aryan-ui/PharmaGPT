@@ -5,6 +5,73 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased] — 2026-07-10 — PharmaGPT v1.0 Module 3: Project Workspace & Navigation Refactoring
+
+### Added
+- **Project Workspace** — "One Project = One Workspace": Equipment, Documents, Risk Assessment,
+  URS, Qualification, Validation Report, Tasks, Approvals, and History are all reached from one
+  unified workspace opened by selecting a project.
+  - Ten tabs, built on the existing Enterprise Workspace shell (new reusable `.ws-tabs`/`.ws-tab`
+    tab-strip component in `workspace.css`).
+  - Equipment and Documents (+ Document Insights) tab content is the same markup/JS from the
+    now-removed standalone views, moved in with zero rendering-logic changes.
+  - Risk Assessment/URS/Qualification/Validation Report tabs are live entry points into those
+    previously-unwired suites (not project-filtered — those tables have no `project_id` column,
+    documented as a Known Issue).
+  - Tasks and Approvals are placeholder tabs (architecture only, no new schema).
+  - Project History tab reuses the shared `qms_audit_trail` table (`record_type='project'`);
+    `routes/projects.py` create/update/delete now log to it.
+  - `static/js/project_workspace.js`, `tests/test_project_workspace.py` (6 new tests).
+
+### Removed
+- **Legacy Validation Workspace** — retired entirely: `routes/workspace.py`,
+  `static/js/val_workspace.js`, `vw-*` CSS, and its views/modal. It was still a fully live, writable
+  flow on a separate `val_projects` entity, contradicting the unified `projects` table from the
+  Module 1 merge. `val_projects`/`val_audit_trail` tables are untouched (historical data preserved);
+  the dead `*_val_project`/`*_val_audit_entry` CRUD functions were removed from `database.py`.
+
+### Fixed
+- `window.selectProject` was never actually exposed on `window` by `projects.js`, silently breaking
+  the Dashboard's "Recent Projects" card navigation. Fixed alongside `dashboard.js`.
+
+---
+
+## [Unreleased] — 2026-07-10 — PharmaGPT v1.0 Module 2: Equipment as a First-Class Entity
+
+### Added
+- **Equipment** — a real database entity owned by a Project, replacing free-text-only equipment
+  info for new records (architecture and core functionality only — Calibration, Preventive
+  Maintenance, Breakdown History, Spare Parts, Vendor Qualification, Environmental Monitoring,
+  Utilities, and Asset Management are explicitly not built, only prepared for).
+  - `equipment` table: Basic Information (Equipment ID/Name/Category/Type/Tag Number/Model/
+    Manufacturer/Vendor/Serial Number/Asset Number), Installation Information (Plant/Block/
+    Department/Area/Room/Line/Installation Date/Commissioning Date), Qualification Information
+    (Qualification Status/Validation Status/Qualification Type/Criticality/GMP Impact).
+  - `equipment_documents` table: polymorphic link to existing `kb_documents`/`documents` rows
+    (User Manual/Vendor Manual/SOP/Drawing/P&ID/Electrical Drawing/Pneumatic Drawing/FAT/SAT/URS/
+    Other) — never duplicates a document; the same manual is reusable across Equipment records.
+  - Full REST API: project-scoped list/create, single-record CRUD, search, type-catalog
+    autocomplete, document link/unlink/list, a legacy-import endpoint
+    (`POST /projects/<id>/equipment/import-legacy`), and an AI-context-bundle endpoint
+    (architecture only — not yet wired into document generation).
+  - Project-scoped Equipment list view + an Equipment Profile page (Overview/Specifications/
+    Documentation/Qualification/Validation History/Related Documents/Related Risk Assessments/
+    Future Modules tabs) built on the existing Enterprise Workspace shell.
+  - `equipment_database.py`, `routes/equipment.py`, `services/equipment_service.py`,
+    `static/js/equipment.js`, `static/css/equipment.css`.
+  - Additive-only changes to shared files: `database.py`, `app.py`, `templates/index.html`
+    (nav item, two views, two modals, script/CSS tags, generalized workspace-view tracking).
+  - `tests/test_equipment_database.py`, `tests/test_equipment_routes.py` — 33 new tests, all
+    passing alongside the existing 109 (142 total).
+  - `pharmagpt/equipment/` (the static per-type Intelligence Engine profile catalog) and
+    `projects.equipment_name/manufacturer/model/equipment_id` (free text) are both unchanged —
+    fully backward compatible.
+
+### Fixed
+- None — new functionality only.
+
+---
+
 ## [Unreleased] — 2026-07-05 — Quality Management Suite (Phase 2: Change Control)
 
 ### Added

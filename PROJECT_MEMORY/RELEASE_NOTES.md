@@ -6,6 +6,102 @@
 
 ---
 
+## [Unreleased] — PharmaGPT v1.0 Module 3: Project Workspace & Navigation Refactoring
+
+**Sprint Name:** PharmaGPT v1.0 Module 3 (follows Module 2 — Equipment as a First-Class Entity)
+**Status:** Complete in the working tree, browser-verified end-to-end, full 148-test regression
+suite passing (147 + 1 pre-existing flaky timing test confirmed unrelated on re-run),
+**not yet committed to git** — per explicit instruction, no architectural commit until the full
+Foundation Refactoring (Modules 1–3) is complete.
+
+**Summary:** Establishes "One Project = One Workspace" — Equipment, Documents (+ Document Insights),
+Risk Assessment, URS, Qualification, Validation Report, Tasks, Approvals, and History are now all
+reached from a single unified Project Workspace opened by selecting a project, instead of a growing
+set of permanent, project-scoped sidebar nav items. See [DECISIONS.md](DECISIONS.md) DEC-024/DEC-025
+for full architectural detail, including a pre-existing architectural conflict discovered and
+resolved before this module began: the sidebar's "Validation Workspace" item was still a fully live,
+writable flow on a separate `val_projects` entity, contradicting the unified `projects` table Module
+1 was supposed to have consolidated everything onto.
+
+**What changed**
+- **Retired the legacy Validation Workspace** (DEC-024): deleted `routes/workspace.py`,
+  `static/js/val_workspace.js`, all `vw-*` CSS, and the `view-val-workspace`/`view-val-project`/
+  `vw-create-modal` markup. Removed the now-dead `create_val_project`/`get_all_val_projects`/
+  `get_val_project`/`update_val_project`/`delete_val_project`/`add_val_audit_entry`/
+  `get_val_audit_trail` functions from `database.py`. `val_projects`/`val_audit_trail` **tables** are
+  untouched — historical data and `_migrate_val_projects()` remain intact; nothing writes to them
+  anymore, for real this time.
+- **New Project Workspace** (DEC-025): `static/js/project_workspace.js` + `view-project-workspace`,
+  built on the existing Enterprise Workspace shell (DEC-017) with a new generic `.ws-tabs`/`.ws-tab`
+  tab-strip component added to `workspace.css`. Ten tabs: Overview, Equipment, Documents (+ Insights
+  strip), Risk Assessment, URS, Qualification, Validation Report, Tasks (placeholder), Approvals
+  (placeholder), History.
+- **Equipment/Documents embedded, not rewritten**: the standalone Equipment list and Documents views'
+  markup was moved verbatim into the new workspace's tab panels (same element IDs) — zero changes to
+  `equipment.js`/`documents.js`/`insights.js`'s rendering logic. Only `equipment.js`'s two navigation
+  functions changed (`eqBackToList()` now calls `window.pwShowTab('equipment')`).
+- **Risk/URS/Qualification/Validation Report entry points**: four new tabs give these
+  backend-complete-but-previously-unwired suites a live entry point via the existing generic
+  `window.showView()` helper + each suite's `initX()` bootstrap. Explicitly **not** project-filtered
+  (those tables have no `project_id` column) — disclosed as a Known Issue, not silently implied.
+- **Live project History**: `routes/projects.py` create/update/delete now log to the shared
+  `qms_audit_trail` table (`record_type='project'`, reusing the DEC-010 polymorphic pattern) —
+  previously nothing logged audit entries for the unified `projects` table at all.
+- **Two pre-existing, unrelated bugs fixed as a side effect**: `window.selectProject` was never
+  actually exposed on `window` by `projects.js`, silently breaking the Dashboard's "Recent Projects"
+  card navigation; fixed alongside `dashboard.js::switchToProject` (now fetches the project record and
+  reuses the same navigation path a sidebar click takes).
+- Sidebar simplified: removed the "Documents & Insights" section (`nav-equipment`/`nav-documents`/
+  `nav-insights`) entirely, alongside the Validation Workspace item.
+- `tests/test_project_workspace.py` — 6 new tests (project audit-trail logging, the new `project`
+  QMS record type, confirming `/val-projects` routes are gone), all passing alongside the existing
+  142 (148 total).
+
+---
+
+## [Unreleased] — PharmaGPT v1.0 Module 2: Equipment as a First-Class Entity
+
+**Sprint Name:** PharmaGPT v1.0 Module 2 (follows Module 1 — the "Phase 2 Module 1" Validation
+Workspace/`projects` merge, `pharmagpt/routes/projects.py`/`test_projects_merge.py`)
+**Status:** Complete in the working tree, browser-verified end-to-end (create/edit/delete equipment,
+legacy import, document linking/unlinking, Equipment Profile tabs, AI-context bundle), full 142-test
+regression suite passing, **not yet committed to git**.
+
+**Summary:** Equipment is now a real database entity owned by a Project (architecture and core
+functionality only, per the module's stated scope — Calibration/Preventive Maintenance/etc. are
+explicitly not built, only prepared for). Replaces nothing — `projects.equipment_name/manufacturer/
+model/equipment_id` (free text) and `pharmagpt/equipment/` (the static per-type Intelligence Engine
+profile catalog) are both left untouched for backward compatibility. See
+[DECISIONS.md](DECISIONS.md) DEC-023 for full architectural detail.
+
+**Modules Added**
+- `pharmagpt/equipment_database.py` — `equipment` (Basic/Installation/Qualification Information per
+  the module spec, `project_id NOT NULL ON DELETE CASCADE`) + `equipment_documents` (polymorphic
+  link to `kb_documents`/`documents`, never duplicates file content) schema + CRUD, plus
+  `import_legacy_equipment()` (one-click consolidation from a project's legacy free-text fields) and
+  `search_equipment()`.
+- `pharmagpt/routes/equipment.py` — project-scoped list/create, single-record CRUD, search, type
+  catalog (autocomplete against `pharmagpt/equipment/`), document link/unlink/list, legacy import,
+  and an AI-context-bundle endpoint (architecture only — not wired into generation).
+- `pharmagpt/services/equipment_service.py` — `get_equipment_context_bundle()` (data-assembly seam
+  for a future AI document-generation integration, same "stub now, wire later" pattern as the
+  vector-RAG stubs, DEC-008) and `get_equipment_type_catalog()`.
+- `pharmagpt/static/js/equipment.js` + `static/css/equipment.css` — project-scoped Equipment list
+  view (Add/Edit modal, legacy-import banner) and an Equipment Profile page built on the existing
+  Enterprise Workspace shell (DEC-017) with Overview/Specifications/Documentation/Qualification/
+  Validation History/Related Documents/Related Risk Assessments/Future Modules (placeholder) tabs.
+  All top-level functions are `eq`-prefixed to avoid the cross-suite global-scope collisions this
+  codebase is known to have (DEC-020).
+- Additive-only changes to shared files: `database.py` (new `EQUIPMENT_SCHEMA` executescript call),
+  `app.py` (blueprint registration), `templates/index.html` (sidebar nav item, two new views, two
+  new modals, CSS/JS script tags, generalized `__ws_setActiveView` to a `Set` of workspace view IDs
+  instead of a single hardcoded `"view-gen-doc"` string so the Equipment Profile can reuse the same
+  Enterprise Workspace enter/exit contract).
+- `tests/test_equipment_database.py`, `tests/test_equipment_routes.py` — 33 new tests, all passing
+  alongside the existing 109 (142 total, zero regressions).
+
+---
+
 ## [Unreleased] — Quality Management Suite (Phase 2: Change Control)
 
 **Sprint Name:** QMS Phase 2 — Change Control

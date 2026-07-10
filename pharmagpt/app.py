@@ -26,7 +26,6 @@ from pharmagpt.routes.chat           import bp as chat_bp
 from pharmagpt.routes.docs           import bp as docs_bp
 from pharmagpt.routes.validation     import bp as validation_bp
 from pharmagpt.routes.knowledge_base import bp as kb_bp
-from pharmagpt.routes.workspace      import bp as workspace_bp
 from pharmagpt.routes.dashboard      import bp as dashboard_bp
 from pharmagpt.routes.risk           import bp as risk_bp
 from pharmagpt.routes.urs            import bp as urs_bp
@@ -37,6 +36,7 @@ from pharmagpt.routes.qms_documents  import bp as qms_documents_bp
 from pharmagpt.routes.qms_deviations import bp as qms_deviations_bp
 from pharmagpt.routes.qms_capa       import bp as qms_capa_bp
 from pharmagpt.routes.qms_change_control import bp as qms_change_control_bp
+from pharmagpt.routes.equipment       import bp as equipment_bp
 
 
 # ── Application setup ─────────────────────────────────────────────────────────
@@ -55,7 +55,6 @@ app.register_blueprint(chat_bp)
 app.register_blueprint(docs_bp)
 app.register_blueprint(validation_bp)
 app.register_blueprint(kb_bp)
-app.register_blueprint(workspace_bp)
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(risk_bp)
 app.register_blueprint(urs_bp)
@@ -66,6 +65,7 @@ app.register_blueprint(qms_documents_bp)
 app.register_blueprint(qms_deviations_bp)
 app.register_blueprint(qms_capa_bp)
 app.register_blueprint(qms_change_control_bp)
+app.register_blueprint(equipment_bp)
 
 
 # ── SPA shell ─────────────────────────────────────────────────────────────────

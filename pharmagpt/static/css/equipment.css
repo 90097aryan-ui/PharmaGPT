@@ -1,0 +1,202 @@
+/* ══════════════════════════════════════════════════════════════════════════════
+   EQUIPMENT — PharmaGPT v1.0 Module 2
+   ──────────────────────────────────────────────────────────────────────────────
+   List view (.eq-container) follows the same structure as .documents-container
+   (doc-header / doc-list-section / doc-row in style.css). The Equipment
+   Profile page (.eq-profile-*) is built on the shared Enterprise Workspace
+   shell (workspace.css .ent-workspace/.ent-ws-*, DEC-017) with a QMS-style
+   tab strip (.eq-tabs/.eq-tab, matching .qms-tabs/.qms-tab in qms.css).
+   Status/criticality badges reuse the existing global .badge + modifier
+   classes from risk.css — no new badge colors are introduced here.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── List view ─────────────────────────────────────────────────────────────── */
+.eq-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.eq-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 18px 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.eq-title    { font-size: 18px; font-weight: 700; color: var(--navy); }
+.eq-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+
+.eq-header-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+.eq-list-section {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 28px 24px;
+}
+.eq-list-section::-webkit-scrollbar { width: 5px; }
+.eq-list-section::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--radius); }
+
+.eq-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.eq-count {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.eq-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 20px;
+  color: var(--text-muted);
+  font-size: 14px;
+  text-align: center;
+  gap: 10px;
+}
+
+.eq-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 6px;
+  transition: background 0.12s, border-color 0.12s;
+  cursor: pointer;
+}
+
+.eq-row:hover { box-shadow: var(--shadow); border-color: #E6DED6; }
+
+.eq-icon {
+  width: 36px; height: 36px; flex-shrink: 0; border-radius: 10px;
+  background: var(--soft-blue, #E7EEF6); color: var(--information, var(--blue-light));
+  display: flex; align-items: center; justify-content: center;
+}
+.eq-icon .icon { width: 18px; height: 18px; }
+
+.eq-info { flex: 1; min-width: 0; }
+.eq-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.eq-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11.5px; color: var(--text-muted); margin-top: 3px; }
+
+.eq-row-badges { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+
+.eq-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.eq-row-actions button {
+  background: #FFF; border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 5px 10px; font-size: 11.5px; font-weight: 500; cursor: pointer;
+  font-family: inherit; color: var(--text); display: inline-flex; align-items: center; gap: 5px;
+}
+.eq-row-actions button:hover { background: var(--bg); }
+.eq-row-actions button.eq-btn-danger { color: #A8544F; border-color: rgba(168,69,63,0.25); }
+.eq-row-actions button.eq-btn-danger:hover { background: rgba(168,69,63,0.06); }
+
+.eq-import-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--soft-amber, #FFF4E5); border: 1px solid #F0DFC0; border-radius: var(--radius);
+  padding: 10px 16px; margin-bottom: 14px; font-size: 12.5px; color: var(--text);
+}
+
+/* ── Add/Edit modal ────────────────────────────────────────────────────────── */
+.eq-modal { width: min(760px, 96vw); max-height: 90vh; overflow-y: auto; }
+.eq-form-section-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
+  color: var(--text-muted); margin: 18px 0 8px; padding-top: 12px; border-top: 1px solid var(--divider);
+}
+.eq-form-section-label:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+
+/* ── Equipment Profile (Enterprise Workspace) ─────────────────────────────── */
+.eq-profile-body { padding: 24px 28px; }
+
+.eq-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.eq-tab {
+  padding: 10px 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+.eq-tab:hover  { color: var(--navy); }
+.eq-tab.active { color: var(--navy); border-bottom-color: var(--accent); }
+
+.eq-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px 24px;
+}
+.eq-detail-field label {
+  display: block; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.4px; color: var(--text-muted); margin-bottom: 3px;
+}
+.eq-detail-field span { font-size: 13.5px; color: var(--text); }
+.eq-detail-field span.eq-empty-value { color: var(--text-disabled); font-style: italic; }
+
+.eq-doc-role-group { margin-bottom: 20px; }
+.eq-doc-role-title {
+  font-size: 12px; font-weight: 700; color: var(--navy); margin-bottom: 8px;
+  text-transform: capitalize;
+}
+.eq-doc-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+  margin-bottom: 6px; font-size: 12.5px; background: var(--surface);
+}
+.eq-doc-item.eq-doc-broken { opacity: 0.6; }
+.eq-doc-item-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.eq-doc-item-title .icon { width: 15px; height: 15px; flex-shrink: 0; color: var(--text-muted); }
+
+.eq-future-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+.eq-future-card {
+  border: 1px dashed var(--border); border-radius: var(--radius-lg, var(--radius));
+  padding: 16px; text-align: center; color: var(--text-muted);
+  background: var(--surface);
+}
+.eq-future-card .icon { width: 22px; height: 22px; margin: 0 auto 8px; opacity: 0.6; }
+.eq-future-card-name { font-size: 12.5px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+.eq-future-card-tag  { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.4px; }
+
+@media (max-width: 768px) {
+  .eq-list-section { padding: 12px 16px; }
+  .eq-header        { padding: 14px 16px; }
+  .eq-profile-body  { padding: 16px; }
+}
