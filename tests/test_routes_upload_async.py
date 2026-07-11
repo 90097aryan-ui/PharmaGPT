@@ -25,11 +25,7 @@ def _wait_for_terminal_status(client, url, timeout=10.0):
     pytest.fail(f"extraction never reached a terminal status: {status}")
 
 
-def test_project_document_upload_is_fast_then_completes(db_path, fixtures_dir):
-    import pharmagpt.app as appmod
-
-    client = appmod.app.test_client()
-
+def test_project_document_upload_is_fast_then_completes(client, fixtures_dir):
     proj = client.post("/projects", json={
         "name": "Test Project", "equipment_name": "HPLC", "manufacturer": "Agilent",
         "department": "QC", "validation_type": "IQ",
@@ -58,11 +54,7 @@ def test_project_document_upload_is_fast_then_completes(db_path, fixtures_dir):
     assert status["page_count"] == 5
 
 
-def test_kb_document_upload_and_retry_flow(db_path, fixtures_dir):
-    import pharmagpt.app as appmod
-
-    client = appmod.app.test_client()
-
+def test_kb_document_upload_and_retry_flow(client, fixtures_dir):
     with open(fixtures_dir["corrupted.pdf"], "rb") as fh:
         corrupt_bytes = fh.read()
 
@@ -89,19 +81,12 @@ def test_kb_document_upload_and_retry_flow(db_path, fixtures_dir):
     assert status_after_retry["extraction_status"] == "failed"  # still corrupt — expected
 
 
-def test_document_status_endpoint_404_for_unknown_document(db_path):
-    import pharmagpt.app as appmod
-
-    client = appmod.app.test_client()
+def test_document_status_endpoint_404_for_unknown_document(client):
     resp = client.get("/documents/999999/status")
     assert resp.status_code == 404
 
 
-def test_project_document_retry_requires_file_present_on_disk(db_path, fixtures_dir):
-    import pharmagpt.app as appmod
-
-    client = appmod.app.test_client()
-
+def test_project_document_retry_requires_file_present_on_disk(client, fixtures_dir):
     proj = client.post("/projects", json={
         "name": "P2", "equipment_name": "X", "manufacturer": "Y",
         "department": "Z", "validation_type": "IQ",

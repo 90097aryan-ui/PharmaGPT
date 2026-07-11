@@ -40,11 +40,23 @@ def db_path(tmp_path, monkeypatch):
 
 
 @pytest.fixture()
-def client(db_path):
+def client(db_path, monkeypatch):
     """Flask test client wired to the db_path fixture's throwaway database.
     pharmagpt.app may already be imported from an earlier test — that's fine,
     since every DB call resolves db.DB_PATH dynamically at call time rather
-    than caching it, so each test still gets full isolation."""
+    than caching it, so each test still gets full isolation.
+
+    Phase 2 wired a global auth gate into every route (pharmagpt/app.py).
+    The tests using this fixture predate that and exercise business logic,
+    not authentication, so the gate is patched to treat every request as
+    exempt here — restored automatically after each test. Tests that need
+    to exercise the real gate (missing/invalid/valid tokens) define their
+    own `client` fixture without this patch — see
+    tests/test_app_auth_integration.py.
+    """
     import pharmagpt.app as appmod
+    import pharmagpt.auth.middleware as auth_middleware
+
+    monkeypatch.setattr(auth_middleware, "is_exempt", lambda path: True)
 
     return appmod.app.test_client()

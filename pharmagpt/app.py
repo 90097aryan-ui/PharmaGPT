@@ -13,14 +13,16 @@ Shared runtime state (Gemini client, history cache) lives in state.py.
 """
 
 import uuid
-from flask import Flask, render_template, session
+from flask import Flask, jsonify, render_template, session
 
 from pharmagpt.config import FLASK_SECRET_KEY, FLASK_DEBUG, FLASK_PORT, MAX_FILE_SIZE
 from pharmagpt.logging_config import configure_logging
 from pharmagpt import database as db
+from pharmagpt.auth import register_auth_middleware
 
 configure_logging()
 
+from pharmagpt.routes.auth           import bp as auth_bp
 from pharmagpt.routes.projects       import bp as projects_bp
 from pharmagpt.routes.chat           import bp as chat_bp
 from pharmagpt.routes.docs           import bp as docs_bp
@@ -47,9 +49,12 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE
 
 db.init_db()
 
+register_auth_middleware(app)
+
 
 # ── Blueprint registration ────────────────────────────────────────────────────
 
+app.register_blueprint(auth_bp)
 app.register_blueprint(projects_bp)
 app.register_blueprint(chat_bp)
 app.register_blueprint(docs_bp)
@@ -76,6 +81,14 @@ def index():
     if "session_id" not in session:
         session["session_id"] = str(uuid.uuid4())
     return render_template("index.html")
+
+
+# ── Health check ──────────────────────────────────────────────────────────────
+
+@app.route("/health")
+def health():
+    """Unauthenticated liveness endpoint for deployment/uptime checks."""
+    return jsonify({"status": "ok"})
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
