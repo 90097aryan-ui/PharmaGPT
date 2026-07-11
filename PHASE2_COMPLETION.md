@@ -132,11 +132,12 @@ database rollback, in this order:
 | `ec249d17fa1cb67863f9d767e2b0479d9ec8227d` | Add Supabase login UI and session management (Phase 2 step 2.6) |
 | `603129620dbe364facf1cc1be9f8a0d2bbbda2e2` | Add Supabase Auth backend: identity/tenancy schema, tenant-context resolver, auth middleware (Phase 2 steps 2.1-2.5) |
 | `bc82a3e07ed3da84bcaf4c2cbf22e181294fc446` | Reload Projects sidebar immediately after login, not just on refresh |
+| `c6e9a495e2f33b032865f0ba4e3715444c5d0f59` | Add Phase 2 completion report (this document) |
 
 Preceding Phase 1 (Supabase provisioning) commits, for reference: `c0d9180` (Add Supabase Python SDK),
 `3dafe32` (Add Supabase client), `7c8aa4b` (Update Python dependencies).
 
-Tagged as **`phase2-auth-complete`** at `bc82a3e07ed3da84bcaf4c2cbf22e181294fc446`.
+Tagged as **`phase2-auth-complete`** at `c6e9a495e2f33b032865f0ba4e3715444c5d0f59` (this commit).
 
 ## 8. Staging test fixtures (kept intentionally — reused in Phase 3)
 
