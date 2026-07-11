@@ -1,0 +1,220 @@
+/**
+ * static/js/auth.js — Supabase Auth-backed login UI and session management.
+ * IMPLEMENTATION_ROADMAP.md Phase 2 step 2.6.
+ *
+ * Talks only to the Flask endpoints already built in routes/auth.py
+ * (POST /auth/login, POST /auth/logout, GET /auth/me) — never to Supabase
+ * directly, and never sees a password beyond forwarding it to /auth/login.
+ *
+ * Loads before every other module (see templates/index.html) so its
+ * window.fetch patch is active before any business-logic module's
+ * DOMContentLoaded handler can issue a request — this is how every
+ * existing fetch("/...") call in dashboard.js, projects.js, etc. gets the
+ * bearer token attached without a single change to those files.
+ */
+(function () {
+  "use strict";
+
+  const STORAGE_KEY = "pharmagpt.session";
+  const nativeFetch = window.fetch.bind(window);
+
+  function readStoredSession() {
+    const raw = localStorage.getItem(STORAGE_KEY) || sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function writeStoredSession(session, remember) {
+    const raw = JSON.stringify(session);
+    if (remember) {
+      localStorage.setItem(STORAGE_KEY, raw);
+      sessionStorage.removeItem(STORAGE_KEY);
+    } else {
+      sessionStorage.setItem(STORAGE_KEY, raw);
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  }
+
+  function clearStoredSession() {
+    localStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(STORAGE_KEY);
+  }
+
+  let session = readStoredSession();
+
+  // ── Public API (used by static/js/*.js modules that want it, e.g. a
+  // future "logged in as" display; nothing else currently depends on it) ──
+  window.PharmaAuth = {
+    isAuthenticated: () => !!(session && session.access_token),
+    getUser: () => (session && session.user) || null,
+    getAccessToken: () => (session && session.access_token) || null,
+    logout: () => logout(),
+  };
+
+  // ── fetch() patch: attach the bearer token to same-origin requests ──────
+  window.fetch = function (input, init) {
+    const token = session && session.access_token;
+    if (!token) return nativeFetch(input, init);
+
+    const url = typeof input === "string" ? input : input.url;
+    const isRelative = !/^https?:\/\//i.test(url);
+    const isSameOrigin = isRelative || url.indexOf(window.location.origin) === 0;
+    if (!isSameOrigin) return nativeFetch(input, init);
+
+    const headers = new Headers(init && init.headers ? init.headers : (input && input.headers) || undefined);
+    if (!headers.has("Authorization")) {
+      headers.set("Authorization", "Bearer " + token);
+    }
+    return nativeFetch(input, Object.assign({}, init, { headers: headers }));
+  };
+
+  // ── View toggling ─────────────────────────────────────────────────────
+  function el(id) {
+    return document.getElementById(id);
+  }
+
+  function showLogin() {
+    el("login-view").style.display = "flex";
+    el("session-check-view").style.display = "none";
+    document.querySelector("header").style.display = "none";
+    document.querySelector(".app-body").style.display = "none";
+    hideUserBadge();
+  }
+
+  function showChecking() {
+    el("login-view").style.display = "none";
+    el("session-check-view").style.display = "flex";
+    document.querySelector("header").style.display = "none";
+    document.querySelector(".app-body").style.display = "none";
+  }
+
+  function showApp(user) {
+    el("login-view").style.display = "none";
+    el("session-check-view").style.display = "none";
+    document.querySelector("header").style.display = "flex";
+    document.querySelector(".app-body").style.display = "flex";
+    showUserBadge(user);
+  }
+
+  function showUserBadge(user) {
+    const badge = el("user-badge");
+    const name = el("user-badge-name");
+    if (!badge) return;
+    if (name) name.textContent = (user && (user.display_name || user.email)) || "";
+    badge.style.display = "flex";
+    if (window.refreshIcons) window.refreshIcons();
+  }
+
+  function hideUserBadge() {
+    const badge = el("user-badge");
+    if (badge) badge.style.display = "none";
+  }
+
+  // ── Login form ───────────────────────────────────────────────────────
+  function setSubmitting(submitting) {
+    const btn = el("login-submit");
+    const label = el("login-submit-label");
+    const spinner = el("login-spinner");
+    if (btn) btn.disabled = submitting;
+    if (label) label.textContent = submitting ? "Logging in…" : "Log In";
+    if (spinner) spinner.style.display = submitting ? "inline-block" : "none";
+  }
+
+  function showError(message) {
+    const box = el("login-error");
+    if (!box) return;
+    box.textContent = message || "";
+    box.style.display = message ? "block" : "none";
+  }
+
+  async function handleLoginSubmit(evt) {
+    evt.preventDefault();
+    showError("");
+
+    const email = el("login-email").value.trim();
+    const password = el("login-password").value;
+    const remember = el("login-remember").checked;
+
+    if (!email || !password) {
+      showError("Enter both your email and password.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await nativeFetch("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email, password: password }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        showError(data.error || "Invalid email or password.");
+        return;
+      }
+
+      session = {
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        expires_at: data.expires_at,
+        user: data.user,
+      };
+      writeStoredSession(session, remember);
+      el("login-form").reset();
+      showApp(session.user);
+      if (window.loadDashboard) window.loadDashboard();
+    } catch (err) {
+      showError("Could not reach the server. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function logout() {
+    try {
+      await window.fetch("/auth/logout", { method: "POST" });
+    } catch (err) {
+      // Best-effort — the local session is cleared regardless of whether
+      // the server-side revocation call succeeds.
+    }
+    session = null;
+    clearStoredSession();
+    showLogin();
+  }
+
+  // ── Boot: decide login vs. dashboard before anything else runs ─────────
+  async function boot() {
+    if (!session || !session.access_token) {
+      showLogin();
+      return;
+    }
+
+    showChecking();
+    try {
+      const res = await window.fetch("/auth/me");
+      if (!res.ok) throw new Error("Session invalid");
+      const user = await res.json();
+      session.user = user;
+      showApp(user);
+    } catch (err) {
+      session = null;
+      clearStoredSession();
+      showLogin();
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const form = el("login-form");
+    if (form) form.addEventListener("submit", handleLoginSubmit);
+
+    const logoutBtn = el("btn-logout");
+    if (logoutBtn) logoutBtn.addEventListener("click", logout);
+  });
+
+  boot();
+})();

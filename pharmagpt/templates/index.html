@@ -20,6 +20,51 @@
 </head>
 <body>
 
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- ── Login (Supabase Auth) — IMPLEMENTATION_ROADMAP.md Phase 2 step 2.6 ── -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <div class="login-view" id="login-view" style="display:none">
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="logo-icon">Rx</div>
+        <div class="header-titles">
+          <h1>PharmaGPT</h1>
+          <p>Pharmaceutical Validation Platform</p>
+        </div>
+      </div>
+
+      <form id="login-form" class="login-form" novalidate>
+        <div class="form-group">
+          <label for="login-email">Email</label>
+          <input type="email" id="login-email" name="email" placeholder="you@company.com"
+                 autocomplete="username" required />
+        </div>
+        <div class="form-group">
+          <label for="login-password">Password</label>
+          <input type="password" id="login-password" name="password" placeholder="••••••••"
+                 autocomplete="current-password" required />
+        </div>
+
+        <label class="login-remember">
+          <input type="checkbox" id="login-remember" /> Remember me
+        </label>
+
+        <div class="login-error" id="login-error" role="alert" style="display:none"></div>
+
+        <button type="submit" class="btn-primary login-submit" id="login-submit">
+          <span id="login-submit-label">Log In</span>
+          <span class="login-spinner" id="login-spinner" style="display:none"></span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── Session check splash (shown while a stored session is verified) ──── -->
+  <div class="session-check-view" id="session-check-view" style="display:none">
+    <div class="login-spinner login-spinner-lg"></div>
+    <p>Checking your session…</p>
+  </div>
+
   <!-- ── Header ──────────────────────────────────────────────────────────────── -->
   <header>
     <div class="header-left">
@@ -37,6 +82,13 @@
         Gemini 2.5 Flash &nbsp;·&nbsp; Online
       </div>
       <button class="btn-clear" id="btn-clear">Clear Chat</button>
+      <div class="user-badge" id="user-badge" style="display:none">
+        <span class="icon" data-lucide="user-circle"></span>
+        <span id="user-badge-name"></span>
+        <button class="btn-logout" id="btn-logout" title="Log out">
+          <span class="icon" data-lucide="log-out"></span>
+        </button>
+      </div>
     </div>
   </header>
 
@@ -1637,6 +1689,11 @@
   </div><!-- /app-body — closes here, not after view-validation, so every module
              (Generate Document, Risk, URS, Qual, Report, QMS) renders inside the
              sidebar + content flex layout instead of full-width below it -->
+
+  <!-- auth.js loads first and patches window.fetch to attach the bearer token
+       before any other module's DOMContentLoaded handler can call it (Phase 2
+       step 2.6) — see static/js/auth.js. -->
+  <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
 
   <!-- Load order: workspace (shared shell) -> dashboard -> projects -> documents -> insights -> validation_config -> validation -> knowledge_base -> chat -->
   <script src="{{ url_for('static', filename='js/workspace.js') }}"></script>
