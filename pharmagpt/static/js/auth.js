@@ -167,7 +167,13 @@
       writeStoredSession(session, remember);
       el("login-form").reset();
       showApp(session.user);
+      // These modules' own DOMContentLoaded handlers already fired (with no
+      // token) before login completed, so re-trigger them now that the
+      // bearer token is in place — otherwise the sidebar Projects list (and
+      // dashboard stats) would stay on their pre-login "failed to load"
+      // state until the next full page refresh.
       if (window.loadDashboard) window.loadDashboard();
+      if (window.loadProjects) window.loadProjects();
     } catch (err) {
       showError("Could not reach the server. Please try again.");
     } finally {
