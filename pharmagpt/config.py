@@ -49,3 +49,18 @@ GC_INTERVAL_PAGES = int(os.getenv("GC_INTERVAL_PAGES", 20))
 # Persist extraction progress to SQLite every N pages (avoids a DB write per
 # page on very large documents while keeping the progress UI responsive).
 PROGRESS_WRITE_EVERY_N_PAGES = int(os.getenv("PROGRESS_WRITE_EVERY_N_PAGES", 5))
+
+# ── URS AI generation settings ────────────────────────────────────────────────
+# See services/urs_generation_job.py. Generation is batched into small Gemini
+# calls run on job_runner's thread pool instead of one giant streamed request,
+# so no single call risks exceeding gunicorn's --timeout (Procfile/render.yaml).
+
+# Max requirement sections sent to Gemini in a single generate_content() call.
+URS_GENERATION_BATCH_SIZE = int(os.getenv("URS_GENERATION_BATCH_SIZE", 2))
+
+# Log a warning if a single Gemini call for one batch takes longer than this.
+URS_GENERATION_SLOW_WARNING_SECONDS = int(os.getenv("URS_GENERATION_SLOW_WARNING_SECONDS", 20))
+
+# Extra attempts for a batch after malformed/truncated Gemini output (parsing
+# failures only — a genuine API error is never retried). 2 => 3 attempts total.
+URS_GENERATION_MAX_RETRIES = int(os.getenv("URS_GENERATION_MAX_RETRIES", 2))

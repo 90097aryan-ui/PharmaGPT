@@ -1,7 +1,9 @@
 """
 routes/urs.py — URS Management Suite API endpoints.
 
-All routes return JSON. SSE streaming used for AI generation.
+All routes return JSON. AI generation runs as a background job (see
+services/urs_generation_job.py) — the frontend polls for status rather than
+holding a request open.
 
 Routes
 ------
@@ -18,7 +20,8 @@ POST   /urs/<id>/requirements/add            add single requirement
 PUT    /urs/<id>/requirements/<req_id>       update single requirement
 DELETE /urs/<id>/requirements/<req_id>       delete single requirement
 
-POST   /urs/<id>/generate                    AI generate requirements (SSE stream)
+POST   /urs/<id>/generate                    start AI generation (returns immediately)
+GET    /urs/<id>/generate/status             poll AI generation job status/progress
 POST   /urs/<id>/review                      AI review URS
 POST   /urs/<id>/library                     load library requirements
 
@@ -35,10 +38,12 @@ GET    /urs/library/types                    list equipment types in library
 
 import json
 import logging
-from flask import Blueprint, jsonify, request, Response, stream_with_context
+import time
+from flask import Blueprint, jsonify, request
 
 from pharmagpt import urs_database as udb
 from pharmagpt.services import urs_service as svc
+from pharmagpt.services.urs_generation_job import submit_generation_job
 from pharmagpt.services.urs_requirement_library import (
     build_numbered_requirements,
     list_equipment_types,
@@ -184,11 +189,18 @@ def library_sections():
     return jsonify({"sections": get_sections_for_type(equipment_type)})
 
 
-# ── AI Generation (SSE) ───────────────────────────────────────────────────────
+# ── AI Generation (background job — poll for status) ─────────────────────────
 
 @bp.route("/<int:uid>/generate", methods=["POST"])
 def generate_requirements(uid):
-    """Stream AI-generated requirements for the URS as JSON chunks."""
+    """Start AI requirement generation as a background job and return immediately.
+
+    Generation used to run inline via generate_content_stream(), holding the
+    request (and a gunicorn worker) open for the full generation time — long
+    enough on large section selections to exceed Render's worker timeout and
+    get SIGKILLed mid-stream. See services/urs_generation_job.py.
+    """
+    route_start = time.perf_counter()
     urs = udb.get_urs(uid)
     if not urs:
         return jsonify({"error": "URS not found"}), 404
@@ -206,65 +218,22 @@ def generate_requirements(uid):
         "intended_use", "process_description",
     )})
 
-    prompt = svc.build_generation_prompt(urs_info, sections)
+    submit_generation_job(uid, urs_info, sections)
 
-    def generate():
-        try:
-            full_text = ""
-            response = gemini_client.models.generate_content_stream(
-                model=GEMINI_MODEL,
-                contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
-                config=types.GenerateContentConfig(
-                    system_instruction=PHARMA_SYSTEM_PROMPT,
-                    temperature=0.3,
-                    max_output_tokens=8192,
-                ),
-            )
-            for chunk in response:
-                if chunk.text:
-                    full_text += chunk.text
-                    yield f"data: {json.dumps({'chunk': chunk.text})}\n\n"
-
-            # Parse JSON and save requirements
-            try:
-                json_str = full_text.strip()
-                if "```json" in json_str:
-                    json_str = json_str.split("```json")[1].split("```")[0].strip()
-                elif "```" in json_str:
-                    json_str = json_str.split("```")[1].split("```")[0].strip()
-                start = json_str.find("[")
-                end = json_str.rfind("]") + 1
-                if start >= 0 and end > start:
-                    json_str = json_str[start:end]
-                ai_reqs = json.loads(json_str)
-                # Number them
-                section_counters: dict[str, int] = {}
-                numbered = []
-                for req in ai_reqs:
-                    section = req.get("section", "General Requirements")
-                    from pharmagpt.services.urs_requirement_library import SECTION_PREFIX
-                    prefix = SECTION_PREFIX.get(section, "REQ")
-                    section_counters[prefix] = section_counters.get(prefix, 0) + 1
-                    req["req_id"] = f"{prefix}-{section_counters[prefix]:03d}"
-                    req["source"] = "ai"
-                    req["status"] = "draft"
-                    numbered.append(req)
-                # Merge with existing library requirements
-                existing = udb.get_requirements(uid)
-                merged = existing + numbered
-                udb.save_requirements(uid, merged)
-                yield f"data: {json.dumps({'done': True, 'count': len(numbered)})}\n\n"
-            except Exception as parse_err:
-                logger.exception("Failed to parse AI-generated requirements for URS %s", uid)
-                yield f"data: {json.dumps({'done': True, 'count': 0, 'parse_error': str(parse_err)})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
-
-    return Response(
-        stream_with_context(generate()),
-        mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    logger.info(
+        "URS %s generation job submitted (%d sections) — request handled in %.3fs",
+        uid, len(sections), time.perf_counter() - route_start,
     )
+    return jsonify({"status": "started", "urs_id": uid}), 202
+
+
+@bp.route("/<int:uid>/generate/status", methods=["GET"])
+def generation_status(uid):
+    """Poll the background generation job's current status/progress."""
+    if not udb.get_urs(uid):
+        return jsonify({"error": "URS not found"}), 404
+    status = udb.get_generation_status(uid)
+    return jsonify(status)
 
 
 # ── AI Review ─────────────────────────────────────────────────────────────────

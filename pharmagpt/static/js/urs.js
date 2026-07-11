@@ -737,6 +737,18 @@ window.skipGeneration = async function () {
   wizardGoTo(4);
 };
 
+// AI generation now runs as a background job (services/urs_generation_job.py)
+// instead of an SSE stream — the POST below returns almost instantly, and
+// this polls GET /urs/<id>/generate/status until the job reaches a terminal
+// state. This avoids holding an HTTP request open for the whole generation
+// time, which used to exceed Render's gunicorn worker timeout.
+const URS_GENERATION_POLL_INTERVAL_MS = 1500;
+const URS_GENERATION_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+
+function ursSleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 window.runAIGeneration = async function () {
   if (!ursState.currentURS) await createURSRecord();
   if (!ursState.currentURS) return;
@@ -748,63 +760,62 @@ window.runAIGeneration = async function () {
   const genText = document.getElementById("urs-gen-text");
   const genCount = document.getElementById("urs-gen-count");
   const genBtn = document.getElementById("generate-btn");
+  const ursId = ursState.currentURS.id;
 
   progress.classList.add("visible");
   genBtn.disabled = true;
-  let charCount = 0;
+  genText.textContent = "Starting generation…";
+  genCount.textContent = "0 requirements generated";
 
   try {
-    const res = await fetch(`/urs/${ursState.currentURS.id}/generate`, {
+    await fetch(`/urs/${ursId}/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sections, ...ursState.wizardData }),
     });
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let reqCount = 0;
-    let parseError = null;
-    let streamError = null;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop();
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        try {
-          const msg = JSON.parse(line.slice(6));
-          if (msg.chunk) {
-            charCount += msg.chunk.length;
-            genText.textContent = `Generating requirements… (${charCount} chars)`;
-          }
-          if (msg.done) {
-            reqCount = msg.count || 0;
-            parseError = msg.parse_error || null;
-            genCount.textContent = `${reqCount} requirements generated`;
-            genText.textContent = parseError ? "Generation finished, but parsing failed." : "Generation complete!";
-          }
-          if (msg.error) {
-            streamError = msg.error;
-            genText.textContent = `Error: ${msg.error}`;
-          }
-        } catch (e) {}
-      }
+    const deadline = Date.now() + URS_GENERATION_POLL_TIMEOUT_MS;
+    let job = null;
+    while (Date.now() < deadline) {
+      job = await fetch(`/urs/${ursId}/generate/status`).then(r => r.json());
+      const total = job.generation_progress_total || 0;
+      const current = job.generation_progress_current || 0;
+      genText.textContent = total
+        ? `Generating requirements… (batch ${current}/${total})`
+        : "Generating requirements…";
+      genCount.textContent = `${job.generation_result_count || 0} requirements generated`;
+
+      if (job.generation_status === "completed" || job.generation_status === "failed") break;
+      await ursSleep(URS_GENERATION_POLL_INTERVAL_MS);
     }
 
-    ursState.requirements = await fetch(`/urs/${ursState.currentURS.id}/requirements`).then(r => r.json());
+    ursState.requirements = await fetch(`/urs/${ursId}/requirements`).then(r => r.json());
 
-    if (streamError) {
-      ursToast(`Generation error: ${streamError}`, "error");
+    const reqCount = (job && job.generation_result_count) || 0;
+    // generation_message is a human-readable per-section summary built from
+    // which sections actually came back (e.g. "2 of 3 sections generated
+    // successfully (11 requirements). 1 section failed and can be retried:
+    // Safety Requirements.") — prefer it over the raw generation_error.
+    const jobMessage = job && job.generation_message;
+    const jobError = job && job.generation_error;
+    const hadPartialFailure = !!jobError && reqCount > 0;
+
+    if (!job || (job.generation_status !== "completed" && job.generation_status !== "failed")) {
+      genText.textContent = "Generation is taking longer than expected.";
+      ursToast("Still generating — check back in a moment, or reopen this URS.", "error");
       genBtn.disabled = false;
-    } else if (parseError || reqCount === 0) {
-      ursToast(`AI returned no usable requirements (${parseError || "empty result"}). Try again, or add requirements manually / from the library.`, "error");
+    } else if (job.generation_status === "failed" || reqCount === 0) {
+      genText.textContent = jobMessage || "Generation finished, but produced no requirements.";
+      ursToast(`${jobMessage || "AI returned no usable requirements"}${jobError ? ` (${jobError})` : ""}. Try again, or add requirements manually / from the library.`, "error");
       genBtn.disabled = false;
     } else {
-      ursToast(`${reqCount} requirements generated`, "success");
-      setTimeout(() => wizardGoTo(4), 800);
+      genText.textContent = jobMessage || "Generation complete!";
+      genCount.textContent = `${reqCount} requirements generated`;
+      ursToast(jobMessage || `${reqCount} requirements generated`, hadPartialFailure ? "info" : "success");
+      // Partial failures leave the button re-enabled so the user can retry
+      // the same sections instead of silently losing the failed ones.
+      if (hadPartialFailure) genBtn.disabled = false;
+      setTimeout(() => wizardGoTo(4), hadPartialFailure ? 1500 : 800);
     }
   } catch (e) {
     genText.textContent = `Error: ${e.message}`;

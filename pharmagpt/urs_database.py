@@ -207,6 +207,72 @@ def update_urs(urs_id: int, data: dict) -> dict | None:
     return get_urs(urs_id)
 
 
+# ── AI Generation Job Tracking ────────────────────────────────────────────────
+# See services/urs_generation_job.py. Generation runs on a background thread
+# (services/job_runner.py); these functions are how that thread reports
+# progress and how routes/urs.py's polling endpoint reads it back. Status
+# lives in SQLite (not memory) so it is visible regardless of which gunicorn
+# worker/thread handles a given poll request.
+
+def start_generation(urs_id: int, total_batches: int) -> None:
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            """UPDATE urs_projects
+               SET generation_status = 'running',
+                   generation_progress_current = 0,
+                   generation_progress_total = ?,
+                   generation_result_count = 0,
+                   generation_error = '',
+                   generation_started_at = CURRENT_TIMESTAMP,
+                   generation_finished_at = NULL
+               WHERE id = ?""",
+            (total_batches, urs_id),
+        )
+    conn.close()
+
+
+def update_generation_progress(urs_id: int, current_batch: int, result_count: int) -> None:
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            """UPDATE urs_projects
+               SET generation_progress_current = ?, generation_result_count = ?
+               WHERE id = ?""",
+            (current_batch, result_count, urs_id),
+        )
+    conn.close()
+
+
+def finish_generation(
+    urs_id: int, status: str, result_count: int, error: str = "", message: str = "",
+) -> None:
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            """UPDATE urs_projects
+               SET generation_status = ?, generation_result_count = ?,
+                   generation_error = ?, generation_message = ?,
+                   generation_finished_at = CURRENT_TIMESTAMP
+               WHERE id = ?""",
+            (status, result_count, error, message, urs_id),
+        )
+    conn.close()
+
+
+def get_generation_status(urs_id: int) -> dict | None:
+    conn = get_connection()
+    row = conn.execute(
+        """SELECT generation_status, generation_progress_current, generation_progress_total,
+                  generation_result_count, generation_error, generation_message,
+                  generation_started_at, generation_finished_at
+           FROM urs_projects WHERE id = ?""",
+        (urs_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def delete_urs(urs_id: int) -> bool:
     conn = get_connection()
     with conn:

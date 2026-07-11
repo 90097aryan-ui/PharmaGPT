@@ -253,6 +253,23 @@ def init_db() -> None:
     conn.executescript(URS_SCHEMA)
     conn.commit()
 
+    # ── URS AI generation — background job tracking (additive columns) ───────
+    # See services/urs_generation_job.py. generate_requirements() used to
+    # stream the Gemini response over the request itself, which held a
+    # gunicorn worker for the full generation time and got SIGKILLed by
+    # `--timeout=60` on long prompts. Generation now runs on job_runner's
+    # thread pool and the frontend polls this state instead.
+    # generation_status: 'idle' | 'running' | 'completed' | 'failed'
+    _add_column_if_missing(conn, "urs_projects", "generation_status",           "TEXT NOT NULL DEFAULT 'idle'")
+    _add_column_if_missing(conn, "urs_projects", "generation_progress_current", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "urs_projects", "generation_progress_total",   "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "urs_projects", "generation_result_count",     "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "urs_projects", "generation_error",            "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(conn, "urs_projects", "generation_message",          "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(conn, "urs_projects", "generation_started_at",       "TIMESTAMP DEFAULT NULL")
+    _add_column_if_missing(conn, "urs_projects", "generation_finished_at",      "TIMESTAMP DEFAULT NULL")
+    conn.commit()
+
     # ── Qualification Management Suite tables ─────────────────────────────────
     from pharmagpt.qual_database import QUAL_SCHEMA
     conn.executescript(QUAL_SCHEMA)
