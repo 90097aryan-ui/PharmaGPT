@@ -296,6 +296,13 @@ def init_db() -> None:
     conn.executescript(EQUIPMENT_SCHEMA)
     conn.commit()
 
+    # ── Phase 3.4 dual-write bookkeeping (docs/PHASE3_EXECUTION_PLAN.md) ──────
+    # Migration bookkeeping only, not part of the target Postgres schema —
+    # same pattern as projects.postgres_id (3.2) and kb_documents.postgres_id (3.3).
+    _add_column_if_missing(conn, "equipment", "postgres_id", "TEXT DEFAULT NULL")
+    _add_column_if_missing(conn, "equipment_documents", "postgres_id", "TEXT DEFAULT NULL")
+    conn.commit()
+
     # ── Phase 2 Module 1 — merge Validation Workspace fields into projects ────
     # Additive columns only; val_projects/val_audit_trail are never dropped or
     # written to going forward, only read once by _migrate_val_projects().

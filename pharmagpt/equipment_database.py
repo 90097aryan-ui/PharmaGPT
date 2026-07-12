@@ -130,6 +130,17 @@ def delete_equipment(equipment_id: int) -> None:
     conn.close()
 
 
+def set_equipment_postgres_id(equipment_id: int, postgres_id: str) -> None:
+    """Record the Postgres `equipment.id` (uuid) this SQLite equipment row
+    was dual-written to (Phase 3.4, docs/PHASE3_EXECUTION_PLAN.md). Pure
+    migration bookkeeping, same pattern as set_project_postgres_id (3.2)
+    and set_kb_document_postgres_id (3.3)."""
+    conn = get_connection()
+    conn.execute("UPDATE equipment SET postgres_id = ? WHERE id = ?", (postgres_id, equipment_id))
+    conn.commit()
+    conn.close()
+
+
 def search_equipment(query: str, project_id: int | None = None) -> list[dict]:
     """Keyword search across name/equipment_code/tag_number/serial_number/manufacturer,
     optionally scoped to a single project."""
@@ -236,6 +247,26 @@ def list_equipment_documents(equipment_id: int) -> list[dict]:
 def unlink_equipment_document(link_id: int) -> None:
     conn = get_connection()
     conn.execute("DELETE FROM equipment_documents WHERE id = ?", (link_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_equipment_document_link(link_id: int) -> dict | None:
+    """Single equipment_documents row by id — used by dual-write to look up
+    postgres_id before an unlink (Phase 3.4)."""
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM equipment_documents WHERE id = ?", (link_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def set_equipment_document_postgres_id(link_id: int, postgres_id: str) -> None:
+    """Record the Postgres `equipment_links.id` (uuid) this SQLite
+    equipment_documents row was dual-written to (Phase 3.4)."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE equipment_documents SET postgres_id = ? WHERE id = ?", (postgres_id, link_id)
+    )
     conn.commit()
     conn.close()
 

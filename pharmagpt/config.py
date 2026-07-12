@@ -58,6 +58,17 @@ PROJECTS_BACKEND = os.getenv("PROJECTS_BACKEND", "sqlite")
 # accepted until a later increment wires the extraction-completion path.
 KB_BACKEND = os.getenv("KB_BACKEND", "sqlite")
 
+# EQUIPMENT_BACKEND: same two states. Dual-write covers create/update and a
+# best-effort real delete (not an archive — equipment has no lifecycle/
+# soft-delete field in the target schema, unlike documents; see
+# pharmagpt/db/equipment_repo.py). equipment_links dual-write is scoped to
+# source_type='kb' links only, and only once the linked KB document already
+# has a Postgres mirror (kb_documents.postgres_id) — 'project'-sourced links
+# have no Postgres-side document to point at yet (project-generated
+# documents are roadmap Phase 9, out of this plan's 3.1-3.6 scope), so those
+# are skipped and logged, not silently dropped.
+EQUIPMENT_BACKEND = os.getenv("EQUIPMENT_BACKEND", "sqlite")
+
 # ── Document upload settings ──────────────────────────────────────────────────
 
 # Folder where uploaded files are stored, organised as uploads/{project_id}/
