@@ -20,6 +20,14 @@ FLASK_DEBUG = os.getenv("FLASK_DEBUG", "true").lower() == "true"
 # Port the Flask app will run on
 FLASK_PORT = int(os.getenv("FLASK_PORT", 5000))
 
+# ── Database backend (Phase 3 migration seam) ─────────────────────────────────
+# "sqlite" (default) — every domain still reads/writes pharmagpt.db, unchanged.
+# "postgres" — reserved for later Phase 3 sub-phases (3.2+) to flip per domain
+# once that domain's Postgres tables are populated and parity-verified. Setting
+# this alone does not change any behavior yet; no code reads it until a
+# domain's dual-write cutover lands. See docs/PHASE3_EXECUTION_PLAN.md.
+DATABASE_BACKEND = os.getenv("DATABASE_BACKEND", "sqlite")
+
 # ── Document upload settings ──────────────────────────────────────────────────
 
 # Folder where uploaded files are stored, organised as uploads/{project_id}/
