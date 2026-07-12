@@ -860,7 +860,7 @@ def get_kb_documents(folder: str | None = None, tag: str | None = None,
                    original_name, file_type, file_size, word_count, page_count,
                    extraction_status, upload_date, extraction_progress_current,
                    extraction_progress_total, extraction_engine, quality_score,
-                   pages_failed, error_message
+                   pages_failed, error_message, postgres_id
             FROM kb_documents {where} ORDER BY upload_date DESC""",
         params,
     ).fetchall()
