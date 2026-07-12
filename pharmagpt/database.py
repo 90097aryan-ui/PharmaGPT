@@ -243,6 +243,12 @@ def init_db() -> None:
         _add_column_if_missing(conn, _table, "error_message",               "TEXT NOT NULL DEFAULT ''")
     conn.commit()
 
+    # ── Phase 3.3 dual-write bookkeeping (docs/PHASE3_EXECUTION_PLAN.md) ──────
+    # Migration bookkeeping only, not part of the target Postgres schema —
+    # same pattern as projects.postgres_id (Phase 3.2).
+    _add_column_if_missing(conn, "kb_documents", "postgres_id", "TEXT DEFAULT NULL")
+    conn.commit()
+
     # ── Risk Management Suite tables ──────────────────────────────────────────
     from pharmagpt.risk_database import RISK_SCHEMA
     conn.executescript(RISK_SCHEMA)
@@ -944,6 +950,17 @@ def delete_kb_document(kb_id: int) -> None:
     """Delete a KB document row by id."""
     conn = get_connection()
     conn.execute("DELETE FROM kb_documents WHERE id = ?", (kb_id,))
+    conn.commit()
+    conn.close()
+
+
+def set_kb_document_postgres_id(kb_id: int, postgres_id: str) -> None:
+    """Record the Postgres `documents.id` (uuid) this SQLite kb_documents
+    row was dual-written to (Phase 3.3, docs/PHASE3_EXECUTION_PLAN.md).
+    Pure migration bookkeeping, same pattern as
+    set_project_postgres_id (Phase 3.2)."""
+    conn = get_connection()
+    conn.execute("UPDATE kb_documents SET postgres_id = ? WHERE id = ?", (postgres_id, kb_id))
     conn.commit()
     conn.close()
 

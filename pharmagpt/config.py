@@ -46,6 +46,18 @@ DATABASE_BACKEND = os.getenv("DATABASE_BACKEND", "sqlite")
 # (3.4) and the route/id-shape work land, not silently attempted here.
 PROJECTS_BACKEND = os.getenv("PROJECTS_BACKEND", "sqlite")
 
+# KB_BACKEND: same two states as PROJECTS_BACKEND. Dual-write covers create
+# and delete (as "archive" — see pharmagpt/db/kb_repo.py, Postgres RESTRICTs
+# hard-deleting a documents row that still has document_versions, and the
+# target architecture treats deletion as a lifecycle transition anyway).
+# Extracted-text sync is NOT covered by dual-write in this iteration — that
+# arrives asynchronously via the shared services/document_processor.py
+# pipeline, which is not touched here (roadmap Migration Principle 1: zero
+# unnecessary rewrites to shared, tenancy-agnostic infrastructure). A
+# one-time copy happens at backfill time; ongoing drift is expected and
+# accepted until a later increment wires the extraction-completion path.
+KB_BACKEND = os.getenv("KB_BACKEND", "sqlite")
+
 # ── Document upload settings ──────────────────────────────────────────────────
 
 # Folder where uploaded files are stored, organised as uploads/{project_id}/
