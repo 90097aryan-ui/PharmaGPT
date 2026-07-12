@@ -17,12 +17,82 @@ GET  /projects/<id>/messages         load chat history for replay
 POST /clear                          clear chat history for a project
 """
 
+import logging
+
+from flask import Blueprint, g, jsonify, request
+
+from pharmagpt import config
 from pharmagpt import database as db
 from pharmagpt import qms_database as qmsdb
-from flask import Blueprint, jsonify, request
+from pharmagpt.auth.decorators import extract_bearer_token
+from pharmagpt.db import projects_repo
 from pharmagpt.state import history_cache
 
 bp = Blueprint("projects", __name__)
+logger = logging.getLogger(__name__)
+
+
+# ── Phase 3.2 dual-write (docs/PHASE3_EXECUTION_PLAN.md) ───────────────────────
+# Active only when PROJECTS_BACKEND=dual. SQLite remains the source of truth
+# and the response the caller sees; a Postgres failure here is logged and
+# swallowed, never raised — it must never turn a successful SQLite write into
+# a failed request.
+
+def _dual_write_create(project: dict) -> None:
+    if config.PROJECTS_BACKEND != "dual":
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return  # Super Admin has no company — nothing to dual-write against
+    try:
+        pg_row = projects_repo.create_project(
+            extract_bearer_token(), tenant.company_id,
+            name=project["name"], status=project.get("status") or "active",
+            target_date=project.get("target_date"),
+            risk_category=project.get("risk_category") or "",
+            protocol_number=project.get("protocol_number") or "",
+            report_number=project.get("report_number") or "",
+        )
+        db.set_project_postgres_id(project["id"], pg_row["id"])
+    except Exception:
+        logger.exception("Phase 3.2 dual-write: failed to sync new project %s to Postgres", project["id"])
+
+
+def _dual_write_update(project: dict) -> None:
+    if config.PROJECTS_BACKEND != "dual":
+        return
+    postgres_id = project.get("postgres_id")
+    if not postgres_id:
+        return  # never dual-written on create (e.g. flag was off then) — skip
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        projects_repo.update_project(
+            extract_bearer_token(), tenant.company_id, postgres_id,
+            name=project["name"], status=project.get("status") or "active",
+            target_date=project.get("target_date"),
+            risk_category=project.get("risk_category") or "",
+            protocol_number=project.get("protocol_number") or "",
+            report_number=project.get("report_number") or "",
+        )
+    except Exception:
+        logger.exception("Phase 3.2 dual-write: failed to sync project %s update to Postgres", project["id"])
+
+
+def _dual_write_delete(project: dict) -> None:
+    if config.PROJECTS_BACKEND != "dual":
+        return
+    postgres_id = project.get("postgres_id")
+    if not postgres_id:
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        projects_repo.delete_project(extract_bearer_token(), tenant.company_id, postgres_id)
+    except Exception:
+        logger.exception("Phase 3.2 dual-write: failed to sync project %s delete to Postgres", project["id"])
 
 
 @bp.route("/projects", methods=["GET"])
@@ -62,6 +132,7 @@ def create_project():
         report_number=data.get("report_number", "").strip(),
     )
     qmsdb.add_audit_entry("project", project["id"], "Project created")
+    _dual_write_create(project)
     return jsonify(project), 201
 
 
@@ -82,16 +153,19 @@ def update_project(project_id):
     data    = request.get_json() or {}
     updated = db.update_project(project_id, data)
     qmsdb.add_audit_entry("project", project_id, "Project details updated")
+    _dual_write_update(updated)
     return jsonify(updated)
 
 
 @bp.route("/projects/<int:project_id>", methods=["DELETE"])
 def delete_project(project_id):
     """Delete a project and cascade to its messages, documents, and generated docs."""
-    if not db.get_project(project_id):
+    existing = db.get_project(project_id)
+    if not existing:
         return jsonify({"error": "Project not found"}), 404
     qmsdb.add_audit_entry("project", project_id, "Project deleted")
     db.delete_project(project_id)
+    _dual_write_delete(existing)
     history_cache.pop(project_id, None)
     return jsonify({"status": "deleted"})
 
