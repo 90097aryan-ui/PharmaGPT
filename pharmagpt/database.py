@@ -305,6 +305,7 @@ def init_db() -> None:
         ("report_number",                 "TEXT DEFAULT ''"),
         ("equipment_id",                  "TEXT DEFAULT ''"),
         ("migrated_from_val_project_id",  "INTEGER DEFAULT NULL"),
+        ("postgres_id",                   "TEXT DEFAULT NULL"),
     ):
         _add_column_if_missing(conn, "projects", _col, _ddl)
     conn.commit()
@@ -462,6 +463,17 @@ def delete_project(project_id: int) -> None:
     """Delete a project and all its messages (cascade handles messages)."""
     conn = get_connection()
     conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    conn.commit()
+    conn.close()
+
+
+def set_project_postgres_id(project_id: int, postgres_id: str) -> None:
+    """Record the Postgres `projects.id` (uuid) this SQLite project row was
+    dual-written to (Phase 3.2, docs/PHASE3_EXECUTION_PLAN.md). Pure
+    migration bookkeeping — postgres_id is not part of the target Postgres
+    schema and has no meaning once SQLite is retired (Phase 3.6)."""
+    conn = get_connection()
+    conn.execute("UPDATE projects SET postgres_id = ? WHERE id = ?", (postgres_id, project_id))
     conn.commit()
     conn.close()
 
