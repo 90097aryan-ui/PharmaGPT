@@ -28,6 +28,24 @@ FLASK_PORT = int(os.getenv("FLASK_PORT", 5000))
 # domain's dual-write cutover lands. See docs/PHASE3_EXECUTION_PLAN.md.
 DATABASE_BACKEND = os.getenv("DATABASE_BACKEND", "sqlite")
 
+# Per-domain migration flags (Phase 3.2+, docs/PHASE3_EXECUTION_PLAN.md).
+# Each domain gets its own flag so one domain's cutover never gates another's.
+#
+# Projects specifically supports only two states, not three, on inspection:
+#   "sqlite" (default) — unchanged today's behavior, reads+writes SQLite only.
+#   "dual"             — SQLite stays the read source of truth; every write
+#                         also best-effort syncs to Postgres (failures logged,
+#                         never raised, SQLite write is never blocked).
+# A "postgres" (read-cutover) state is deliberately not offered yet: the
+# target `projects` table (DATABASE_ARCHITECTURE.md §4.2) drops the
+# equipment_name/manufacturer/department/validation_type/model/location
+# fields (that data's home becomes the Equipment Library, Phase 3.4) and
+# uses uuid ids where every route today uses `<int:project_id>` — flipping
+# reads over now would change the API shape and break the frontend, not
+# just move where the bytes live. Read cutover is revisited once Equipment
+# (3.4) and the route/id-shape work land, not silently attempted here.
+PROJECTS_BACKEND = os.getenv("PROJECTS_BACKEND", "sqlite")
+
 # ── Document upload settings ──────────────────────────────────────────────────
 
 # Folder where uploaded files are stored, organised as uploads/{project_id}/
