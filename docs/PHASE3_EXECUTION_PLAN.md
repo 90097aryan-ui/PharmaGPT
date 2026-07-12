@@ -25,12 +25,12 @@
 - **Success criteria:** Project CRUD identical from the UI; zero parity drift over a 48h Staging soak.
 
 ### 3.3 Knowledge Base Migration
-- **Objective:** Migrate `kb_documents` into `documents`/`document_versions` per `DB-002`, behind a flag.
-- **Files:** `pharmagpt/database.py`, `pharmagpt/routes/knowledge_base.py`, `pharmagpt/static/js/knowledge_base.js`.
-- **DB impact:** `documents` (`source_context='knowledge_base'`)/`document_versions`/`document_categories`/`tags` populated.
-- **Estimated commits:** 4. **Rollback point:** Flag off → KB routes revert to `kb_documents`.
-- **Testing:** Existing KB tests; browse/search/download parity check.
-- **Success criteria:** Every KB doc browsable/searchable/downloadable exactly as before.
+- **Objective:** Dual-write `kb_documents` create/delete into `documents`/`document_versions`/`document_categories`/`tags`/`document_tags` per `DB-002` (SQLite stays the read source of truth), backfill existing rows under the same bootstrap company as 3.2. No frontend change — `static/js/knowledge_base.js` untouched, no API contract change.
+- **Files:** `migrations/0006_documents_rls_*.sql` (new), `pharmagpt/db/kb_repo.py` (new), `pharmagpt/config.py` (+`KB_BACKEND` flag: `sqlite`|`dual`), `pharmagpt/database.py` (+`postgres_id` column/setter on `kb_documents`), `pharmagpt/routes/knowledge_base.py`, `scripts/backfill_kb_documents.py` / `check_kb_parity.py` (new).
+- **DB impact:** `documents` (`source_context='knowledge_base'`, `document_type='kb_document'` — SQLite has no finer type taxonomy to draw from), `document_versions`, `document_categories` (from SQLite `folder`), `tags`/`document_tags` (from comma-separated `tags`) populated. Created directly in `status='approved'` — KB uploads have no review gate in the current app. `storage_path` records today's local-disk path as a placeholder; actual byte migration is roadmap Phase 4, not this milestone. **Extracted-text sync is out of scope for dual-write** — it arrives asynchronously via the shared `services/document_processor.py` pipeline (used by KB *and* project documents alike), which this milestone does not touch, per Migration Principle 1 (zero unnecessary rewrites to shared infrastructure); backfill does a one-time copy only, so parity checks on `extracted_text` are expected to drift and are deliberately not checked. Delete dual-writes as `status='archived'`, not a hard delete — Postgres RESTRICTs deleting a `documents` row with `document_versions`, and archival is the architecturally correct behavior anyway; SQLite's real hard delete is unchanged. *(Amended from the original wording during implementation — see commit history.)*
+- **Estimated commits:** 4 (actual: 5, including a bugfix — see summary). **Rollback point:** Flag off (default) → fully inert; revert commits to remove code.
+- **Testing:** 13 new tests (dual-write orchestration + both scripts, fully mocked) + full existing suite, 0 regression.
+- **Success criteria:** Every KB doc browsable/searchable/downloadable exactly as before (verified: no route behavior changed, only additive dual-write side effects gated by a default-off flag).
 
 ### 3.4 Equipment Library Migration — *depends on 3.3*
 - **Objective:** Re-parent `equipment` to `company_id`, introduce `equipment_links`, behind a flag.
@@ -63,8 +63,12 @@
 - **Effort creep on 3.5** (5 files, largest domain) — matches roadmap's own Phase 9 X-Large estimate; do not compress.
 
 ## 3. Deployment checkpoints
-- After **3.1**: schema-only deploy to Staging → validate → **stop; wait for user go-ahead** before 3.2.
-- After each of **3.2–3.5**: ≥48h Staging dual-write soak → manual 2-company RLS isolation check → flag-flip deploy to Staging → then, separately and only after Staging is confirmed stable, Production.
+
+**Execution mode (revised after 3.2):** code development for 3.3 onward proceeds continuously, module to module, without waiting for a full 48h Staging soak of the prior module — only for that module's code to be complete, locally tested, and (once deployed) show a clean initial backfill + parity check with no deployment errors. Parity checks for already-shipped modules continue in the background while later modules are built. This does not touch the non-negotiables: SQLite stays the sole read source of truth until final cutover, every write dual-writes to Postgres, and the actual PostgreSQL read cutover / SQLite retirement (3.6) does not happen until **every** migrated module (3.2–3.5) has completed validation with zero drift — that gate is unchanged and absolute.
+
+- After **3.1**: schema-only deploy to Staging → validate → done (confirmed).
+- After each of **3.2–3.5**: deploy → run backfill → run parity check once → if clean and no deployment errors, code development immediately continues to the next module. Parity checks keep running periodically against every already-shipped module in parallel. A full extended soak and the 2-company RLS isolation check still happen before any flag is flipped beyond `dual`, but no longer gate starting the *next* module's development.
+- Before **3.6** (cutover): every one of 3.2–3.5 must independently show zero parity drift over its own extended soak — this checkpoint is not compressed, regardless of how fast 3.2–3.5's code shipped.
 - After **3.6**: tag `phase3-complete`, full regression run, hand off to roadmap Phase 7+ (Project Workspace membership, AI Engine, Document Engine) — out of this plan's scope.
 
 ## 4. Go / No-Go checklist (per milestone)
