@@ -92,6 +92,17 @@ def get_project_equipment(project_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_all_equipment() -> list[dict]:
+    """Every Equipment record across every Project (Phase 3.4,
+    docs/PHASE3_EXECUTION_PLAN.md — the backfill/parity scripts need a
+    company-wide view, not a per-project one, since Postgres equipment is
+    company-owned)."""
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM equipment ORDER BY created_at DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def update_equipment(equipment_id: int, data: dict) -> dict | None:
     conn = get_connection()
     existing = conn.execute("SELECT * FROM equipment WHERE id = ?", (equipment_id,)).fetchone()
