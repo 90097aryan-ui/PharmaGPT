@@ -18,13 +18,109 @@ DELETE /equipment/<id>/documents/<link_id>   unlink a document
 GET    /equipment/<id>/ai-context            assembled AI-context bundle (architecture only)
 """
 
-from flask import Blueprint, jsonify, request
+import logging
 
+from flask import Blueprint, g, jsonify, request
+
+from pharmagpt import config
 from pharmagpt import database as db
 from pharmagpt import equipment_database as equipdb
+from pharmagpt.auth.decorators import extract_bearer_token
+from pharmagpt.db import equipment_repo
 from pharmagpt.services import equipment_service
 
 bp = Blueprint("equipment", __name__)
+logger = logging.getLogger(__name__)
+
+
+# ── Phase 3.4 dual-write (docs/PHASE3_EXECUTION_PLAN.md) ───────────────────────
+# Same non-blocking policy as routes/projects.py and routes/knowledge_base.py:
+# active only when EQUIPMENT_BACKEND=dual, never raises, SQLite stays the
+# source of truth and the response the caller sees.
+
+def _dual_write_create(equipment: dict) -> None:
+    if config.EQUIPMENT_BACKEND != "dual":
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        pg_row = equipment_repo.create_equipment(extract_bearer_token(), tenant.company_id, equipment)
+        equipdb.set_equipment_postgres_id(equipment["id"], pg_row["id"])
+    except Exception:
+        logger.exception("Phase 3.4 dual-write: failed to sync new equipment %s to Postgres", equipment["id"])
+
+
+def _dual_write_update(equipment: dict) -> None:
+    if config.EQUIPMENT_BACKEND != "dual":
+        return
+    postgres_id = equipment.get("postgres_id")
+    if not postgres_id:
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        equipment_repo.update_equipment(extract_bearer_token(), tenant.company_id, postgres_id, equipment)
+    except Exception:
+        logger.exception("Phase 3.4 dual-write: failed to sync equipment %s update to Postgres", equipment["id"])
+
+
+def _dual_write_delete(equipment: dict) -> None:
+    if config.EQUIPMENT_BACKEND != "dual":
+        return
+    postgres_id = equipment.get("postgres_id")
+    if not postgres_id:
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        equipment_repo.delete_equipment(extract_bearer_token(), tenant.company_id, postgres_id)
+    except Exception:
+        logger.exception(
+            "Phase 3.4 dual-write: failed to delete equipment %s in Postgres "
+            "(expected if equipment_links still reference it — Postgres RESTRICTs)",
+            equipment["id"],
+        )
+
+
+def _dual_write_link(equipment_id: int, link: dict) -> None:
+    if config.EQUIPMENT_BACKEND != "dual":
+        return
+    if link.get("source_type") != "kb":
+        return  # project-sourced links have no Postgres document yet — see config.py
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    equipment = equipdb.get_equipment(equipment_id)
+    kb_doc = db.get_kb_document(link["source_id"])
+    equipment_postgres_id = (equipment or {}).get("postgres_id")
+    kb_postgres_id = (kb_doc or {}).get("postgres_id")
+    if not equipment_postgres_id or not kb_postgres_id:
+        return  # one or both sides not dual-written yet — nothing to link to
+    try:
+        pg_link = equipment_repo.link_kb_document(
+            extract_bearer_token(), tenant.company_id, equipment_postgres_id, kb_postgres_id
+        )
+        equipdb.set_equipment_document_postgres_id(link["id"], pg_link["id"])
+    except Exception:
+        logger.exception("Phase 3.4 dual-write: failed to sync equipment link %s to Postgres", link["id"])
+
+
+def _dual_write_unlink(link: dict) -> None:
+    if config.EQUIPMENT_BACKEND != "dual":
+        return
+    postgres_id = link.get("postgres_id")
+    if not postgres_id:
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        equipment_repo.unlink(extract_bearer_token(), tenant.company_id, postgres_id)
+    except Exception:
+        logger.exception("Phase 3.4 dual-write: failed to unlink equipment link %s in Postgres", link["id"])
 
 
 # ── Project-scoped list / create ──────────────────────────────────────────────
@@ -46,6 +142,7 @@ def create_equipment(project_id):
         return jsonify({"error": "Equipment name is required"}), 400
 
     equipment = equipdb.create_equipment(project_id, data)
+    _dual_write_create(equipment)
     return jsonify(equipment), 201
 
 
@@ -59,6 +156,7 @@ def import_legacy_equipment(project_id):
     equipment = equipdb.import_legacy_equipment(project_id)
     if not equipment:
         return jsonify({"error": "Project has no legacy equipment information to import"}), 400
+    _dual_write_create(equipment)
     return jsonify(equipment), 201
 
 
@@ -98,14 +196,17 @@ def update_equipment(equipment_id):
     if "name" in data and not (data.get("name") or "").strip():
         return jsonify({"error": "Equipment name cannot be empty"}), 400
     updated = equipdb.update_equipment(equipment_id, data)
+    _dual_write_update(updated)
     return jsonify(updated)
 
 
 @bp.route("/equipment/<int:equipment_id>", methods=["DELETE"])
 def delete_equipment(equipment_id):
-    if not equipdb.get_equipment(equipment_id):
+    existing = equipdb.get_equipment(equipment_id)
+    if not existing:
         return jsonify({"error": "Equipment not found"}), 404
     equipdb.delete_equipment(equipment_id)
+    _dual_write_delete(existing)
     return jsonify({"status": "deleted"})
 
 
@@ -142,6 +243,7 @@ def link_equipment_document(equipment_id):
 
     title_snapshot = source_doc.get("title") or source_doc.get("original_name") or ""
     link = equipdb.link_equipment_document(equipment_id, document_role, source_type, source_id, title_snapshot)
+    _dual_write_link(equipment_id, link)
     return jsonify(link), 201
 
 
@@ -149,7 +251,10 @@ def link_equipment_document(equipment_id):
 def unlink_equipment_document(equipment_id, link_id):
     if not equipdb.get_equipment(equipment_id):
         return jsonify({"error": "Equipment not found"}), 404
+    existing_link = equipdb.get_equipment_document_link(link_id)
     equipdb.unlink_equipment_document(link_id)
+    if existing_link:
+        _dual_write_unlink(existing_link)
     return jsonify({"status": "unlinked"})
 
 
