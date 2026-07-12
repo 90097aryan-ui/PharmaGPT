@@ -14,12 +14,58 @@ DELETE /kb/documents/<id>            delete doc + file
 GET    /kb/folders/counts            per-folder document counts for sidebar badges
 """
 
+import logging
+
+from flask import Blueprint, g, jsonify, request, send_file
+
+from pharmagpt import config
 from pharmagpt import database as db
 from pharmagpt import documents as doc_utils
+from pharmagpt.auth.decorators import extract_bearer_token
+from pharmagpt.db import kb_repo
 from pharmagpt.services.document_processor import process_document_async
-from flask import Blueprint, jsonify, request, send_file
 
 bp = Blueprint("knowledge_base", __name__)
+logger = logging.getLogger(__name__)
+
+
+# ── Phase 3.3 dual-write (docs/PHASE3_EXECUTION_PLAN.md) ───────────────────────
+# Same policy as routes/projects.py: active only when KB_BACKEND=dual, never
+# raises, SQLite stays the source of truth and the response the caller sees.
+
+def _dual_write_create(kb_doc: dict) -> None:
+    if config.KB_BACKEND != "dual":
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return  # Super Admin has no company — nothing to dual-write against
+    try:
+        result = kb_repo.create_kb_document(
+            extract_bearer_token(), tenant.company_id,
+            title=kb_doc["title"], folder=kb_doc["folder"],
+            tags_csv=kb_doc.get("tags") or "",
+            stored_filename=kb_doc["stored_filename"],
+            file_type=kb_doc["file_type"], file_size=kb_doc["file_size"],
+            effective_date=kb_doc.get("effective_date"),
+        )
+        db.set_kb_document_postgres_id(kb_doc["id"], result["document_id"])
+    except Exception:
+        logger.exception("Phase 3.3 dual-write: failed to sync new KB document %s to Postgres", kb_doc["id"])
+
+
+def _dual_write_delete(kb_doc: dict) -> None:
+    if config.KB_BACKEND != "dual":
+        return
+    postgres_id = kb_doc.get("postgres_id")
+    if not postgres_id:
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        kb_repo.archive_document(extract_bearer_token(), tenant.company_id, postgres_id)
+    except Exception:
+        logger.exception("Phase 3.3 dual-write: failed to archive KB document %s in Postgres", kb_doc["id"])
 
 
 @bp.route("/kb/documents", methods=["GET"])
@@ -97,6 +143,7 @@ def kb_upload_document():
     )
 
     db.mark_kb_pending(kb_doc["id"])
+    _dual_write_create(kb_doc)
     process_document_async("kb", kb_doc["id"], doc_utils.get_kb_file_path(stored_filename), extension)
     return jsonify(db.get_kb_document(kb_doc["id"])), 201
 
@@ -185,6 +232,7 @@ def kb_delete_document(kb_id):
 
     doc_utils.delete_kb_from_disk(doc["stored_filename"])
     db.delete_kb_document(kb_id)
+    _dual_write_delete(doc)
     return jsonify({"status": "deleted"})
 
 
