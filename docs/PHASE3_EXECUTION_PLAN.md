@@ -16,9 +16,9 @@
 - **Success criteria:** App behaves identically to `phase2-auth-complete`; schema exists in Staging; no code path touches the new tables yet.
 
 ### 3.2 Projects Migration
-- **Objective:** Dual-write `projects`/`project_members`, backfill existing rows under the bootstrap company, cut `routes/projects.py` reads over behind a flag.
-- **Files:** `pharmagpt/database.py` (projects functions only), `pharmagpt/routes/projects.py`, new `pharmagpt/db/projects_repo.py`.
-- **DB impact:** `projects`/`project_members` populated; SQLite remains source of truth until flag flip confirmed.
+- **Objective:** Dual-write `projects`, backfill existing rows under a bootstrap company, cut `routes/projects.py` reads over behind a flag. `project_members` is created and RLS-protected but **not** populated here — SQLite has no real per-project membership data to backfill from (owner/approver are free-text, not user references); that is Phase 7 (Project Workspace) territory. *(Amended after 3.1's implementation surfaced this gap — see commit history.)*
+- **Files:** `migrations/0005_projects_rls_*.sql` (new), `pharmagpt/db/projects_repo.py` (new), `pharmagpt/config.py` (+`PROJECTS_BACKEND` flag: `sqlite`|`dual`|`postgres`), `pharmagpt/routes/projects.py`, `scripts/backfill_projects.py` (new), `scripts/check_projects_parity.py` (new).
+- **DB impact:** `projects` populated (name/status/owner text.../target_date/risk_category/protocol_number/report_number map directly; `equipment_name`/`manufacturer`/`department`/`validation_type`/`model`/`location` have no column in the target schema — per `PLATFORM_ARCHITECTURE.md` §10 that data's home is the Equipment Library, wired in 3.4 — so it stays SQLite-only until then, which is fine since SQLite remains the source of truth throughout 3.2). `owner_user_id`/`approver_user_id` stay `NULL` (current app stores free text, not a user reference; resolving that is Phase 7, not a 3.2 concern).
 - **Estimated commits:** 4.
 - **Rollback point:** Flag off → reverts to SQLite; Postgres rows ignorable.
 - **Testing:** Existing project tests + new dual-write parity diff.
