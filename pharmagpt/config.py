@@ -69,6 +69,27 @@ KB_BACKEND = os.getenv("KB_BACKEND", "sqlite")
 # are skipped and logged, not silently dropped.
 EQUIPMENT_BACKEND = os.getenv("EQUIPMENT_BACKEND", "sqlite")
 
+# QMS_BACKEND: same two states, one flag covering all four Phase 3.5 record
+# types (deviations, capas, change_controls, risk_assessments) — they are
+# one milestone in docs/PHASE3_EXECUTION_PLAN.md, not four, and share one
+# repo module (pharmagpt/db/qms_repo.py). Dual-write covers only the flat
+# top-level fields with a column in DATABASE_ARCHITECTURE.md §4.7's target
+# tables (title, status, project_id) plus audit_trail entries for the three
+# QMS types that write one on create (deviation/capa/change_control — risk
+# assessments use a separate, SQLite-only risk_approval table today, not
+# qms_audit_trail, so there's no audit entry to mirror for that type here).
+# The current build's much richer sub-structures — investigation
+# (fishbone/5-why/timeline), impact assessments, CAPA actions/effectiveness
+# checks, change-control impact/actions/links — have no table in the frozen
+# target schema (DATABASE_ARCHITECTURE.md §4.7 defines only the four flat
+# tables) and are intentionally NOT dual-written; they remain SQLite-only,
+# same documented-gap treatment as Projects' equipment_name (3.2).
+# attachments/comments/approvals dual-write is deferred entirely in this
+# iteration — audit_trail already captures every state-changing action
+# with actor/timestamp/reason, which is the regulator-relevant minimum;
+# the remaining shared tables are a follow-up, not silently skipped.
+QMS_BACKEND = os.getenv("QMS_BACKEND", "sqlite")
+
 # ── Document upload settings ──────────────────────────────────────────────────
 
 # Folder where uploaded files are stored, organised as uploads/{project_id}/

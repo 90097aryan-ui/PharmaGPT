@@ -133,6 +133,15 @@ def delete_deviation(deviation_id: int) -> None:
     conn.close()
 
 
+def set_deviation_postgres_id(deviation_id: int, postgres_id: str) -> None:
+    """Record the Postgres `deviations.id` (uuid) this SQLite deviation row
+    was dual-written to (Phase 3.5, docs/PHASE3_EXECUTION_PLAN.md)."""
+    conn = get_connection()
+    conn.execute("UPDATE qms_deviations SET postgres_id = ? WHERE id = ?", (postgres_id, deviation_id))
+    conn.commit()
+    conn.close()
+
+
 def get_dashboard_stats() -> dict:
     conn = get_connection()
     rows = conn.execute("SELECT status, deviation_type, deviation_category, created_at FROM qms_deviations").fetchall()

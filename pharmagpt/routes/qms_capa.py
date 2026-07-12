@@ -35,15 +35,86 @@ POST   /qms/capa/<id>/export/docx           DOCX export
 """
 
 import io
+import logging
 import re
-from flask import Blueprint, jsonify, request, send_file
+from flask import Blueprint, g, jsonify, request, send_file
 
+from pharmagpt import config
+from pharmagpt import database as db
 from pharmagpt import qms_capa_database as cdb
 from pharmagpt import qms_deviation_database as ddb
 from pharmagpt import qms_database as qmsdb
+from pharmagpt.auth.decorators import extract_bearer_token
+from pharmagpt.db import qms_repo
 from pharmagpt.services import qms_capa_service as svc
 
 bp = Blueprint("qms_capa", __name__, url_prefix="/qms/capa")
+logger = logging.getLogger(__name__)
+RECORD_TYPE = "capa"
+
+
+# ── Phase 3.5 dual-write (docs/PHASE3_EXECUTION_PLAN.md) ───────────────────────
+
+def _resolve_project_postgres_id(project_id):
+    if not project_id:
+        return None
+    project = db.get_project(project_id)
+    return (project or {}).get("postgres_id")
+
+
+def _dual_write_create(capa: dict, audit_action: str, performed_by: str) -> None:
+    if config.QMS_BACKEND != "dual":
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        pg_row = qms_repo.create_record(
+            extract_bearer_token(), tenant.company_id, RECORD_TYPE,
+            title=capa["title"], status=capa.get("status") or "open",
+            project_id=_resolve_project_postgres_id(capa.get("project_id")),
+        )
+        cdb.set_capa_postgres_id(capa["id"], pg_row["id"])
+        qms_repo.add_audit_entry(
+            extract_bearer_token(), tenant.company_id, RECORD_TYPE, pg_row["id"],
+            audit_action, actor_user_id=tenant.user_id,
+        )
+    except Exception:
+        logger.exception("Phase 3.5 dual-write: failed to sync new CAPA %s to Postgres", capa["id"])
+
+
+def _dual_write_update(capa: dict) -> None:
+    if config.QMS_BACKEND != "dual":
+        return
+    postgres_id = capa.get("postgres_id")
+    if not postgres_id:
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        qms_repo.update_record(
+            extract_bearer_token(), tenant.company_id, RECORD_TYPE, postgres_id,
+            title=capa["title"], status=capa.get("status") or "open",
+            project_id=_resolve_project_postgres_id(capa.get("project_id")),
+        )
+    except Exception:
+        logger.exception("Phase 3.5 dual-write: failed to sync CAPA %s update to Postgres", capa["id"])
+
+
+def _dual_write_delete(capa: dict) -> None:
+    if config.QMS_BACKEND != "dual":
+        return
+    postgres_id = capa.get("postgres_id")
+    if not postgres_id:
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        qms_repo.delete_record(extract_bearer_token(), tenant.company_id, RECORD_TYPE, postgres_id)
+    except Exception:
+        logger.exception("Phase 3.5 dual-write: failed to delete CAPA %s in Postgres", capa["id"])
 
 
 # ── CAPAs ──────────────────────────────────────────────────────────────────────
@@ -66,6 +137,7 @@ def create_capa():
         return jsonify({"error": "CAPA title is required"}), 400
     capa = cdb.create_capa(data)
     qmsdb.add_audit_entry("capa", capa["id"], "CAPA created", data.get("initiated_by", ""))
+    _dual_write_create(capa, "CAPA created", data.get("initiated_by", ""))
     return jsonify(capa), 201
 
 
@@ -87,14 +159,18 @@ def update_capa(cid):
     if not cdb.get_capa(cid):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
-    return jsonify(cdb.update_capa(cid, data))
+    updated = cdb.update_capa(cid, data)
+    _dual_write_update(updated)
+    return jsonify(updated)
 
 
 @bp.route("/<int:cid>", methods=["DELETE"])
 def delete_capa(cid):
-    if not cdb.get_capa(cid):
+    existing = cdb.get_capa(cid)
+    if not existing:
         return jsonify({"error": "Not found"}), 404
     cdb.delete_capa(cid)
+    _dual_write_delete(existing)
     return jsonify({"deleted": True})
 
 

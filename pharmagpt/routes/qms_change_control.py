@@ -46,16 +46,87 @@ POST   /qms/change-control/<id>/export/docx               DOCX export
 """
 
 import io
+import logging
 import re
-from flask import Blueprint, jsonify, request, send_file
+from flask import Blueprint, g, jsonify, request, send_file
 
+from pharmagpt import config
+from pharmagpt import database as db
 from pharmagpt import qms_change_control_database as ccdb
 from pharmagpt import qms_deviation_database as ddb
 from pharmagpt import qms_capa_database as cdb
 from pharmagpt import qms_database as qmsdb
+from pharmagpt.auth.decorators import extract_bearer_token
+from pharmagpt.db import qms_repo
 from pharmagpt.services import qms_change_control_service as svc
 
 bp = Blueprint("qms_change_control", __name__, url_prefix="/qms/change-control")
+logger = logging.getLogger(__name__)
+RECORD_TYPE = "change_control"
+
+
+# ── Phase 3.5 dual-write (docs/PHASE3_EXECUTION_PLAN.md) ───────────────────────
+
+def _resolve_project_postgres_id(project_id):
+    if not project_id:
+        return None
+    project = db.get_project(project_id)
+    return (project or {}).get("postgres_id")
+
+
+def _dual_write_create(cc: dict, audit_action: str, performed_by: str) -> None:
+    if config.QMS_BACKEND != "dual":
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        pg_row = qms_repo.create_record(
+            extract_bearer_token(), tenant.company_id, RECORD_TYPE,
+            title=cc["title"], status=cc.get("status") or "open",
+            project_id=_resolve_project_postgres_id(cc.get("project_id")),
+        )
+        ccdb.set_change_control_postgres_id(cc["id"], pg_row["id"])
+        qms_repo.add_audit_entry(
+            extract_bearer_token(), tenant.company_id, RECORD_TYPE, pg_row["id"],
+            audit_action, actor_user_id=tenant.user_id,
+        )
+    except Exception:
+        logger.exception("Phase 3.5 dual-write: failed to sync new change control %s to Postgres", cc["id"])
+
+
+def _dual_write_update(cc: dict) -> None:
+    if config.QMS_BACKEND != "dual":
+        return
+    postgres_id = cc.get("postgres_id")
+    if not postgres_id:
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        qms_repo.update_record(
+            extract_bearer_token(), tenant.company_id, RECORD_TYPE, postgres_id,
+            title=cc["title"], status=cc.get("status") or "open",
+            project_id=_resolve_project_postgres_id(cc.get("project_id")),
+        )
+    except Exception:
+        logger.exception("Phase 3.5 dual-write: failed to sync change control %s update to Postgres", cc["id"])
+
+
+def _dual_write_delete(cc: dict) -> None:
+    if config.QMS_BACKEND != "dual":
+        return
+    postgres_id = cc.get("postgres_id")
+    if not postgres_id:
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        qms_repo.delete_record(extract_bearer_token(), tenant.company_id, RECORD_TYPE, postgres_id)
+    except Exception:
+        logger.exception("Phase 3.5 dual-write: failed to delete change control %s in Postgres", cc["id"])
 
 
 # ── Change Controls ────────────────────────────────────────────────────────────
@@ -79,6 +150,7 @@ def create_change_control():
         return jsonify({"error": "Change control title is required"}), 400
     cc = ccdb.create_change_control(data)
     qmsdb.add_audit_entry("change_control", cc["id"], "Change control drafted", data.get("requested_by", ""))
+    _dual_write_create(cc, "Change control drafted", data.get("requested_by", ""))
     return jsonify(cc), 201
 
 
@@ -95,14 +167,18 @@ def update_change_control(cc_id):
     if not ccdb.get_change_control(cc_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
-    return jsonify(ccdb.update_change_control(cc_id, data))
+    updated = ccdb.update_change_control(cc_id, data)
+    _dual_write_update(updated)
+    return jsonify(updated)
 
 
 @bp.route("/<int:cc_id>", methods=["DELETE"])
 def delete_change_control(cc_id):
-    if not ccdb.get_change_control(cc_id):
+    existing = ccdb.get_change_control(cc_id)
+    if not existing:
         return jsonify({"error": "Not found"}), 404
     ccdb.delete_change_control(cc_id)
+    _dual_write_delete(existing)
     return jsonify({"deleted": True})
 
 

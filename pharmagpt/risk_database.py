@@ -136,6 +136,16 @@ def delete_assessment(assessment_id: int) -> bool:
     return True
 
 
+def set_assessment_postgres_id(assessment_id: int, postgres_id: str) -> None:
+    """Record the Postgres `risk_assessments.id` (uuid) this SQLite
+    assessment row was dual-written to (Phase 3.5, docs/PHASE3_EXECUTION_PLAN.md)."""
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            "UPDATE risk_assessments SET postgres_id = ? WHERE id = ?", (postgres_id, assessment_id)
+        )
+
+
 def get_dashboard_stats() -> dict:
     conn = get_connection()
     rows = conn.execute("SELECT status, priority, COUNT(*) as cnt FROM risk_assessments GROUP BY status, priority").fetchall()

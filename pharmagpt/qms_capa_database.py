@@ -125,6 +125,15 @@ def delete_capa(capa_id: int) -> None:
     conn.close()
 
 
+def set_capa_postgres_id(capa_id: int, postgres_id: str) -> None:
+    """Record the Postgres `capas.id` (uuid) this SQLite CAPA row was
+    dual-written to (Phase 3.5, docs/PHASE3_EXECUTION_PLAN.md)."""
+    conn = get_connection()
+    conn.execute("UPDATE qms_capas SET postgres_id = ? WHERE id = ?", (postgres_id, capa_id))
+    conn.commit()
+    conn.close()
+
+
 def get_dashboard_stats() -> dict:
     conn = get_connection()
     rows = conn.execute("SELECT id, status, date_initiated, target_closure_date FROM qms_capas").fetchall()

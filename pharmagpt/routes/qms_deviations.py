@@ -34,15 +34,88 @@ POST   /qms/deviations/<id>/export/docx      DOCX export
 """
 
 import io
+import logging
 import re
-from flask import Blueprint, jsonify, request, send_file
+from flask import Blueprint, g, jsonify, request, send_file
 
+from pharmagpt import config
+from pharmagpt import database as db
 from pharmagpt import qms_deviation_database as ddb
 from pharmagpt import qms_capa_database as cdb
 from pharmagpt import qms_database as qmsdb
+from pharmagpt.auth.decorators import extract_bearer_token
+from pharmagpt.db import qms_repo
 from pharmagpt.services import qms_deviation_service as svc
 
 bp = Blueprint("qms_deviations", __name__, url_prefix="/qms/deviations")
+logger = logging.getLogger(__name__)
+RECORD_TYPE = "deviation"
+
+
+# ── Phase 3.5 dual-write (docs/PHASE3_EXECUTION_PLAN.md) ───────────────────────
+# Same non-blocking policy as every other Phase 3 domain: active only when
+# QMS_BACKEND=dual, never raises, SQLite stays the source of truth.
+
+def _resolve_project_postgres_id(project_id):
+    if not project_id:
+        return None
+    project = db.get_project(project_id)
+    return (project or {}).get("postgres_id")
+
+
+def _dual_write_create(deviation: dict, audit_action: str, performed_by: str) -> None:
+    if config.QMS_BACKEND != "dual":
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        pg_row = qms_repo.create_record(
+            extract_bearer_token(), tenant.company_id, RECORD_TYPE,
+            title=deviation["title"], status=deviation.get("status") or "open",
+            project_id=_resolve_project_postgres_id(deviation.get("project_id")),
+        )
+        ddb.set_deviation_postgres_id(deviation["id"], pg_row["id"])
+        qms_repo.add_audit_entry(
+            extract_bearer_token(), tenant.company_id, RECORD_TYPE, pg_row["id"],
+            audit_action, actor_user_id=tenant.user_id,
+        )
+    except Exception:
+        logger.exception("Phase 3.5 dual-write: failed to sync new deviation %s to Postgres", deviation["id"])
+
+
+def _dual_write_update(deviation: dict) -> None:
+    if config.QMS_BACKEND != "dual":
+        return
+    postgres_id = deviation.get("postgres_id")
+    if not postgres_id:
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        qms_repo.update_record(
+            extract_bearer_token(), tenant.company_id, RECORD_TYPE, postgres_id,
+            title=deviation["title"], status=deviation.get("status") or "open",
+            project_id=_resolve_project_postgres_id(deviation.get("project_id")),
+        )
+    except Exception:
+        logger.exception("Phase 3.5 dual-write: failed to sync deviation %s update to Postgres", deviation["id"])
+
+
+def _dual_write_delete(deviation: dict) -> None:
+    if config.QMS_BACKEND != "dual":
+        return
+    postgres_id = deviation.get("postgres_id")
+    if not postgres_id:
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        qms_repo.delete_record(extract_bearer_token(), tenant.company_id, RECORD_TYPE, postgres_id)
+    except Exception:
+        logger.exception("Phase 3.5 dual-write: failed to delete deviation %s in Postgres", deviation["id"])
 
 
 # ── Deviations ─────────────────────────────────────────────────────────────────
@@ -66,6 +139,7 @@ def create_deviation():
         return jsonify({"error": "Deviation title is required"}), 400
     deviation = ddb.create_deviation(data)
     qmsdb.add_audit_entry("deviation", deviation["id"], "Deviation initiated", data.get("initiated_by", ""))
+    _dual_write_create(deviation, "Deviation initiated", data.get("initiated_by", ""))
     return jsonify(deviation), 201
 
 
@@ -82,14 +156,18 @@ def update_deviation(did):
     if not ddb.get_deviation(did):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
-    return jsonify(ddb.update_deviation(did, data))
+    updated = ddb.update_deviation(did, data)
+    _dual_write_update(updated)
+    return jsonify(updated)
 
 
 @bp.route("/<int:did>", methods=["DELETE"])
 def delete_deviation(did):
-    if not ddb.get_deviation(did):
+    existing = ddb.get_deviation(did)
+    if not existing:
         return jsonify({"error": "Not found"}), 404
     ddb.delete_deviation(did)
+    _dual_write_delete(existing)
     return jsonify({"deleted": True})
 
 

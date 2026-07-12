@@ -141,6 +141,15 @@ def delete_change_control(cc_id: int) -> None:
     conn.close()
 
 
+def set_change_control_postgres_id(cc_id: int, postgres_id: str) -> None:
+    """Record the Postgres `change_controls.id` (uuid) this SQLite change
+    control row was dual-written to (Phase 3.5, docs/PHASE3_EXECUTION_PLAN.md)."""
+    conn = get_connection()
+    conn.execute("UPDATE qms_change_controls SET postgres_id = ? WHERE id = ?", (postgres_id, cc_id))
+    conn.commit()
+    conn.close()
+
+
 def set_narrative(cc_id: int, key: str, text: str) -> dict:
     """Merge one AI-generated narrative (risk_summary, rollback_plan, regulatory_impact,
     justification, executive_summary, verification_summary, effectiveness_review) into

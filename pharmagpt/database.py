@@ -254,6 +254,13 @@ def init_db() -> None:
     conn.executescript(RISK_SCHEMA)
     conn.commit()
 
+    # ── Phase 3.5 dual-write bookkeeping (docs/PHASE3_EXECUTION_PLAN.md) ──────
+    # Migration bookkeeping only, not part of the target Postgres schema —
+    # same pattern as projects.postgres_id (3.2), kb_documents.postgres_id
+    # (3.3), equipment.postgres_id (3.4).
+    _add_column_if_missing(conn, "risk_assessments", "postgres_id", "TEXT DEFAULT NULL")
+    conn.commit()
+
     # ── URS Management Suite tables ───────────────────────────────────────────
     from pharmagpt.urs_database import URS_SCHEMA
     conn.executescript(URS_SCHEMA)
@@ -289,6 +296,12 @@ def init_db() -> None:
     # ── Quality Management Suite tables (Document Control, Deviation, CAPA) ────
     from pharmagpt.qms_database import QMS_SCHEMA
     conn.executescript(QMS_SCHEMA)
+    conn.commit()
+
+    # ── Phase 3.5 dual-write bookkeeping (docs/PHASE3_EXECUTION_PLAN.md) ──────
+    _add_column_if_missing(conn, "qms_deviations", "postgres_id", "TEXT DEFAULT NULL")
+    _add_column_if_missing(conn, "qms_capas", "postgres_id", "TEXT DEFAULT NULL")
+    _add_column_if_missing(conn, "qms_change_controls", "postgres_id", "TEXT DEFAULT NULL")
     conn.commit()
 
     # ── Equipment entity (PharmaGPT v1.0 Module 2) ─────────────────────────────

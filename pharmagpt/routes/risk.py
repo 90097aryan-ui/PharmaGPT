@@ -34,9 +34,13 @@ POST   /risk/assessments/<id>/export/docx        export as DOCX
 """
 
 import json
-from flask import Blueprint, jsonify, request, Response, stream_with_context
+import logging
+from flask import Blueprint, g, jsonify, request, Response, stream_with_context
 
+from pharmagpt import config
 from pharmagpt import risk_database as rdb
+from pharmagpt.auth.decorators import extract_bearer_token
+from pharmagpt.db import qms_repo
 from pharmagpt.services import risk_service as svc
 from pharmagpt.state import gemini_client
 from pharmagpt.config import GEMINI_MODEL
@@ -45,6 +49,64 @@ from pharmagpt.prompts.risk_prompt import get_generation_prompt
 from google.genai import types
 
 bp = Blueprint("risk", __name__, url_prefix="/risk")
+logger = logging.getLogger(__name__)
+RECORD_TYPE = "risk_assessment"
+
+
+# ── Phase 3.5 dual-write (docs/PHASE3_EXECUTION_PLAN.md) ───────────────────────
+# risk_assessments has no project_id in SQLite at all (a disclosed roadmap
+# limitation, Phase 7 territory — FOUNDATION_ARCHITECTURE.md §6) so
+# project_id is always None here, and creation doesn't call
+# qms_database.add_audit_entry (risk uses its own separate risk_approval
+# table, not qms_audit_trail) so there's no audit entry to mirror.
+
+def _dual_write_create(assessment: dict) -> None:
+    if config.QMS_BACKEND != "dual":
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        pg_row = qms_repo.create_record(
+            extract_bearer_token(), tenant.company_id, RECORD_TYPE,
+            title=assessment["title"], status=assessment.get("status") or "open",
+        )
+        rdb.set_assessment_postgres_id(assessment["id"], pg_row["id"])
+    except Exception:
+        logger.exception("Phase 3.5 dual-write: failed to sync new risk assessment %s to Postgres", assessment["id"])
+
+
+def _dual_write_update(assessment: dict) -> None:
+    if config.QMS_BACKEND != "dual":
+        return
+    postgres_id = assessment.get("postgres_id")
+    if not postgres_id:
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        qms_repo.update_record(
+            extract_bearer_token(), tenant.company_id, RECORD_TYPE, postgres_id,
+            title=assessment["title"], status=assessment.get("status") or "open",
+        )
+    except Exception:
+        logger.exception("Phase 3.5 dual-write: failed to sync risk assessment %s update to Postgres", assessment["id"])
+
+
+def _dual_write_delete(assessment: dict) -> None:
+    if config.QMS_BACKEND != "dual":
+        return
+    postgres_id = assessment.get("postgres_id")
+    if not postgres_id:
+        return
+    tenant = g.tenant
+    if not tenant.company_id:
+        return
+    try:
+        qms_repo.delete_record(extract_bearer_token(), tenant.company_id, RECORD_TYPE, postgres_id)
+    except Exception:
+        logger.exception("Phase 3.5 dual-write: failed to delete risk assessment %s in Postgres", assessment["id"])
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -76,6 +138,7 @@ def create_assessment():
         return jsonify({"error": "Assessment title is required"}), 400
     assessment = rdb.create_assessment(data)
     rdb.add_approval_entry(assessment["id"], "Assessment created", data.get("assessment_owner", ""), "Owner")
+    _dual_write_create(assessment)
     return jsonify(assessment), 201
 
 
@@ -93,14 +156,17 @@ def update_assessment(aid):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     updated = rdb.update_assessment(aid, data)
+    _dual_write_update(updated)
     return jsonify(updated)
 
 
 @bp.route("/assessments/<int:aid>", methods=["DELETE"])
 def delete_assessment(aid):
-    if not rdb.get_assessment(aid):
+    existing = rdb.get_assessment(aid)
+    if not existing:
         return jsonify({"error": "Not found"}), 404
     rdb.delete_assessment(aid)
+    _dual_write_delete(existing)
     return jsonify({"deleted": True})
 
 
