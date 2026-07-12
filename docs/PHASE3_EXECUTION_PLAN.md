@@ -33,12 +33,12 @@
 - **Success criteria:** Every KB doc browsable/searchable/downloadable exactly as before (verified: no route behavior changed, only additive dual-write side effects gated by a default-off flag).
 
 ### 3.4 Equipment Library Migration — *depends on 3.3*
-- **Objective:** Re-parent `equipment` to `company_id`, introduce `equipment_links`, behind a flag.
-- **Files:** `pharmagpt/equipment_database.py`, `pharmagpt/routes/equipment.py`, `pharmagpt/services/equipment_service.py`.
-- **DB impact:** `equipment`/`equipment_links` populated; `equipment.project_id` retained on the SQLite side (`IMP-004`).
-- **Estimated commits:** 4. **Rollback point:** Flag off → equipment routes revert to project-owned SQLite.
-- **Testing:** Existing equipment tests; multi-project-same-equipment scenario.
-- **Success criteria:** Every equipment record reachable company-wide; no data duplication.
+- **Objective:** Dual-write `equipment` (company-owned per `PA-013`, no `project_id`) create/update/delete, and `equipment_documents` link/unlink into `equipment_links` for `source_type='kb'` only. `equipment.project_id` retained on the SQLite side (`IMP-004`) — SQLite behavior/shape is completely unchanged.
+- **Files:** `migrations/0007_equipment_fixes_and_rls_*.sql` (new — also fixes two bugs found in 0004: `gmp_impact` was `boolean`, the shipped build stores a 3-value text enum; `notes` had no column at all), `pharmagpt/db/equipment_repo.py` (new), `pharmagpt/config.py` (+`EQUIPMENT_BACKEND`), `pharmagpt/equipment_database.py` (+`postgres_id` columns/setters, +`get_all_equipment()`), `pharmagpt/routes/equipment.py`, `scripts/backfill_equipment.py` / `check_equipment_parity.py` (new). `services/equipment_service.py` untouched (not tenancy/storage-coupled).
+- **DB impact:** `equipment` populated with **full field fidelity** (every SQLite column has a target column, unlike Projects) under the shared bootstrap company. `equipment_links` populated only for `source_type='kb'` links whose KB document has already been dual-written/backfilled — `source_type='project'` links have no Postgres document to point at yet (project-generated documents are roadmap Phase 9, out of this plan's 3.1–3.6 scope) and are explicitly skipped/counted, not silently dropped. Delete dual-writes as a real Postgres delete (equipment has no lifecycle/archive field, unlike documents) and swallows the expected RESTRICT failure when links still reference it.
+- **Estimated commits:** 4 (actual: 4). **Rollback point:** Flag off (default) → fully inert.
+- **Testing:** 20 new tests (dual-write orchestration + both scripts, fully mocked) + full existing suite, 0 regression.
+- **Success criteria:** Every equipment record reachable company-wide with no data duplication (verified in code/tests; live Staging RLS isolation check is a deployment-time step, not verifiable from here).
 
 ### 3.5 QMS Migration — *depends on 3.2*
 - **Objective:** Migrate `qms_*` tables (deviations, capas, change_controls, risk_assessments) plus `qms_audit_trail/attachments/comments/approvals` into the generalized platform tables, behind a flag.
