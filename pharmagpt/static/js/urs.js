@@ -202,18 +202,117 @@ function showView(viewId) {
   if (el) el.style.display = "flex";
 }
 
-/* ── Toast ──────────────────────────────────────────────────────────────────── */
-function ursToast(msg, type = "info") {
-  let toast = document.getElementById("urs-toast");
-  if (!toast) {
-    toast = document.createElement("div");
-    toast.id = "urs-toast";
-    toast.className = "urs-toast";
-    document.body.appendChild(toast);
+/* ── Notification System ───────────────────────────────────────────────────
+   Stacked, top-right notifications. success/info auto-dismiss; warning/error
+   persist until the user dismisses or retries them — nothing disappears out
+   from under a user who hasn't read it yet. Errors get a short client-side
+   correlation ID and a "Copy Details" action so there's something concrete
+   to hand to support; there is no server-issued error ID (frontend-only
+   scope this iteration), so this identifies the *occurrence* client-side,
+   not a server log record.
+──────────────────────────────────────────────────────────────────────────── */
+const URS_NOTIFY_ICONS = {
+  success: "<span class='icon' data-lucide='check-circle-2'></span>",
+  warning: "<span class='icon' data-lucide='alert-triangle'></span>",
+  error:   "<span class='icon' data-lucide='x-circle'></span>",
+  info:    "<span class='icon' data-lucide='info'></span>",
+};
+
+function ursNotifyStack() {
+  let stack = document.getElementById("urs-notify-stack");
+  if (!stack) {
+    stack = document.createElement("div");
+    stack.id = "urs-notify-stack";
+    stack.className = "urs-notify-stack";
+    document.body.appendChild(stack);
   }
-  toast.textContent = msg;
-  toast.className = `urs-toast ${type} show`;
-  setTimeout(() => { toast.classList.remove("show"); }, 3000);
+  return stack;
+}
+
+function ursGenErrorId() {
+  return "ERR-" + Date.now().toString(36).toUpperCase() + "-" + Math.random().toString(36).slice(2, 6).toUpperCase();
+}
+
+/**
+ * ursNotify({ type, title, message, detail, retry, category, persistent })
+ *   type: "success" | "warning" | "error" | "info" (default "info")
+ *   retry: optional async function — adds a Retry button that re-invokes it
+ *   detail: optional extra text (e.g. raw server error) for "Copy Details"
+ *   category: optional short label (Authentication/Validation/Generation/…)
+ *   persistent: force no auto-dismiss regardless of type
+ * Returns { dismiss } so callers can close it programmatically.
+ */
+function ursNotify(opts) {
+  const { type = "info", title, message, detail, retry, category, persistent } = opts || {};
+  const stack = ursNotifyStack();
+  const el = document.createElement("div");
+  el.className = `urs-notify ${type}`;
+  const isPersistent = persistent || type === "error" || type === "warning";
+  const errorId = type === "error" ? ursGenErrorId() : null;
+
+  el.innerHTML = `
+    <div class="urs-notify-icon">${URS_NOTIFY_ICONS[type] || URS_NOTIFY_ICONS.info}</div>
+    <div class="urs-notify-body">
+      ${title ? `<div class="urs-notify-title">${escHtml(title)}${category ? ` <span style="font-weight:500;color:var(--text-muted)">· ${escHtml(category)}</span>` : ""}</div>` : ""}
+      <div class="urs-notify-message">${escHtml(message || "")}</div>
+      ${errorId ? `<div class="urs-notify-id">Error ID: ${errorId}</div>` : ""}
+      <div class="urs-notify-actions"></div>
+    </div>
+    <button class="urs-notify-close" aria-label="Dismiss">&times;</button>`;
+
+  const actions = el.querySelector(".urs-notify-actions");
+  const dismiss = () => {
+    el.classList.add("leaving");
+    setTimeout(() => el.remove(), 220);
+  };
+  el.querySelector(".urs-notify-close").onclick = dismiss;
+
+  if (retry) {
+    const retryBtn = document.createElement("button");
+    retryBtn.className = "urs-notify-btn primary";
+    retryBtn.textContent = "Retry";
+    retryBtn.onclick = async () => {
+      retryBtn.disabled = true;
+      retryBtn.textContent = "Retrying…";
+      dismiss();
+      try { await retry(); } catch (e) { /* retry() is expected to notify on its own failure */ }
+    };
+    actions.appendChild(retryBtn);
+  }
+  if (detail) {
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "urs-notify-btn";
+    copyBtn.textContent = "Copy Details";
+    copyBtn.onclick = async () => {
+      const text = `${title || ""}\n${message || ""}\n${detail}${errorId ? `\nError ID: ${errorId}` : ""}`.trim();
+      try {
+        await navigator.clipboard.writeText(text);
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => { copyBtn.textContent = "Copy Details"; }, 1500);
+      } catch (e) { /* clipboard unavailable — no-op, not worth surfacing */ }
+    };
+    actions.appendChild(copyBtn);
+  }
+  const dismissBtn = document.createElement("button");
+  dismissBtn.className = "urs-notify-btn";
+  dismissBtn.textContent = "Dismiss";
+  dismissBtn.onclick = dismiss;
+  actions.appendChild(dismissBtn);
+
+  stack.appendChild(el);
+  requestAnimationFrame(() => el.classList.add("show"));
+
+  if (!isPersistent) {
+    setTimeout(dismiss, type === "success" ? 3500 : 4500);
+  }
+  return { dismiss };
+}
+
+// Backward-compatible wrapper — every existing ursToast(msg, type) call site
+// (there are ~20 across this file) now renders through the stacked
+// notification system automatically, with no per-call-site changes needed.
+function ursToast(msg, type = "info") {
+  ursNotify({ type, message: msg });
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -223,18 +322,50 @@ window.loadURSDashboard = async function () {
   showView("view-urs-dashboard");
   const body = document.getElementById("urs-dash-body");
   if (!body) return;
-  body.innerHTML = '<div class="urs-empty"><div class="urs-gen-spinner" style="margin:40px auto;width:32px;height:32px;border-width:4px"></div></div>';
+  body.innerHTML = ursDashboardSkeleton();
 
   try {
-    const [stats, allURS] = await Promise.all([
-      fetch("/urs/dashboard").then(r => r.json()),
-      fetch("/urs/").then(r => r.json()),
-    ]);
+    const [statsResp, listResp] = await Promise.all([fetch("/urs/dashboard"), fetch("/urs/")]);
+    if (!statsResp.ok) throw new Error(`Dashboard stats request failed (HTTP ${statsResp.status})`);
+    if (!listResp.ok) throw new Error(`URS list request failed (HTTP ${listResp.status})`);
+    const [stats, allURS] = await Promise.all([statsResp.json(), listResp.json()]);
     body.innerHTML = buildDashboardHTML(stats, allURS);
   } catch (e) {
-    body.innerHTML = `<div class="urs-empty"><p>Failed to load dashboard: ${e.message}</p></div>`;
+    body.innerHTML = ursErrorStateHTML("Couldn't load the dashboard", e.message, "loadURSDashboard()");
+    ursNotify({
+      type: "error", title: "Dashboard failed to load", message: e.message,
+      category: "Database", retry: () => loadURSDashboard(),
+    });
   }
 };
+
+function ursDashboardSkeleton() {
+  return `
+  <div class="urs-dash-stats">
+    ${Array(6).fill('<div class="urs-skeleton urs-skeleton-stat"></div>').join("")}
+  </div>
+  <div class="urs-dash-grid">
+    <div class="urs-dash-card"><div class="urs-dash-card-body" style="padding-top:16px">
+      ${Array(3).fill('<div class="urs-skeleton urs-skeleton-card"></div>').join("")}
+    </div></div>
+    <div class="urs-dash-card"><div class="urs-dash-card-body" style="padding-top:16px">
+      ${Array(4).fill('<div class="urs-skeleton urs-skeleton-line" style="width:88%"></div>').join("")}
+    </div></div>
+  </div>`;
+}
+
+/* Shared retry-capable error state markup for any panel that failed to load.
+   `retryExpr` is a literal JS expression string (e.g. "loadURSDashboard()")
+   invoked by the Retry button's onclick — kept as a string rather than a
+   function reference so this can be safely embedded via innerHTML. */
+function ursErrorStateHTML(title, message, retryExpr) {
+  return `<div class="urs-error-state">
+    <div class="urs-empty-icon"><span class='icon' data-lucide='alert-triangle'></span></div>
+    <div class="urs-empty-title">${escHtml(title)}</div>
+    <div class="urs-empty-sub">${escHtml(message)}</div>
+    ${retryExpr ? `<button class="btn-urs-primary" style="margin-top:14px" onclick="${retryExpr}"><span class='icon' data-lucide='refresh-cw'></span> Retry</button>` : ""}
+  </div>`;
+}
 
 function buildDashboardHTML(stats, allURS) {
   const categoryColors = {
@@ -351,15 +482,19 @@ window.loadURSList = function () {
 };
 
 async function fetchAndRenderURSList(filters = {}) {
+  ursState.lastListFilters = filters;
   const grid = document.getElementById("urs-list-grid");
   const empty = document.getElementById("urs-list-empty");
   if (!grid) return;
-  grid.innerHTML = "";
   if (empty) empty.style.display = "none";
+  grid.innerHTML = Array(6).fill('<div class="urs-skeleton urs-skeleton-card"></div>').join("");
 
   const params = new URLSearchParams(filters);
   try {
-    const data = await fetch(`/urs/?${params}`).then(r => r.json());
+    const resp = await fetch(`/urs/?${params}`);
+    if (!resp.ok) throw new Error(`Server returned HTTP ${resp.status}`);
+    const data = await resp.json();
+    grid.innerHTML = "";
     if (!data.length) {
       if (empty) empty.style.display = "flex";
       return;
@@ -382,14 +517,25 @@ async function fetchAndRenderURSList(filters = {}) {
         </div>
         <div class="urs-card-actions">
           <button class="btn-urs-outline" onclick="event.stopPropagation();openURS(${u.id})"><span class=\'icon\' data-lucide=\'folder-open\'></span> Open</button>
-          <button class="btn-urs-outline" onclick="event.stopPropagation();exportURSDocx(${u.id}, '${escHtml(u.urs_number || 'URS')}')"><span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span> DOCX</button>
+          <button class="btn-urs-outline urs-export-btn" data-export-state="idle" onclick="event.stopPropagation();exportURSDocx(${u.id}, '${escHtml(u.urs_number || 'URS')}', this)">
+            <div class="urs-btn-spinner"></div><span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span>
+            <span class="urs-btn-label-idle">DOCX</span><span class="urs-btn-label-busy">Preparing…</span><span class="urs-btn-label-done">Done</span>
+          </button>
           <button class="btn-urs-danger" onclick="event.stopPropagation();deleteURS(${u.id})"><span class=\'icon\' data-lucide=\'trash-2\'></span></button>
         </div>`;
       card.addEventListener("click", () => openURS(u.id));
       grid.appendChild(card);
     });
   } catch (e) {
-    grid.innerHTML = `<p style="color:var(--error);font-size:13px">Error: ${e.message}</p>`;
+    grid.innerHTML = "";
+    if (empty) empty.style.display = "none";
+    grid.insertAdjacentHTML("beforeend", ursErrorStateHTML(
+      "Couldn't load URS documents", e.message, "fetchAndRenderURSList(ursState.lastListFilters)",
+    ));
+    ursNotify({
+      type: "error", title: "URS list failed to load", message: e.message,
+      category: "Database", retry: () => fetchAndRenderURSList(filters),
+    });
   }
 }
 
@@ -506,20 +652,44 @@ function renderEquipmentList(catKey) {
 }
 
 /* ── Step 2: Project Information ───────────────────────────────────────────── */
+// URS Number / Document Number / Version / Revision / Prepared By are no
+// longer entered here — the backend (Stabilization Iteration 2) auto-issues
+// them at creation and ignores client-supplied values for these fields, so
+// editable inputs for them would just be misleading. They're shown as
+// read-only "system-assigned" fields instead, populated from
+// ursState.currentURS once the record exists (blank/placeholder before
+// that — the numbers aren't allocated until creation).
 function renderStep2(body) {
   const d = ursState.wizardData;
-  const today = new Date().toISOString().split("T")[0];
+  const urs = ursState.currentURS;
+  const preparedByName = (window.PharmaAuth && PharmaAuth.getUser && PharmaAuth.getUser()?.display_name) || "";
+
+  const readonlyField = (label, value, badge) => `
+    <div class="urs-field">
+      <label class="urs-label">${label}</label>
+      <div class="urs-readonly-field">
+        <span class="value">${escHtml(value)}</span>
+        <span class="urs-readonly-badge">${badge}</span>
+      </div>
+    </div>`;
+
   body.innerHTML = `
   <div class="urs-section-header"><div class="section-icon"><span class=\'icon\' data-lucide=\'pencil-line\'></span></div>Project Information</div>
+
+  <div class="urs-doc-control-note">
+    <span class="icon" data-lucide="info"></span>
+    <div>URS Number, Document Number, Version, Revision, and Prepared By are assigned automatically by the system — they are not entered manually. Reviewed By, Approved By, and QA Approval are captured later, in the Approval step.</div>
+  </div>
+
+  <div class="urs-form-grid" style="margin-bottom:20px">
+    ${readonlyField("URS Number", urs?.urs_number || "Assigned when this URS is created", "Auto")}
+    ${readonlyField("Document Number", urs?.doc_number || "Assigned when this URS is created", "Auto")}
+    ${readonlyField("Version", urs?.version || "1.0", "Auto")}
+    ${readonlyField("Revision", urs?.revision || "A", "Auto")}
+    ${readonlyField("Prepared By", urs?.prepared_by || preparedByName || "Current user", "You")}
+  </div>
+
   <div class="urs-form-grid">
-    <div class="urs-field">
-      <label class="urs-label">URS Number <span class="req-star">*</span></label>
-      <input class="urs-input" id="w-urs-number" value="${d.urs_number || ''}" placeholder="e.g. URS-2025-001">
-    </div>
-    <div class="urs-field">
-      <label class="urs-label">Document Number</label>
-      <input class="urs-input" id="w-doc-number" value="${d.doc_number || ''}" placeholder="e.g. QA-URS-001">
-    </div>
     <div class="urs-field full">
       <label class="urs-label">URS Title <span class="req-star">*</span></label>
       <input class="urs-input" id="w-title" value="${d.title || 'URS – ' + (d.equipment_name || '')}" placeholder="User Requirement Specification for…">
@@ -569,26 +739,6 @@ function renderStep2(body) {
         <option ${d.validation_type==='Equipment Qualification'?'selected':''}>Equipment Qualification</option>
       </select>
     </div>
-    <div class="urs-field">
-      <label class="urs-label">Revision</label>
-      <input class="urs-input" id="w-revision" value="${d.revision || 'A'}" placeholder="A">
-    </div>
-    <div class="urs-field">
-      <label class="urs-label">Effective Date</label>
-      <input class="urs-input" type="date" id="w-effective-date" value="${d.effective_date || today}">
-    </div>
-    <div class="urs-field">
-      <label class="urs-label">Prepared By</label>
-      <input class="urs-input" id="w-prepared-by" value="${d.prepared_by || ''}" placeholder="Full name">
-    </div>
-    <div class="urs-field">
-      <label class="urs-label">Reviewed By</label>
-      <input class="urs-input" id="w-reviewed-by" value="${d.reviewed_by || ''}" placeholder="Full name">
-    </div>
-    <div class="urs-field">
-      <label class="urs-label">Approved By</label>
-      <input class="urs-input" id="w-approved-by" value="${d.approved_by || ''}" placeholder="Full name">
-    </div>
     <div class="urs-field full">
       <label class="urs-label">Purpose</label>
       <textarea class="urs-textarea" id="w-purpose" placeholder="Purpose of this URS…">${d.purpose || ''}</textarea>
@@ -609,8 +759,6 @@ function renderStep2(body) {
 }
 
 function collectStep2Data() {
-  ursState.wizardData.urs_number     = document.getElementById("w-urs-number")?.value.trim() || "";
-  ursState.wizardData.doc_number     = document.getElementById("w-doc-number")?.value.trim() || "";
   ursState.wizardData.title          = document.getElementById("w-title")?.value.trim() || "";
   ursState.wizardData.equipment_name = document.getElementById("w-equipment-name")?.value.trim() || "";
   ursState.wizardData.equipment_id   = document.getElementById("w-equipment-id")?.value.trim() || "";
@@ -621,11 +769,6 @@ function collectStep2Data() {
   ursState.wizardData.site           = document.getElementById("w-site")?.value.trim() || "";
   ursState.wizardData.location       = document.getElementById("w-location")?.value.trim() || "";
   ursState.wizardData.validation_type= document.getElementById("w-validation-type")?.value || "";
-  ursState.wizardData.revision       = document.getElementById("w-revision")?.value.trim() || "A";
-  ursState.wizardData.effective_date = document.getElementById("w-effective-date")?.value || "";
-  ursState.wizardData.prepared_by    = document.getElementById("w-prepared-by")?.value.trim() || "";
-  ursState.wizardData.reviewed_by    = document.getElementById("w-reviewed-by")?.value.trim() || "";
-  ursState.wizardData.approved_by    = document.getElementById("w-approved-by")?.value.trim() || "";
   ursState.wizardData.purpose        = document.getElementById("w-purpose")?.value.trim() || "";
   ursState.wizardData.intended_use   = document.getElementById("w-intended-use")?.value.trim() || "";
   ursState.wizardData.process_description = document.getElementById("w-process-desc")?.value.trim() || "";
@@ -686,11 +829,7 @@ function renderStep3(body) {
     </button>
   </div>
 
-  <div class="urs-gen-progress" id="urs-gen-progress">
-    <div class="urs-gen-spinner"></div>
-    <div class="urs-gen-text" id="urs-gen-text">Generating requirements…</div>
-    <div class="urs-gen-count" id="urs-gen-count">0 requirements generated</div>
-  </div>
+  <div class="urs-gen-panel" id="urs-gen-progress"></div>
 
   <div style="display:flex;justify-content:space-between;margin-top:24px">
     <button class="btn-urs-secondary" style="background:rgba(61,47,33,.06);color:var(--navy);border-color:var(--border)" onclick="wizardBack()"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Back</button>
@@ -737,16 +876,99 @@ window.skipGeneration = async function () {
   wizardGoTo(4);
 };
 
-// AI generation now runs as a background job (services/urs_generation_job.py)
+// AI generation runs as a background job (services/urs_generation_job.py)
 // instead of an SSE stream — the POST below returns almost instantly, and
 // this polls GET /urs/<id>/generate/status until the job reaches a terminal
 // state. This avoids holding an HTTP request open for the whole generation
 // time, which used to exceed Render's gunicorn worker timeout.
+//
+// Real workflow progress (Stabilization Iteration 3): the backend reports
+// progress in Gemini *batches*, not individual sections (services/
+// urs_generation_job.py batches URS_GENERATION_BATCH_SIZE sections per
+// call) — there is no API field naming which sections are in which batch.
+// Rather than hardcode that backend batch-size constant here (fragile if
+// it's ever tuned), the exact batch boundaries are reconstructed from data
+// we already have: `sections` (what we requested, in request order — the
+// backend batches strictly in that same order) and `generation_progress_
+// total` (the batch count, known from the first status poll). Since
+// batching is fixed-size contiguous chunking, batchSize =
+// ceil(sections.length / total) reproduces the identical partition the
+// backend used. This is what makes the ✓-per-completed-batch checklist
+// below accurate rather than a guess.
+//
+// Every render of the progress panel is driven by one state object passed
+// to renderGenerationPanel() — replacing the old design where a countdown
+// timer and a requirement counter were two independently-updated DOM nodes
+// that a not-quite-terminal poll (a client-side timeout racing a server
+// response that had *already* arrived) could leave visibly contradicting
+// each other ("59 requirements generated" next to "taking longer than
+// expected"). One state object rendered in one place cannot go stale in
+// only half of itself.
 const URS_GENERATION_POLL_INTERVAL_MS = 1500;
 const URS_GENERATION_POLL_TIMEOUT_MS = 5 * 60 * 1000;
 
 function ursSleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function ursChunk(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + Math.max(1, size)));
+  return out.length ? out : [[]];
+}
+
+function ursFormatETA(ms) {
+  if (!isFinite(ms) || ms <= 0) return "";
+  const totalSec = Math.round(ms / 1000);
+  const m = Math.floor(totalSec / 60), s = totalSec % 60;
+  return m > 0 ? `~${m}m ${s}s remaining` : `~${s}s remaining`;
+}
+
+/**
+ * Single source of truth for the generation progress panel. Every call
+ * fully re-renders from the state passed in — there is no other code path
+ * that mutates this panel's DOM, so it can never show a stale fragment next
+ * to a fresh one.
+ *   phase: "starting" | "running" | "completed" | "failed" | "stalled"
+ */
+function renderGenerationPanel(container, { sections, batches, current, total, resultCount, phase, message, startedAt }) {
+  const itemsHtml = batches.map((batchSections, i) => {
+    let state;
+    if (phase === "completed") state = "done";
+    else if (phase === "failed" || phase === "stalled") state = i < current ? "done" : "pending";
+    else state = i < current ? "done" : (i === current ? "active" : "pending");
+
+    const icon = state === "done" ? "<span class='icon' data-lucide='check'></span>"
+      : state === "active" ? "<div class='urs-gen-spinner-sm'></div>"
+      : "<span class='icon' data-lucide='circle'></span>";
+    const label = batchSections.join(", ") || "Additional requirements";
+    const text = state === "active" ? `Generating ${label}…` : label;
+    return `<div class="urs-gen-item ${state}"><div class="urs-gen-item-icon">${icon}</div><div>${escHtml(text)}</div></div>`;
+  }).join("");
+
+  const pct = total ? Math.min(100, Math.round((current / total) * 100)) : 0;
+  let statusLine = "", statusClass = "";
+  if (phase === "starting")      { statusLine = "Starting generation…"; }
+  else if (phase === "running")  { statusLine = `Generating requirements… (batch ${current}/${total})`; }
+  else if (phase === "completed"){ statusLine = message || `${resultCount} requirement${resultCount === 1 ? "" : "s"} generated`; statusClass = "success"; }
+  else if (phase === "failed")   { statusLine = message || "Generation finished, but produced no requirements."; statusClass = "failed"; }
+  else if (phase === "stalled")  { statusLine = "Generation is taking longer than expected."; statusClass = "stalled"; }
+
+  const eta = (phase === "running" && current > 0 && startedAt)
+    ? ursFormatETA((Date.now() - startedAt) / current * (total - current))
+    : "";
+
+  container.innerHTML = `
+    <div class="urs-gen-status-line ${statusClass}">
+      ${phase === "running" || phase === "starting" ? "<div class='urs-gen-spinner-sm'></div>" : ""}
+      ${escHtml(statusLine)}
+    </div>
+    <div class="urs-gen-checklist">${itemsHtml}</div>
+    <div class="urs-gen-progress-bar-track"><div class="urs-gen-progress-bar-fill" style="width:${pct}%"></div></div>
+    <div class="urs-gen-footer">
+      <span class="urs-gen-eta">${resultCount} requirement${resultCount === 1 ? "" : "s"} generated so far</span>
+      ${eta ? `<span class="urs-gen-eta">Estimated time remaining: ${eta}</span>` : ""}
+    </div>`;
 }
 
 window.runAIGeneration = async function () {
@@ -757,35 +979,45 @@ window.runAIGeneration = async function () {
   if (!sections.length) { ursToast("Select at least one section", "error"); return; }
 
   const progress = document.getElementById("urs-gen-progress");
-  const genText = document.getElementById("urs-gen-text");
-  const genCount = document.getElementById("urs-gen-count");
   const genBtn = document.getElementById("generate-btn");
   const ursId = ursState.currentURS.id;
 
   progress.classList.add("visible");
   genBtn.disabled = true;
-  genText.textContent = "Starting generation…";
-  genCount.textContent = "0 requirements generated";
+  const startedAt = Date.now();
+  let batches = [sections]; // best-effort placeholder until the first poll reveals the real batch count
+  renderGenerationPanel(progress, { sections, batches, current: 0, total: 1, resultCount: 0, phase: "starting", startedAt });
 
+  let job = null;
   try {
-    await fetch(`/urs/${ursId}/generate`, {
+    const startResp = await fetch(`/urs/${ursId}/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sections, ...ursState.wizardData }),
     });
+    if (!startResp.ok) throw new Error(`Server returned HTTP ${startResp.status}`);
 
     const deadline = Date.now() + URS_GENERATION_POLL_TIMEOUT_MS;
-    let job = null;
+    let batchesResolved = false;
     while (Date.now() < deadline) {
-      job = await fetch(`/urs/${ursId}/generate/status`).then(r => r.json());
-      const total = job.generation_progress_total || 0;
-      const current = job.generation_progress_current || 0;
-      genText.textContent = total
-        ? `Generating requirements… (batch ${current}/${total})`
-        : "Generating requirements…";
-      genCount.textContent = `${job.generation_result_count || 0} requirements generated`;
+      const statusResp = await fetch(`/urs/${ursId}/generate/status`);
+      if (!statusResp.ok) throw new Error(`Status check failed (HTTP ${statusResp.status})`);
+      job = await statusResp.json();
 
-      if (job.generation_status === "completed" || job.generation_status === "failed") break;
+      const total = job.generation_progress_total || 1;
+      const current = job.generation_progress_current || 0;
+      if (!batchesResolved && total > 0) {
+        batches = ursChunk(sections, Math.ceil(sections.length / total));
+        batchesResolved = true;
+      }
+      const isTerminal = job.generation_status === "completed" || job.generation_status === "failed";
+      renderGenerationPanel(progress, {
+        sections, batches, current, total,
+        resultCount: job.generation_result_count || 0,
+        phase: isTerminal ? job.generation_status : "running",
+        message: job.generation_message, startedAt,
+      });
+      if (isTerminal) break;
       await ursSleep(URS_GENERATION_POLL_INTERVAL_MS);
     }
 
@@ -799,27 +1031,51 @@ window.runAIGeneration = async function () {
     const jobMessage = job && job.generation_message;
     const jobError = job && job.generation_error;
     const hadPartialFailure = !!jobError && reqCount > 0;
+    const total = (job && job.generation_progress_total) || batches.length;
+    const current = (job && job.generation_progress_current) || 0;
 
     if (!job || (job.generation_status !== "completed" && job.generation_status !== "failed")) {
-      genText.textContent = "Generation is taking longer than expected.";
-      ursToast("Still generating — check back in a moment, or reopen this URS.", "error");
+      // The 5-minute client-side poll window elapsed with the job still
+      // "running" server-side — it has NOT failed, it's still in progress
+      // in the background. Distinct wording and a distinct "stalled" visual
+      // state from an actual failure, and a Retry that re-polls rather than
+      // silently leaving a contradictory message on screen.
+      renderGenerationPanel(progress, { sections, batches, current, total, resultCount: reqCount, phase: "stalled", startedAt });
+      ursNotify({
+        type: "warning", title: "Still generating",
+        message: "This is taking longer than expected but is still running in the background. Reopen this URS in a moment to check on it, or retry.",
+        category: "Generation", retry: () => runAIGeneration(),
+      });
       genBtn.disabled = false;
     } else if (job.generation_status === "failed" || reqCount === 0) {
-      genText.textContent = jobMessage || "Generation finished, but produced no requirements.";
-      ursToast(`${jobMessage || "AI returned no usable requirements"}${jobError ? ` (${jobError})` : ""}. Try again, or add requirements manually / from the library.`, "error");
+      renderGenerationPanel(progress, { sections, batches, current, total, resultCount: reqCount, phase: "failed", message: jobMessage, startedAt });
+      ursNotify({
+        type: "error", title: "Generation produced no requirements",
+        message: jobMessage || "AI returned no usable requirements. Try again, or add requirements manually / from the library.",
+        detail: jobError || "", category: "Generation", retry: () => runAIGeneration(),
+      });
       genBtn.disabled = false;
     } else {
-      genText.textContent = jobMessage || "Generation complete!";
-      genCount.textContent = `${reqCount} requirements generated`;
-      ursToast(jobMessage || `${reqCount} requirements generated`, hadPartialFailure ? "info" : "success");
-      // Partial failures leave the button re-enabled so the user can retry
-      // the same sections instead of silently losing the failed ones.
-      if (hadPartialFailure) genBtn.disabled = false;
-      setTimeout(() => wizardGoTo(4), hadPartialFailure ? 1500 : 800);
+      renderGenerationPanel(progress, { sections, batches, current, total, resultCount: reqCount, phase: "completed", message: jobMessage, startedAt });
+      if (hadPartialFailure) {
+        ursNotify({
+          type: "warning", title: "Generation partially completed", message: jobMessage,
+          detail: jobError, category: "Generation", retry: () => runAIGeneration(),
+        });
+        genBtn.disabled = false;
+      } else {
+        ursNotify({ type: "success", title: "Generation complete", message: jobMessage || `${reqCount} requirements generated` });
+      }
+      // Automatic transition to the Requirements review step once generation
+      // finishes — the user shouldn't have to manually navigate forward.
+      setTimeout(() => wizardGoTo(4), hadPartialFailure ? 1800 : 900);
     }
   } catch (e) {
-    genText.textContent = `Error: ${e.message}`;
-    ursToast(`Generation error: ${e.message}`, "error");
+    renderGenerationPanel(progress, { sections, batches, current: 0, total: batches.length, resultCount: 0, phase: "failed", message: e.message, startedAt });
+    ursNotify({
+      type: "error", title: "Generation failed to start", message: e.message,
+      category: "Generation", retry: () => runAIGeneration(),
+    });
     genBtn.disabled = false;
   }
 };
@@ -1005,8 +1261,11 @@ function renderStep5(body) {
 
   <div class="urs-info-grid">
     <div class="urs-info-card">
-      <div class="urs-info-card-title">Document Details</div>
-      <div class="urs-info-row"><label>URS Number</label><span>${escHtml(urs.urs_number || ursState.wizardData.urs_number || "—")}</span></div>
+      <div class="urs-info-card-title">Document Details <span style="font-weight:400;text-transform:none;letter-spacing:0">(system-assigned)</span></div>
+      <div class="urs-info-row"><label>URS Number</label><span>${escHtml(urs.urs_number || "—")}</span></div>
+      <div class="urs-info-row"><label>Document Number</label><span>${escHtml(urs.doc_number || "—")}</span></div>
+      <div class="urs-info-row"><label>Version / Revision</label><span>${escHtml(urs.version || "1.0")} / ${escHtml(urs.revision || "A")}</span></div>
+      <div class="urs-info-row"><label>Prepared By</label><span>${escHtml(urs.prepared_by || "—")}</span></div>
       <div class="urs-info-row"><label>Title</label><span>${escHtml(urs.title || ursState.wizardData.title || "—")}</span></div>
       <div class="urs-info-row"><label>Status</label><span>${formatStatus(urs.status || "draft")}</span></div>
       <div class="urs-info-row"><label>Requirements</label><span>${reqCount}</span></div>
@@ -1036,7 +1295,10 @@ function renderStep5(body) {
   <div style="display:flex;gap:12px;justify-content:center;margin-top:8px;flex-wrap:wrap">
     ${urs.id ? `
     <button class="btn-urs-primary" onclick="openURS(${urs.id})"><span class=\'icon\' data-lucide=\'folder-open\'></span> Open URS</button>
-    <button class="btn-urs-outline" onclick="exportURSDocx(${urs.id}, '${escHtml(urs.urs_number || 'URS')}')"><span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span> Export DOCX</button>
+    <button class="btn-urs-outline urs-export-btn" data-export-state="idle" onclick="exportURSDocx(${urs.id}, '${escHtml(urs.urs_number || 'URS')}', this)">
+      <div class="urs-btn-spinner"></div><span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span>
+      <span class="urs-btn-label-idle">Export DOCX</span><span class="urs-btn-label-busy">Preparing…</span><span class="urs-btn-label-done">Downloaded</span>
+    </button>
     <button class="btn-urs-outline" onclick="submitForReview(${urs.id})"><span class=\'icon\' data-lucide=\'mail\'></span> Submit for Review</button>
     ` : ""}
     <button class="btn-urs-outline" onclick="startNewURS()"><span class=\'icon\' data-lucide=\'plus\'></span> Create Another URS</button>
@@ -1145,6 +1407,7 @@ function renderOverviewPanel(panel, urs, reqs) {
       <div class="urs-info-card-title">Document Information</div>
       ${infoRow("URS Number", urs.urs_number)}
       ${infoRow("Document Number", urs.doc_number)}
+      ${infoRow("Version", urs.version || "1.0")}
       ${infoRow("Revision", urs.revision)}
       ${infoRow("Status", formatStatus(urs.status))}
       ${infoRow("Category", urs.category)}
@@ -1183,9 +1446,16 @@ function renderOverviewPanel(panel, urs, reqs) {
   ${urs.purpose ? `<div class="urs-info-card" style="margin-bottom:16px">
     <div class="urs-info-card-title">Purpose</div><p style="font-size:14px;line-height:1.6">${escHtml(urs.purpose)}</p>
   </div>` : ""}
-  <div style="display:flex;gap:10px;margin-top:4px;flex-wrap:wrap">
-    <button class="btn-urs-primary" onclick="exportURSDocx(${urs.id}, '${escHtml(urs.urs_number||'URS')}')"><span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span> Export DOCX</button>
-    <button class="btn-urs-outline" onclick="submitForReview(${urs.id})"><span class=\'icon\' data-lucide=\'mail\'></span> Submit for Review</button>
+  <div style="display:flex;gap:10px;margin-top:4px;flex-wrap:wrap;align-items:center">
+    <button class="btn-urs-primary urs-export-btn" data-export-state="idle" onclick="exportURSDocx(${urs.id}, '${escHtml(urs.urs_number||'URS')}', this)">
+      <div class="urs-btn-spinner"></div><span class=\'icon\' data-lucide=\'arrow-down-to-line\'></span>
+      <span class="urs-btn-label-idle">Export DOCX</span>
+      <span class="urs-btn-label-busy">Preparing…</span>
+      <span class="urs-btn-label-done">Downloaded</span>
+    </button>
+    ${ursValidActionsFor(urs.status).includes("Submitted for Review")
+      ? `<button class="btn-urs-outline" onclick="submitForReview(${urs.id})"><span class=\'icon\' data-lucide=\'mail\'></span> Submit for Review</button>`
+      : `<span class="urs-lifecycle-hint" style="margin:0">Submit for Review not available from ${formatStatus(urs.status)}</span>`}
     <button class="btn-urs-outline" onclick="switchDetailTab('review')"><span class=\'icon\' data-lucide=\'bot\'></span> AI Review</button>
     <button class="btn-urs-outline" onclick="createVersionSnapshot(${urs.id})"><span class=\'icon\' data-lucide=\'camera\'></span> Snapshot Version</button>
   </div>`;
@@ -1425,8 +1695,59 @@ window.runAIReview = async function (uid) {
 };
 
 /* ── Approval Tab ───────────────────────────────────────────────────────────── */
+// Mirrors pharmagpt/services/urs_lifecycle.py's ALLOWED_TRANSITIONS and
+// routes/urs.py's _ACTION_STATUS_MAP — a presentation-only duplication so
+// the action dropdown only ever offers actions the backend will actually
+// accept from the document's current status, instead of letting a user
+// pick something and find out it's invalid from a 409 after submitting.
+// The backend remains the sole source of truth and still validates
+// independently (see the 409 handling in addApprovalEntry below, which
+// covers the case where the status changed in another tab since this
+// panel was rendered) — this only prevents the *obviously* invalid case.
+const URS_LIFECYCLE_TRANSITIONS = {
+  draft:            ["under_review"],
+  under_review:     ["pending_approval", "approved", "draft"],
+  pending_approval: ["approved", "draft"],
+  approved:         ["effective", "draft"],
+  effective:        ["obsolete"],
+  obsolete:         [],
+};
+const URS_ACTION_STATUS_MAP = {
+  "Submitted for Review":   "under_review",
+  "Review Complete":        "under_review",
+  "Submitted for Approval": "pending_approval",
+  "Approved":               "approved",
+  "Rejected":                "draft",
+  "Make Effective":          "effective",
+  "Obsolete":                 "obsolete",
+};
+
+function ursValidActionsFor(status) {
+  const allowed = new Set(URS_LIFECYCLE_TRANSITIONS[status] || []);
+  return Object.keys(URS_ACTION_STATUS_MAP).filter(a => allowed.has(URS_ACTION_STATUS_MAP[a]));
+}
+
 function renderApprovalPanel(panel, urs) {
+  const user = window.PharmaAuth && PharmaAuth.getUser && PharmaAuth.getUser();
+  const validActions = ursValidActionsFor(urs.status);
+  const noActionsAvailable = validActions.length === 0;
+
   panel.innerHTML = `
+  <div class="urs-lifecycle-current">
+    <span class="urs-tag urs-tag-status ${urs.status}">${formatStatus(urs.status)}</span>
+    <span>is the current document status</span>
+  </div>
+
+  <div class="urs-info-grid" style="grid-template-columns:1fr;margin-bottom:20px">
+    <div class="urs-info-card">
+      <div class="urs-info-card-title">Reviewed By / Approved By / QA Approval</div>
+      ${infoRow("Reviewed By", urs.reviewed_by)}
+      ${infoRow("Approved By", urs.approved_by)}
+      ${infoRow("QA Approval", urs.approved_by ? "Approved" : "Pending")}
+      ${infoRow("Effective Date", urs.effective_date)}
+    </div>
+  </div>
+
   <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
     <div style="flex:1;min-width:280px">
       <div class="urs-section-header" style="margin-bottom:16px"><div class="section-icon"><span class=\'icon\' data-lucide=\'check-circle-2\'></span></div>Approval Trail</div>
@@ -1436,40 +1757,52 @@ function renderApprovalPanel(panel, urs) {
     </div>
     <div style="width:280px;flex-shrink:0">
       <div class="urs-section-header" style="margin-bottom:16px"><div class="section-icon"><span class=\'icon\' data-lucide=\'plus\'></span></div>Add Entry</div>
-      <div class="urs-field" style="margin-bottom:12px">
-        <label class="urs-label">Action</label>
-        <select class="urs-select" id="approval-action">
-          <option>Submitted for Review</option>
-          <option>Review Complete</option>
-          <option>Submitted for Approval</option>
-          <option>Approved</option>
-          <option>Rejected</option>
-          <option>Obsolete</option>
-        </select>
-      </div>
-      <div class="urs-field" style="margin-bottom:12px">
-        <label class="urs-label">Name</label>
-        <input class="urs-input" id="approval-name" placeholder="Your name">
-      </div>
-      <div class="urs-field" style="margin-bottom:12px">
-        <label class="urs-label">Role</label>
-        <input class="urs-input" id="approval-role" placeholder="e.g. QA Manager">
-      </div>
-      <div class="urs-field" style="margin-bottom:12px">
-        <label class="urs-label">Comments</label>
-        <textarea class="urs-textarea" id="approval-comments" placeholder="Optional comments…"></textarea>
-      </div>
-      <button class="btn-urs-primary" style="width:100%" onclick="addApprovalEntry(${urs.id})">Add Entry</button>
+      ${noActionsAvailable ? `
+        <div class="urs-lifecycle-hint">This document is <strong>${formatStatus(urs.status)}</strong> — no further lifecycle transitions are available from here.</div>
+      ` : `
+        <div class="urs-field" style="margin-bottom:12px">
+          <label class="urs-label">Action</label>
+          <select class="urs-select" id="approval-action" onchange="updateApprovalActionHint()">
+            ${validActions.map(a => `<option>${a}</option>`).join("")}
+          </select>
+          <div class="urs-lifecycle-hint" id="approval-action-hint"></div>
+        </div>
+        <div class="urs-field" style="margin-bottom:12px">
+          <label class="urs-label">Performed By</label>
+          ${user ? `
+            <div class="urs-identity-chip"><span class=\'icon\' data-lucide=\'user-check\'></span> <strong>${escHtml(user.display_name || user.email || "You")}</strong>${user.role ? ` (${escHtml(user.role)})` : ""}</div>
+          ` : `
+            <input class="urs-input" id="approval-name" placeholder="Your name" style="margin-bottom:8px">
+            <input class="urs-input" id="approval-role" placeholder="e.g. QA Manager">
+          `}
+        </div>
+        <div class="urs-field" style="margin-bottom:12px">
+          <label class="urs-label">Comments</label>
+          <textarea class="urs-textarea" id="approval-comments" placeholder="Optional comments…"></textarea>
+        </div>
+        <button class="btn-urs-primary" style="width:100%" id="approval-submit-btn" onclick="addApprovalEntry(${urs.id})">Add Entry</button>
+      `}
     </div>
   </div>`;
   loadApprovalTrail(urs.id);
+  if (!noActionsAvailable) updateApprovalActionHint();
 }
+
+window.updateApprovalActionHint = function () {
+  const sel = document.getElementById("approval-action");
+  const hint = document.getElementById("approval-action-hint");
+  if (!sel || !hint) return;
+  const target = URS_ACTION_STATUS_MAP[sel.value];
+  hint.textContent = target ? `This will move the document status to: ${formatStatus(target)}` : "";
+};
 
 async function loadApprovalTrail(uid) {
   const timeline = document.getElementById("approval-timeline");
   if (!timeline) return;
   try {
-    const entries = await fetch(`/urs/${uid}/approval`).then(r => r.json());
+    const resp = await fetch(`/urs/${uid}/approval`);
+    if (!resp.ok) throw new Error(`Server returned HTTP ${resp.status}`);
+    const entries = await resp.json();
     if (!entries.length) {
       timeline.innerHTML = `<div class="urs-empty" style="padding:20px"><p>No entries yet.</p></div>`;
       return;
@@ -1484,30 +1817,68 @@ async function loadApprovalTrail(uid) {
         </div>
       </div>`).join("");
   } catch (err) {
-    timeline.innerHTML = `<p style="color:var(--error)">Error loading trail</p>`;
+    timeline.innerHTML = ursErrorStateHTML("Couldn't load the approval trail", err.message, `loadApprovalTrail(${uid})`);
   }
 }
 
 window.addApprovalEntry = async function (uid) {
   const action = document.getElementById("approval-action")?.value;
-  const name = document.getElementById("approval-name")?.value.trim();
-  const role = document.getElementById("approval-role")?.value.trim();
+  const user = window.PharmaAuth && PharmaAuth.getUser && PharmaAuth.getUser();
+  const name = user ? (user.display_name || user.email || "") : (document.getElementById("approval-name")?.value.trim() || "");
+  const role = user ? (user.role || "") : (document.getElementById("approval-role")?.value.trim() || "");
   const comments = document.getElementById("approval-comments")?.value.trim();
   if (!name) { ursToast("Name is required", "error"); return; }
+
+  const btn = document.getElementById("approval-submit-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Submitting…"; }
+
   try {
-    await fetch(`/urs/${uid}/approval`, {
+    const resp = await fetch(`/urs/${uid}/approval`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, performed_by: name, role, comments }),
     });
-    // Refresh current URS state and re-render
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      if (resp.status === 409) {
+        // Someone else (or another tab) moved the document's status since
+        // this panel was rendered — reload it so the action list reflects
+        // reality instead of leaving the user staring at a now-stale form.
+        ursState.currentURS = await fetch(`/urs/${uid}`).then(r => r.json());
+        refreshDetailStatusBadge();
+        renderApprovalPanel(document.querySelector('.urs-detail-panel[data-tab="approval"]'), ursState.currentURS);
+        ursNotify({
+          type: "warning", title: "Status changed since this page loaded",
+          message: body.error || "This action is no longer valid for the document's current status. The form has been refreshed.",
+          category: "Validation",
+        });
+        return;
+      }
+      throw new Error(body.error || `Server returned HTTP ${resp.status}`);
+    }
     ursState.currentURS = await fetch(`/urs/${uid}`).then(r => r.json());
-    loadApprovalTrail(uid);
- ursToast("Approval entry added", "success");
+    refreshDetailStatusBadge();
+    renderApprovalPanel(document.querySelector('.urs-detail-panel[data-tab="approval"]'), ursState.currentURS);
+    ursNotify({ type: "success", title: "Approval entry added", message: `"${action}" recorded.` });
   } catch (e) {
-    ursToast(`Error: ${e.message}`, "error");
+    ursNotify({
+      type: "error", title: "Couldn't add approval entry", message: e.message,
+      category: "Validation", retry: () => addApprovalEntry(uid),
+    });
+    if (btn) { btn.disabled = false; btn.textContent = "Add Entry"; }
   }
 };
+
+/* Keeps the detail view's header status badge in sync after any action
+   that can change urs.status (approval entries, submit-for-review) — the
+   badge is otherwise only set once when the detail view first loads. */
+function refreshDetailStatusBadge() {
+  const badge = document.getElementById("urs-detail-status");
+  if (badge && ursState.currentURS) {
+    badge.textContent = formatStatus(ursState.currentURS.status);
+    badge.className = `urs-tag urs-tag-status ${ursState.currentURS.status}`;
+  }
+}
 
 /* ── Versions Tab ───────────────────────────────────────────────────────────── */
 function renderVersionsPanel(panel, urs) {
@@ -1548,17 +1919,25 @@ async function loadVersionsList(uid) {
 window.createVersionSnapshot = async function (uid) {
   const summary = prompt("Enter change summary for this snapshot:", "Version snapshot");
   if (summary === null) return;
-  const by = prompt("Your name:", "") || "System";
+  // created_by comes from the authenticated user when available — only
+  // falls back to a prompt in the rare case there's no session (matches
+  // the same identity-derivation pattern used for approval entries).
+  const user = window.PharmaAuth && PharmaAuth.getUser && PharmaAuth.getUser();
+  const by = (user && (user.display_name || user.email)) || prompt("Your name:", "") || "System";
   try {
-    await fetch(`/urs/${uid}/versions`, {
+    const resp = await fetch(`/urs/${uid}/versions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ change_summary: summary, created_by: by }),
     });
- ursToast("Version snapshot created", "success");
+    if (!resp.ok) throw new Error(`Server returned HTTP ${resp.status}`);
+    ursNotify({ type: "success", title: "Version snapshot created", message: summary });
     loadVersionsList(uid);
   } catch (e) {
-    ursToast(`Error: ${e.message}`, "error");
+    ursNotify({
+      type: "error", title: "Couldn't create version snapshot", message: e.message,
+      category: "Database", retry: () => createVersionSnapshot(uid),
+    });
   }
 };
 
@@ -1599,40 +1978,103 @@ function renderTraceabilityPanel(panel, urs) {
 /* ─────────────────────────────────────────────────────────────────────────────
    GLOBAL ACTIONS
 ────────────────────────────────────────────────────────────────────────────── */
-window.exportURSDocx = function (uid, ursNum) {
-  const link = document.createElement("a");
-  link.href = `/urs/${uid}/export/docx`;
-  link.download = `URS_${ursNum || uid}.docx`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
- ursToast("Downloading DOCX…", "info");
+// DOCX export — fetch + blob instead of a blind <a href> navigation.
+// Iteration 2 fixed the download-auth bug (a browser navigation can't carry
+// a custom Authorization header) with a session-cookie fallback, but a
+// navigation still gives this code zero visibility into success/failure —
+// it fires-and-forgets, so a 401/404/500 response was previously
+// indistinguishable from a successful download; the user just... didn't
+// get a file, with no explanation. fetch() carries the bearer token
+// automatically (the same patched window.fetch every other call in this
+// file already relies on) and lets this show real preparing/downloading/
+// done/failed states with an actual error message and retry on failure.
+window.exportURSDocx = async function (uid, ursNum, btnEl) {
+  const btn = btnEl || (typeof event !== "undefined" && event.currentTarget) || null;
+  const setState = (state) => { if (btn) btn.dataset.exportState = state; };
+
+  setState("preparing");
+  try {
+    const resp = await fetch(`/urs/${uid}/export/docx`);
+    if (!resp.ok) {
+      let message = `Server returned HTTP ${resp.status}`;
+      try {
+        const body = await resp.json();
+        if (body && body.error) message = body.error;
+      } catch (e) { /* response wasn't JSON — keep the generic message */ }
+      throw new Error(message);
+    }
+
+    setState("downloading");
+    const blob = await resp.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = `URS_${ursNum || uid}.docx`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(blobUrl);
+
+    setState("done");
+    ursNotify({ type: "success", title: "DOCX ready", message: `URS_${ursNum || uid}.docx downloaded.` });
+    setTimeout(() => setState("idle"), 2000);
+  } catch (e) {
+    setState("idle");
+    ursNotify({
+      type: "error", title: "DOCX export failed", message: e.message,
+      category: "Download", retry: () => exportURSDocx(uid, ursNum, btn),
+    });
+  }
 };
 
 window.deleteURS = async function (uid) {
   if (!confirm("Delete this URS? This action cannot be undone.")) return;
   try {
-    await fetch(`/urs/${uid}`, { method: "DELETE" });
- ursToast("URS deleted", "success");
+    const resp = await fetch(`/urs/${uid}`, { method: "DELETE" });
+    if (!resp.ok) throw new Error(`Server returned HTTP ${resp.status}`);
+    ursNotify({ type: "success", title: "URS deleted", message: `URS #${uid} was deleted.` });
     loadURSList();
   } catch (e) {
-    ursToast(`Error: ${e.message}`, "error");
+    ursNotify({
+      type: "error", title: "Couldn't delete URS", message: e.message,
+      category: "Database", retry: () => deleteURS(uid),
+    });
   }
 };
 
 window.submitForReview = async function (uid) {
-  const name = prompt("Your name (submitter):", "") || "";
+  // Prevents an obviously-invalid submit (e.g. re-clicking on an already
+  // Under-Review/Approved document) without waiting on a round-trip — the
+  // backend still validates independently either way.
+  if (ursState.currentURS && !ursValidActionsFor(ursState.currentURS.status).includes("Submitted for Review")) {
+    ursNotify({
+      type: "warning", title: "Already past Draft",
+      message: `This document is ${formatStatus(ursState.currentURS.status)} and can't be re-submitted for review from here.`,
+      category: "Validation",
+    });
+    return;
+  }
+  const user = window.PharmaAuth && PharmaAuth.getUser && PharmaAuth.getUser();
+  const name = (user && (user.display_name || user.email)) || prompt("Your name (submitter):", "") || "";
   if (!name) return;
   try {
-    await fetch(`/urs/${uid}/approval`, {
+    const resp = await fetch(`/urs/${uid}/approval`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "Submitted for Review", performed_by: name, role: "Author", comments: "" }),
+      body: JSON.stringify({ action: "Submitted for Review", performed_by: name, role: (user && user.role) || "Author", comments: "" }),
     });
- ursToast("URS submitted for review", "success");
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      throw new Error(body.error || `Server returned HTTP ${resp.status}`);
+    }
     ursState.currentURS = await fetch(`/urs/${uid}`).then(r => r.json());
+    refreshDetailStatusBadge();
+    ursNotify({ type: "success", title: "Submitted for review", message: "This URS has been submitted for review." });
   } catch (e) {
-    ursToast(`Error: ${e.message}`, "error");
+    ursNotify({
+      type: "error", title: "Couldn't submit for review", message: e.message,
+      category: "Validation", retry: () => submitForReview(uid),
+    });
   }
 };
 

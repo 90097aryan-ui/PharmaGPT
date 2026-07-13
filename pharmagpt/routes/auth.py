@@ -20,6 +20,7 @@ Phase 2 step 2.5.
 from dataclasses import asdict
 
 from flask import Blueprint, g, jsonify, request
+from flask import session as flask_session
 from supabase_auth.errors import AuthApiError
 
 from pharmagpt.auth.context import AuthenticationError, TenantContext, resolve_tenant_context
@@ -68,6 +69,19 @@ def login():
         # deactivated) — do not hand back a session for it.
         return jsonify({"error": str(exc)}), 403
 
+    # Mirror the access token into a signed, HttpOnly Flask session cookie
+    # as a secondary auth channel alongside the primary bearer-token one.
+    # This exists for exactly one reason: a browser navigation (e.g. the
+    # DOCX export <a download> link in static/js/urs.js) cannot attach a
+    # custom Authorization header, only cookies — so without this, any
+    # download triggered by a plain link click has no way to prove who it
+    # is and gets rejected. auth/middleware.py's before_request hook checks
+    # this cookie only when a request has no Authorization header at all,
+    # and re-syncs it on every authenticated header-based request so it
+    # never goes stale relative to whatever token the frontend is currently
+    # using. Never used in place of the header when a header is present.
+    flask_session["access_token"] = session.access_token
+
     return jsonify({
         "access_token": session.access_token,
         "refresh_token": session.refresh_token,
@@ -83,6 +97,7 @@ def logout():
     access_token = extract_bearer_token()
     client = get_anonymous_client()
     client.auth.admin.sign_out(access_token, "global")
+    flask_session.clear()
     return jsonify({"success": True})
 
 

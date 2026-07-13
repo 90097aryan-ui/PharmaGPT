@@ -47,6 +47,17 @@ app = Flask(__name__)
 app.secret_key                  = FLASK_SECRET_KEY
 app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE
 
+# The session cookie now doubles as a secondary auth channel (see
+# auth/middleware.py) for requests that can't carry an Authorization header
+# — e.g. the DOCX export download navigation. HttpOnly keeps it unreadable
+# to page JS (an improvement over the bearer token, which already sits in
+# localStorage); SameSite=Lax still allows it on the same-origin top-level
+# navigation a download link performs; Secure is enabled outside debug mode
+# so it's never sent over plain HTTP in production.
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"]   = not FLASK_DEBUG
+
 db.init_db()
 
 register_auth_middleware(app)

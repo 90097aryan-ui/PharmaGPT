@@ -109,7 +109,9 @@ class GenerationBlockedError(Exception):
     than burning retries against the same filter."""
 
 
-def submit_generation_job(urs_id: int, urs_info: dict, sections: list[str]) -> None:
+def submit_generation_job(
+    urs_id: int, urs_info: dict, sections: list[str], performed_by: str = "System",
+) -> None:
     """
     Kick off background AI generation for a URS and return immediately.
 
@@ -118,17 +120,29 @@ def submit_generation_job(urs_id: int, urs_info: dict, sections: list[str]) -> N
     to job_runner — so a poll that lands in the gap between this call
     returning and the background thread actually starting still sees
     'running', never a stale 'idle'.
+
+    `performed_by` identifies who triggered generation for the audit trail
+    (Generation Started/Completed/Failed entries). It must be resolved by
+    the caller (routes/urs.py, from the authenticated request's g.tenant)
+    before this call — the background thread runs outside any Flask request
+    context, so it has no way to read `g` itself.
     """
     batches = _batch_sections(sections, URS_GENERATION_BATCH_SIZE) or [[]]
     udb.start_generation(urs_id, len(batches))
-    job_runner.submit(_run_generation_job, urs_id, urs_info, batches)
+    udb.add_approval_entry(
+        urs_id, "Generation Started", performed_by, "",
+        f"{len(sections)} section(s) requested", urs_info.get("revision", "A"),
+    )
+    job_runner.submit(_run_generation_job, urs_id, urs_info, batches, performed_by)
 
 
 def _batch_sections(sections: list[str], batch_size: int) -> list[list[str]]:
     return [sections[i:i + batch_size] for i in range(0, len(sections), batch_size)]
 
 
-def _run_generation_job(urs_id: int, urs_info: dict, batches: list[list[str]]) -> None:
+def _run_generation_job(
+    urs_id: int, urs_info: dict, batches: list[list[str]], performed_by: str = "System",
+) -> None:
     """The background job body. Runs on job_runner's thread pool.
 
     Each batch is generated and parsed independently: a failure in one batch
@@ -137,6 +151,23 @@ def _run_generation_job(urs_id: int, urs_info: dict, batches: list[list[str]]) -
     computed from what actually comes back, not just which batch "succeeded",
     so a partially-recovered batch still gets credited for the sections it
     did produce.
+
+    Each batch's requirements are persisted immediately via
+    append_requirements() as soon as that batch completes, rather than
+    accumulated in memory and written once in a single bulk save after the
+    loop. Two reasons: (1) a process crash mid-job no longer loses every
+    already-generated requirement, only the batch in flight; (2) it is what
+    makes the final status/count write in finish_generation() genuinely
+    atomic — there is no longer a slow bulk-insert step sitting between "the
+    last batch's count is known" and "the terminal status is written". A
+    batch whose persistence itself fails is treated as failed (not counted),
+    since claiming a requirement was "generated" when it was never durably
+    saved would be worse than under-reporting it.
+
+    The per-batch progress write (update_generation_progress) is skipped for
+    the *last* batch — its contribution to progress/count is folded into the
+    single finish_generation() call after the loop instead, so status and
+    the final result_count are always published together, never separately.
     """
     job_start = time.perf_counter()
     all_numbered: list[dict] = []
@@ -156,15 +187,22 @@ def _run_generation_job(urs_id: int, urs_info: dict, batches: list[list[str]]) -
             )
             if recovery_note:
                 batch_errors.append(f"Batch {i} ({', '.join(batch_sections) or 'default sections'}): {recovery_note}")
+
+            numbered_batch: list[dict] = []
             for req in batch_reqs:
                 section = req.get("section", "General Requirements")
-                covered_sections.add(section)
                 prefix = SECTION_PREFIX.get(section, "REQ")
                 section_counters[prefix] = section_counters.get(prefix, 0) + 1
                 req["req_id"] = f"{prefix}-{section_counters[prefix]:03d}"
                 req["source"] = "ai"
                 req["status"] = "draft"
-                all_numbered.append(req)
+                numbered_batch.append(req)
+
+            if numbered_batch:
+                udb.append_requirements(urs_id, numbered_batch)
+            for req in numbered_batch:
+                covered_sections.add(req.get("section", "General Requirements"))
+            all_numbered.extend(numbered_batch)
         except GenerationBlockedError as exc:
             logger.error("URS %s generation batch %d/%d blocked: %s", urs_id, i, len(batches), exc)
             batch_errors.append(f"Batch {i} ({', '.join(batch_sections) or 'default sections'}): {exc}")
@@ -172,20 +210,17 @@ def _run_generation_job(urs_id: int, urs_info: dict, batches: list[list[str]]) -
             logger.exception("URS %s generation batch %d/%d failed", urs_id, i, len(batches))
             batch_errors.append(f"Batch {i} ({', '.join(batch_sections) or 'default sections'}): {exc}")
 
-        udb.update_generation_progress(urs_id, i, len(all_numbered))
-
-    if all_numbered:
-        try:
-            existing = udb.get_requirements(urs_id)
-            udb.save_requirements(urs_id, existing + all_numbered)
-        except Exception as exc:
-            logger.exception("URS %s: failed to save generated requirements", urs_id)
-            batch_errors.append(f"Failed to save generated requirements: {exc}")
+        if i < len(batches):
+            udb.update_generation_progress(urs_id, i, len(all_numbered))
 
     status = "failed" if not all_numbered else "completed"
     message = _build_generation_message(requested_sections, covered_sections, len(all_numbered))
     error_summary = "; ".join(batch_errors)
-    udb.finish_generation(urs_id, status, len(all_numbered), error_summary, message)
+    udb.finish_generation(urs_id, status, len(batches), len(all_numbered), error_summary, message)
+    udb.add_approval_entry(
+        urs_id, "Generation Completed" if status == "completed" else "Generation Failed",
+        performed_by, "", message or error_summary, urs_info.get("revision", "A"),
+    )
 
     total_seconds = time.perf_counter() - job_start
     logger.info(

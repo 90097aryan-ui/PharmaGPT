@@ -21,6 +21,10 @@ from pharmagpt.routes.auth import bp as auth_bp
 @pytest.fixture()
 def app():
     app = Flask(__name__)
+    # A secret key is required for login() to write the session-cookie auth
+    # fallback (see auth/middleware.py) — the real app always has one set
+    # (pharmagpt/app.py), this fixture just mirrors that.
+    app.secret_key = "test-secret-key"
     app.register_blueprint(auth_bp)
     return app
 

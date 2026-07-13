@@ -287,3 +287,93 @@ def test_parse_ai_requirements_strips_markdown_fences():
 def test_batch_sections_respects_batch_size():
     sections = ["A", "B", "C", "D", "E"]
     assert gen_job._batch_sections(sections, 2) == [["A", "B"], ["C", "D"], ["E"]]
+
+
+# ── Atomic status/count writes (Stabilization Iteration 2, priority 2) ─────
+# Regression coverage for the root cause of the old "59 requirements
+# generated" / "taking longer than expected" contradiction: the final
+# result_count used to be published (via update_generation_progress) before
+# a separate, later finish_generation() call flipped generation_status to a
+# terminal value — a poll landing in that gap saw a "final" count next to a
+# non-terminal status. These tests assert the fix's two load-bearing
+# properties: requirements are persisted per-batch as they complete (not
+# once at the very end), and finish_generation() always publishes
+# progress_current == progress_total together with the terminal status and
+# result_count in the one call that ends the job.
+
+def test_requirements_are_persisted_incrementally_per_batch(db_path, monkeypatch):
+    urs = _make_urs()
+    seen_after_first_batch = {}
+
+    def fake_generate_content(model, contents, config):
+        prompt_text = contents[0].parts[0].text
+        if "Safety Requirements" in prompt_text:
+            # By the time the second batch's Gemini call happens, the first
+            # batch's requirement must already be in the database — proof
+            # persistence happens per-batch, not in one bulk save at the end.
+            seen_after_first_batch["count"] = len(udb.get_requirements(urs["id"]))
+            return _FakeResponse(_req_json("Safety Requirements"))
+        return _FakeResponse(_req_json("Functional Requirements"))
+
+    monkeypatch.setattr(gen_job, "gemini_client", _FakeClient(fake_generate_content))
+
+    gen_job._run_generation_job(
+        urs["id"], urs, [["Functional Requirements"], ["Safety Requirements"]],
+    )
+
+    assert seen_after_first_batch["count"] == 1
+    assert len(udb.get_requirements(urs["id"])) == 2
+
+
+def test_finish_generation_always_sets_progress_current_equal_to_total(db_path, monkeypatch):
+    urs = _make_urs()
+
+    def fake_generate_content(model, contents, config):
+        return _FakeResponse(_req_json("Functional Requirements"))
+
+    monkeypatch.setattr(gen_job, "gemini_client", _FakeClient(fake_generate_content))
+
+    gen_job._run_generation_job(
+        urs["id"], urs, [["Functional Requirements"], ["Safety Requirements"]],
+    )
+
+    status = udb.get_generation_status(urs["id"])
+    assert status["generation_status"] == "completed"
+    assert status["generation_progress_current"] == status["generation_progress_total"] == 2
+    # The requirement actually persisted for the *last* batch to complete
+    # must already be reflected in generation_result_count at the exact
+    # moment status becomes terminal — both are written by the same
+    # statement in finish_generation(), so this can never be observed any
+    # other way.
+    assert status["generation_result_count"] == len(udb.get_requirements(urs["id"]))
+
+
+def test_finish_generation_writes_status_progress_and_count_atomically(db_path):
+    """Direct unit check on finish_generation() itself: a single call sets
+    status, progress_current/total, and result_count together — there is no
+    way to observe one without the others already being consistent."""
+    urs = _make_urs()
+    udb.start_generation(urs["id"], total_batches=3)
+
+    udb.finish_generation(urs["id"], "completed", 3, 7, "", "3 of 3 sections generated (7 requirements).")
+
+    status = udb.get_generation_status(urs["id"])
+    assert status["generation_status"] == "completed"
+    assert status["generation_progress_current"] == 3
+    assert status["generation_progress_total"] == 3
+    assert status["generation_result_count"] == 7
+
+
+def test_append_requirements_does_not_touch_existing_rows(db_path):
+    urs = _make_urs()
+    udb.save_requirements(urs["id"], [
+        {"req_id": "REQ-001", "section": "General", "requirement": "Pre-existing requirement."},
+    ])
+
+    udb.append_requirements(urs["id"], [
+        {"req_id": "REQ-002", "section": "Functional", "requirement": "Newly appended requirement."},
+    ])
+
+    reqs = udb.get_requirements(urs["id"])
+    assert len(reqs) == 2
+    assert {r["req_id"] for r in reqs} == {"REQ-001", "REQ-002"}

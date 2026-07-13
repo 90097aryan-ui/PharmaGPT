@@ -11,6 +11,7 @@ urs_versions      : Snapshot of requirements at each version point
 
 import json
 import sqlite3
+from datetime import datetime
 from pharmagpt.database import get_connection
 
 
@@ -97,27 +98,85 @@ URS_SCHEMA = """
         created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (urs_id) REFERENCES urs_projects(id) ON DELETE CASCADE
     );
+
+    -- urs_numbering: atomic per-year sequence counters backing
+    -- _next_document_number(). One row per (series, year) — 'series'
+    -- distinguishes the URS Number sequence from the Document Number
+    -- sequence so they can grow independently. Sequence state lives here,
+    -- not derived from urs_projects rows, so a deleted URS never frees its
+    -- number for reuse (document control requires numbers stay unique
+    -- forever, not just among currently-existing rows).
+    CREATE TABLE IF NOT EXISTS urs_numbering (
+        series   TEXT    NOT NULL,
+        year     INTEGER NOT NULL,
+        last_seq INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (series, year)
+    );
 """
+
+
+# ── Document Control Automation ───────────────────────────────────────────────
+# Server-issued, never client-supplied. See routes/urs.py create_urs()/
+# add_approval() for how these are wired into the create and approval flows.
+
+def _next_document_number(series: str, prefix: str) -> str:
+    """Atomically allocate the next sequential number in `series` for the
+    current calendar year and return it formatted as PREFIX-YYYY-NNN.
+
+    Uses urs_numbering as a dedicated counter table (rather than COUNT(*) or
+    MAX() over urs_projects) so a deleted URS never frees its number for
+    reuse, and concurrent creates under SQLite's serialized writers never
+    race to the same number."""
+    year = datetime.now().year
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            "INSERT INTO urs_numbering (series, year, last_seq) VALUES (?, ?, 0) "
+            "ON CONFLICT(series, year) DO NOTHING",
+            (series, year),
+        )
+        conn.execute(
+            "UPDATE urs_numbering SET last_seq = last_seq + 1 WHERE series = ? AND year = ?",
+            (series, year),
+        )
+        seq = conn.execute(
+            "SELECT last_seq FROM urs_numbering WHERE series = ? AND year = ?",
+            (series, year),
+        ).fetchone()[0]
+    conn.close()
+    return f"{prefix}-{year}-{seq:03d}"
 
 
 # ── URS Projects ──────────────────────────────────────────────────────────────
 
 def create_urs(data: dict) -> dict:
+    """Create a new URS. Document-control fields are entirely system-issued:
+    urs_number/doc_number are auto-numbered, revision/version always start
+    at 'A'/'1.0', status always starts at 'draft', and reviewed_by/
+    approved_by/effective_date start blank — none of these are read from
+    `data` even if a caller supplies them (closes the previous bypass where
+    a client could POST {"status": "approved"} directly at creation time).
+    prepared_by is still read from `data`; routes/urs.py's create_urs() is
+    responsible for populating it from the authenticated user before calling
+    this function."""
+    urs_number = _next_document_number("urs_number", "URS")
+    doc_number = _next_document_number("doc_number", "QA-URS")
     conn = get_connection()
     with conn:
         cur = conn.execute(
             """INSERT INTO urs_projects
-               (urs_number, doc_number, title, revision, status, department, site, location,
+               (urs_number, doc_number, title, revision, version, status, department, site, location,
                 equipment_name, equipment_id, manufacturer, model, capacity, category,
                 equipment_type, validation_type, purpose, intended_use, process_description,
                 prepared_by, reviewed_by, approved_by, effective_date, linked_project_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                data.get("urs_number", ""),
-                data.get("doc_number", ""),
+                urs_number,
+                doc_number,
                 data.get("title", "Untitled URS"),
-                data.get("revision", "A"),
-                data.get("status", "draft"),
+                "A",
+                "1.0",
+                "draft",
                 data.get("department", ""),
                 data.get("site", ""),
                 data.get("location", ""),
@@ -133,16 +192,16 @@ def create_urs(data: dict) -> dict:
                 data.get("intended_use", ""),
                 data.get("process_description", ""),
                 data.get("prepared_by", ""),
-                data.get("reviewed_by", ""),
-                data.get("approved_by", ""),
-                data.get("effective_date", ""),
+                "",
+                "",
+                "",
                 data.get("linked_project_id"),
             ),
         )
         new_id = cur.lastrowid
     conn.close()
     add_approval_entry(new_id, "URS Created", data.get("prepared_by", "System"), "Author",
-                       "Initial draft created", data.get("revision", "A"))
+                       "Initial draft created", "A")
     return get_urs(new_id)
 
 
@@ -245,17 +304,37 @@ def update_generation_progress(urs_id: int, current_batch: int, result_count: in
 
 
 def finish_generation(
-    urs_id: int, status: str, result_count: int, error: str = "", message: str = "",
+    urs_id: int, status: str, total_batches: int, result_count: int,
+    error: str = "", message: str = "",
 ) -> None:
+    """Atomically write the terminal generation state — status, final
+    progress (current == total), result_count, and message/error — in a
+    single UPDATE statement.
+
+    This is the only place generation_status ever becomes 'completed' or
+    'failed', and it is always written together with the result_count that
+    goes with it. Previously the last per-batch update_generation_progress()
+    call published the final result_count on its own, with status still
+    'running' until a separate, later finish_generation() call (after the
+    full save_requirements() pass) flipped it — a poll landing in that gap
+    could observe "N requirements generated" next to generation_status:
+    'running', which the frontend had no consistent way to reconcile (the
+    root cause of the old "59 requirements" / "taking longer than expected"
+    contradiction). Folding the final progress+count+status into one
+    statement — and persisting requirements incrementally per batch instead
+    of in one bulk save at the end (see append_requirements) — closes that
+    window entirely rather than just narrowing it.
+    """
     conn = get_connection()
     with conn:
         conn.execute(
             """UPDATE urs_projects
-               SET generation_status = ?, generation_result_count = ?,
+               SET generation_status = ?, generation_progress_current = ?,
+                   generation_progress_total = ?, generation_result_count = ?,
                    generation_error = ?, generation_message = ?,
                    generation_finished_at = CURRENT_TIMESTAMP
                WHERE id = ?""",
-            (status, result_count, error, message, urs_id),
+            (status, total_batches, total_batches, result_count, error, message, urs_id),
         )
     conn.close()
 
@@ -352,6 +431,58 @@ def save_requirements(urs_id: int, requirements: list[dict]) -> list[dict]:
                     req.get("status", "draft"),
                     req.get("source", "ai"),
                     i,
+                ),
+            )
+        conn.execute(
+            "UPDATE urs_projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (urs_id,)
+        )
+    conn.close()
+    return get_requirements(urs_id)
+
+
+def append_requirements(urs_id: int, requirements: list[dict]) -> list[dict]:
+    """Insert new requirement rows without touching any existing ones.
+
+    Used by services/urs_generation_job.py to persist each AI generation
+    batch as soon as it completes, rather than accumulating every batch in
+    memory and writing them all in one save_requirements() call at the very
+    end. This closes the window where a background-job crash between "Gemini
+    finished" and "the bulk save ran" would silently lose already-generated
+    requirements, and it means generation_result_count always reflects rows
+    that are actually in the table, not just an in-memory tally."""
+    if not requirements:
+        return get_requirements(urs_id)
+    conn = get_connection()
+    with conn:
+        max_order = conn.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) FROM urs_requirements WHERE urs_id = ?",
+            (urs_id,),
+        ).fetchone()[0]
+        for offset, req in enumerate(requirements, start=1):
+            conn.execute(
+                """INSERT INTO urs_requirements
+                   (urs_id, req_id, section, requirement, rationale, priority,
+                    gmp_criticality, regulatory_ref, verification_method,
+                    acceptance_criteria, risk_link, traceability_link,
+                    comments, status, source, sort_order)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    urs_id,
+                    req.get("req_id", ""),
+                    req.get("section", "General"),
+                    req.get("requirement", ""),
+                    req.get("rationale", ""),
+                    req.get("priority", "Medium"),
+                    req.get("gmp_criticality", "GMP"),
+                    req.get("regulatory_ref", ""),
+                    req.get("verification_method", "Functional Test"),
+                    req.get("acceptance_criteria", ""),
+                    req.get("risk_link", ""),
+                    req.get("traceability_link", ""),
+                    req.get("comments", ""),
+                    req.get("status", "draft"),
+                    req.get("source", "ai"),
+                    max_order + offset,
                 ),
             )
         conn.execute(
@@ -484,6 +615,13 @@ def create_version_snapshot(urs_id: int, change_summary: str, created_by: str) -
             ),
         )
         new_id = cur.lastrowid
+        # Keep the document-control header's `version` field (auto-generated,
+        # see create_urs) in sync with the latest snapshot so it never drifts
+        # from the version history it's summarizing.
+        conn2.execute(
+            "UPDATE urs_projects SET version = ? WHERE id = ?",
+            (f"{count + 1}.0", urs_id),
+        )
     conn2.close()
     conn3 = get_connection()
     row = conn3.execute("SELECT * FROM urs_versions WHERE id = ?", (new_id,)).fetchone()

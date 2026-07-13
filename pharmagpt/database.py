@@ -283,6 +283,15 @@ def init_db() -> None:
     _add_column_if_missing(conn, "urs_projects", "generation_finished_at",      "TIMESTAMP DEFAULT NULL")
     conn.commit()
 
+    # ── URS document control automation (Stabilization Iteration 2) ──────────
+    # See urs_database.py create_urs()/create_version_snapshot(). `version`
+    # is the document-control header's version label ("1.0", "2.0", ...),
+    # auto-set at creation and kept in sync with the latest urs_versions
+    # snapshot — distinct from `revision` (the "A"/"B"/... rework-cycle
+    # letter) which already existed as a column.
+    _add_column_if_missing(conn, "urs_projects", "version", "TEXT NOT NULL DEFAULT '1.0'")
+    conn.commit()
+
     # ── Qualification Management Suite tables ─────────────────────────────────
     from pharmagpt.qual_database import QUAL_SCHEMA
     conn.executescript(QUAL_SCHEMA)
