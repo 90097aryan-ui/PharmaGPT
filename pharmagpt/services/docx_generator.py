@@ -24,7 +24,8 @@ Footer (every page except cover)
   Controlled Document  |  Revision  |  Page X of Y  |  PharmaGPT  |  Date
 
 Optional
-  DRAFT diagonal watermark when document_status == "Draft"
+  Diagonal status watermark (native Word text, not an image) — see
+  _watermark_text_for_status() for the document_status -> text mapping.
 
 PDF integration point
   The DocxGenerator.build() returns bytes.  A future pdf_generator.py
@@ -159,7 +160,11 @@ class DocumentData:
     protocol_number:  str = ""
     revision_number:  str = "00"
     effective_date:   str = ""
-    document_status:  str = "Draft"   # "Draft" | "Final"
+    # "Draft" | "Final" (legacy two-state callers) or any URS lifecycle
+    # status ("draft" | "under_review" | "pending_approval" | "approved" |
+    # "effective" | "obsolete") — see _watermark_text_for_status() for how
+    # this drives the exported watermark text.
+    document_status:  str = "Draft"
 
     # ── Company ───────────────────────────────────────────────────────────────
     company_name: str = ""
@@ -232,8 +237,9 @@ class DocxGenerator:
             self._add_page_break()
             self._add_review_report(self._review_result)
         self._setup_header_footer()
-        if self.data.document_status.lower() == "draft":
-            self._add_draft_watermark()
+        watermark_text = _watermark_text_for_status(self.data.document_status)
+        if watermark_text:
+            self._add_watermark(watermark_text)
 
         buf = BytesIO()
         self.doc.save(buf)
@@ -1183,31 +1189,55 @@ class DocxGenerator:
         # ── First-page header/footer: leave empty (clean cover page) ──────────
         # (already set by different_first_page_header_footer = True in _configure_page_layout)
 
-    # ── DRAFT watermark ───────────────────────────────────────────────────────
+    # ── Status watermark ──────────────────────────────────────────────────────
 
-    def _add_draft_watermark(self) -> None:
-        """Insert a grey diagonal DRAFT watermark via header VML shape."""
+    def _add_watermark(self, text: str) -> None:
+        """Insert a light-grey, semi-transparent, ~45°-diagonal text
+        watermark behind the page content, via the same VML shape
+        (`#_x0000_t136`, a text-on-a-path autoshape) that Word's own
+        Insert > Watermark > Custom feature generates — so this is a real
+        native Word watermark, not an inserted picture.
+
+        Sized so a single word ("DRAFT") and a two-word phrase ("UNDER
+        REVIEW") both read clearly without swamping the page: width scales
+        with the text length instead of using one fixed (oversized) box.
+        """
         section = self.doc.sections[0]
         header  = section.header
+
+        width_pt  = max(260, min(70 * len(text), 560))
+        height_pt = 130
 
         watermark_xml = (
             '<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
             '<w:pPr><w:jc w:val="center"/></w:pPr>'
             '<w:r><w:rPr/><w:pict>'
+            '<v:shapetype xmlns:v="urn:schemas-microsoft-com:vml" '
+            'id="_x0000_t136" coordsize="1600,21600" o:spt="136" '
+            'xmlns:o="urn:schemas-microsoft-com:office:office" '
+            'adj="10800" path="m@7,0l@8,5400,,10800@7,21600@9,21600,21600,10800xe">'
+            '<v:formulas>'
+            '<v:f eqn="sum #0 0 10800"/><v:f eqn="prod #0 2 1"/><v:f eqn="sum 21600 0 @1"/>'
+            '<v:f eqn="sum 0 0 @2"/><v:f eqn="sum 21600 0 @3"/>'
+            '</v:formulas>'
+            '<v:path textpathok="t" o:connecttype="custom"/>'
+            '<v:textpath on="t" fitshape="t"/>'
+            '</v:shapetype>'
             '<v:shape xmlns:v="urn:schemas-microsoft-com:vml" '
             'xmlns:o="urn:schemas-microsoft-com:office:office" '
             'xmlns:w10="urn:schemas-microsoft-com:office:word" '
-            'id="_x0000_s2049" type="#_x0000_t136" '
-            'style="position:absolute;margin-left:0;margin-top:0;'
-            'width:528pt;height:264pt;z-index:-251654144;'
-            'mso-position-horizontal:center;mso-position-vertical:center" '
-            'fillcolor="#C0C0C0" stroked="f" coordsize="21600,21600">'
-            '<v:fill o:detectmouseclick="t"/>'
+            f'id="_x0000_s2049" type="#_x0000_t136" '
+            f'style="position:absolute;margin-left:0;margin-top:0;'
+            f'width:{width_pt}pt;height:{height_pt}pt;rotation:315;z-index:-251654144;'
+            'mso-position-horizontal:center;mso-position-horizontal-relative:margin;'
+            'mso-position-vertical:center;mso-position-vertical-relative:margin" '
+            'o:allowincell="f" fillcolor="#C0C0C0" stroked="f" coordsize="21600,21600">'
+            '<v:fill opacity=".5"/>'
             '<v:path o:connecttype="none"/>'
             '<v:textbox style="mso-fit-shape-to-text:t"><w:txbxContent/></v:textbox>'
             '<w10:wrap anchorx="page" anchory="page"/>'
-            '<v:textpath style="font-family:\'Calibri\';font-size:1pt;'
-            'v-text-kern:t" trim="t" fitshape="t" string="DRAFT"/>'
+            f'<v:textpath style="font-family:\'Calibri\';font-size:1pt;'
+            f'v-text-kern:t" trim="t" fitshape="t" string="{_xml_escape(text)}"/>'
             '</v:shape></w:pict></w:r></w:p>'
         )
         from lxml import etree
@@ -1253,6 +1283,41 @@ class DocxGenerator:
 # ══════════════════════════════════════════════════════════════════════════════
 # Module-level helpers (pure functions, reusable by pdf_generator.py)
 # ══════════════════════════════════════════════════════════════════════════════
+
+# Lifecycle status -> watermark text. Keyed on the lower-cased, underscore-
+# or-space-normalised status so both the URS suite's snake_case statuses
+# ("under_review") and human-typed ones ("Under Review") match. "effective"
+# and legacy "final" intentionally map to None (no watermark) — those are
+# the two states this document is actually approved for use in, so nothing
+# should be stamped across the page.
+_WATERMARK_BY_STATUS = {
+    "draft":             "DRAFT",
+    "under review":      "UNDER REVIEW",
+    "pending approval":  "PENDING APPROVAL",
+    "approved":          "APPROVED",
+    "effective":         None,
+    "obsolete":          "OBSOLETE",
+    "final":             None,
+}
+
+
+def _watermark_text_for_status(document_status: str) -> str | None:
+    """Map a document lifecycle status to the watermark text it should
+    carry on export, or None for no watermark. Unrecognised statuses get
+    no watermark rather than guessing."""
+    key = (document_status or "").strip().lower().replace("_", " ")
+    return _WATERMARK_BY_STATUS.get(key)
+
+
+def _xml_escape(text: str) -> str:
+    """Escape text for safe embedding inside a double-quoted XML attribute."""
+    return (
+        text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+    )
+
 
 def _set_cell_bg(cell, hex_color: str) -> None:
     tc   = cell._tc

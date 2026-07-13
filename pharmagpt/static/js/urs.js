@@ -1595,7 +1595,11 @@ window.saveDetailRequirements = async function () {
 /* ── Review Tab ─────────────────────────────────────────────────────────────── */
 function renderReviewPanel(panel, urs) {
   const review = urs.ai_review_data || {};
-  const hasReview = review.compliance_score > 0;
+  // A review "exists" once one has actually completed and been saved
+  // (reviewed_at is stamped by POST /urs/<id>/review on success) — a raw
+  // score check here would treat a legitimately low/zero-scored review as
+  // "not yet reviewed" and silently hide it.
+  const hasReview = !!review.reviewed_at;
 
   if (!hasReview) {
     panel.innerHTML = `
@@ -1680,17 +1684,27 @@ window.runAIReview = async function (uid) {
   if (btn) btn.disabled = true;
 
   try {
-    const review = await fetch(`/urs/${uid}/review`, { method: "POST" }).then(r => r.json());
+    const resp = await fetch(`/urs/${uid}/review`, { method: "POST" });
+    const review = await resp.json();
+    if (!resp.ok) throw new Error(review.error || `Server returned HTTP ${resp.status}`);
+
     ursState.currentURS = { ...ursState.currentURS, ai_review_data: review, ...review };
     renderReviewPanel(
       document.querySelector('.urs-detail-panel[data-tab="review"]'),
       ursState.currentURS
     );
- ursToast("AI Review complete", "success");
+    ursToast("AI Review complete", "success");
   } catch (e) {
-    ursToast(`Review failed: ${e.message}`, "error");
-    if (btn) btn.disabled = false;
     if (progress) progress.classList.remove("visible");
+    if (btn) btn.disabled = false;
+    const panel = document.querySelector('.urs-detail-panel[data-tab="review"]');
+    if (panel) {
+      const timeline = panel.querySelector(".urs-ai-panel");
+      if (timeline) {
+        timeline.insertAdjacentHTML("beforeend", ursErrorStateHTML("AI Review failed", e.message, `runAIReview(${uid})`));
+      }
+    }
+    ursToast(`Review failed: ${e.message}`, "error");
   }
 };
 
@@ -1799,14 +1813,24 @@ window.updateApprovalActionHint = function () {
 async function loadApprovalTrail(uid) {
   const timeline = document.getElementById("approval-timeline");
   if (!timeline) return;
+
+  // A hung request (slow cold start, a busy SQLite writer, a dropped
+  // connection) must not leave the spinner spinning forever — abort and
+  // surface a retryable error instead of an endless loader.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
   try {
-    const resp = await fetch(`/urs/${uid}/approval`);
+    const resp = await fetch(`/urs/${uid}/approval`, { signal: controller.signal });
     if (!resp.ok) throw new Error(`Server returned HTTP ${resp.status}`);
     const entries = await resp.json();
-    if (!entries.length) {
-      timeline.innerHTML = `<div class="urs-empty" style="padding:20px"><p>No entries yet.</p></div>`;
+    if (!Array.isArray(entries) || !entries.length) {
+      timeline.innerHTML = `<div class="urs-empty" style="padding:20px"><p>No approval history available.</p></div>`;
       return;
     }
+    // Defensive: render oldest-first regardless of what order the backend
+    // returned them in, so the trail always reads chronologically.
+    entries.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     timeline.innerHTML = entries.map(e => `
       <div class="urs-approval-entry">
         <div class="urs-approval-dot"></div>
@@ -1817,7 +1841,10 @@ async function loadApprovalTrail(uid) {
         </div>
       </div>`).join("");
   } catch (err) {
-    timeline.innerHTML = ursErrorStateHTML("Couldn't load the approval trail", err.message, `loadApprovalTrail(${uid})`);
+    const message = err.name === "AbortError" ? "Request timed out — the server took too long to respond." : err.message;
+    timeline.innerHTML = ursErrorStateHTML("Couldn't load the approval trail", message, `loadApprovalTrail(${uid})`);
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

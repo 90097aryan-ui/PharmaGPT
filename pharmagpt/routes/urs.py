@@ -38,8 +38,9 @@ GET    /urs/library/types                    list equipment types in library
 
 import json
 import logging
+import re
 import time
-from datetime import date
+from datetime import date, datetime
 from flask import Blueprint, g, jsonify, request
 
 from pharmagpt import urs_database as udb
@@ -288,7 +289,16 @@ def generation_status(uid):
 
 @bp.route("/<int:uid>/review", methods=["POST"])
 def review_urs(uid):
-    """AI review of the complete URS — scores and improvement suggestions."""
+    """AI review of the complete URS — scores and improvement suggestions.
+
+    On success, the review is persisted and returned with HTTP 200. On
+    failure, nothing is written to the URS (a transient Gemini error must
+    not clobber a previously-saved good review — see get_review below,
+    which is how the frontend re-displays the latest saved review) and the
+    response is a non-2xx status with a human-readable "error" message, so
+    the frontend can render an explicit failure state instead of silently
+    treating a broken response as "no review yet".
+    """
     urs = udb.get_urs(uid)
     if not urs:
         return jsonify({"error": "URS not found"}), 404
@@ -307,26 +317,31 @@ def review_urs(uid):
                 max_output_tokens=4096,
             ),
         )
-        raw = response.text.strip()
+        raw = (response.text or "").strip()
         if "```json" in raw:
             raw = raw.split("```json")[1].split("```")[0].strip()
         elif "```" in raw:
             raw = raw.split("```")[1].split("```")[0].strip()
-        review_data = json.loads(raw)
+        if not raw:
+            raise ValueError("Gemini returned an empty response")
+        try:
+            review_data = json.loads(raw)
+        except json.JSONDecodeError:
+            # Model sometimes prefixes/suffixes the JSON with prose despite
+            # the "return ONLY JSON" instruction — fall back to extracting
+            # the first {...} block (mirrors the list-extraction fallback
+            # already used for the risk-assessment reviewer, routes/risk.py).
+            match = re.search(r"\{[\s\S]*\}", raw)
+            if not match:
+                raise
+            review_data = json.loads(match.group())
     except Exception as e:
-        review_data = {
-            "compliance_score": 0,
-            "completeness_score": 0,
-            "overall_assessment": f"Review failed: {str(e)}",
-            "strengths": [],
-            "missing_requirements": [],
-            "improvements": [],
-            "regulatory_gaps": [],
-            "data_integrity_assessment": "",
-            "csv_readiness": "",
-            "risk_flags": [],
-            "recommendation": "Review Error",
-        }
+        logger.exception("AI review failed for URS %s", uid)
+        return jsonify({
+            "error": f"AI review failed: {e}",
+        }), 502
+
+    review_data["reviewed_at"] = datetime.utcnow().isoformat()
 
     # Save review data to URS
     udb.update_urs(uid, {
@@ -491,6 +506,7 @@ def export_docx(uid):
             "reviewed_by": urs.get("reviewed_by", ""),
             "approved_by": urs.get("approved_by", ""),
             "effective_date": urs.get("effective_date", ""),
+            "document_status": urs.get("status", lifecycle.DRAFT),
         }
         docx_bytes = markdown_to_docx(markdown_content, "URS", form_data)
     except Exception as exc:
