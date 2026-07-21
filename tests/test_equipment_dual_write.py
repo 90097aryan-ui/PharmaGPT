@@ -102,16 +102,23 @@ def test_dual_write_create_failure_does_not_break_response(client, authed, monke
     assert equipdb.get_equipment(resp.get_json()["id"]) is not None
 
 
-def test_dual_write_skips_super_admin_with_no_company(client, monkeypatch):
+def test_super_admin_cannot_create_equipment(client, authed, monkeypatch):
+    """Equipment is nested under a Project route, and Super Admin (no
+    company_id) has no standing access to any company's Projects
+    (PLATFORM_ARCHITECTURE.md §7) — so the project lookup itself resolves to
+    "not found" for them, same as any caller outside that project's company,
+    before either the SQLite write or the Postgres dual-write ever runs.
+    The project itself is created by a real company_admin tenant first."""
     monkeypatch.setattr(config, "EQUIPMENT_BACKEND", "dual")
+    with authed:
+        project = _create_project(client)
+
     with patch(
         "pharmagpt.auth.middleware.resolve_tenant_context", return_value=SUPER_ADMIN_TENANT
-    ):
-        project = _create_project(client)
-        with patch("pharmagpt.routes.equipment.equipment_repo.create_equipment") as mock_create:
-            resp = _create_equipment(client, project["id"])
+    ), patch("pharmagpt.routes.equipment.equipment_repo.create_equipment") as mock_create:
+        resp = _create_equipment(client, project["id"])
 
-    assert resp.status_code == 201
+    assert resp.status_code == 404
     mock_create.assert_not_called()
 
 
@@ -213,7 +220,7 @@ def test_dual_write_link_kb_document_calls_repo_when_both_sides_migrated(client,
             title="SOP-1", folder="SOP", tags="", doc_version="1.0",
             effective_date=None, review_date=None, original_name="sop1.pdf",
             stored_filename="stored1.pdf", file_type="pdf", file_size=1024,
-        )
+        company_id="company-1")
         db.set_kb_document_postgres_id(kb_doc["id"], "pg-kb-doc-1")
 
         with patch(
@@ -246,7 +253,7 @@ def test_dual_write_link_skipped_when_kb_document_not_migrated_yet(client, authe
             title="SOP-2", folder="SOP", tags="", doc_version="1.0",
             effective_date=None, review_date=None, original_name="sop2.pdf",
             stored_filename="stored2.pdf", file_type="pdf", file_size=1024,
-        )
+        company_id="company-1")
         # no postgres_id set on kb_doc -> not migrated yet
 
         with patch("pharmagpt.routes.equipment.equipment_repo.link_kb_document") as mock_link:
@@ -274,7 +281,7 @@ def test_dual_write_unlink_calls_repo_with_postgres_id(client, authed, monkeypat
             title="SOP-3", folder="SOP", tags="", doc_version="1.0",
             effective_date=None, review_date=None, original_name="sop3.pdf",
             stored_filename="stored3.pdf", file_type="pdf", file_size=1024,
-        )
+        company_id="company-1")
         db.set_kb_document_postgres_id(kb_doc["id"], "pg-kb-doc-2")
 
         with patch(

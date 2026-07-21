@@ -32,7 +32,7 @@ underlying qms_approvals table (and this read endpoint) stays shared.
 
 import os
 from werkzeug.utils import secure_filename
-from flask import Blueprint, jsonify, request, send_file
+from flask import Blueprint, g, jsonify, request, send_file
 
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import qms_document_database as qdocdb
@@ -40,6 +40,8 @@ from pharmagpt import qms_deviation_database as qdevdb
 from pharmagpt import qms_capa_database as qcapadb
 from pharmagpt import qms_change_control_database as qccdb
 from pharmagpt import database as db
+from pharmagpt import tenancy
+from pharmagpt.auth.decorators import require_role
 from pharmagpt.config import UPLOAD_FOLDER, ALLOWED_EXTENSIONS
 from pharmagpt.documents import get_extension, get_mime_type
 
@@ -61,8 +63,18 @@ _GETTERS = {
 
 
 def _record_exists(record_type: str, record_id: int) -> bool:
+    """Tenant-scoped existence check — verifies the record both exists AND
+    belongs to the caller's company (pharmagpt/tenancy.py). Every route below
+    reads/writes the shared polymorphic qms_attachments/qms_comments/
+    qms_audit_trail/qms_approvals tables keyed only by (record_type,
+    record_id) with no company_id column of their own, so this check is the
+    only thing standing between a caller and another company's attachments/
+    comments/audit trail/e-signatures for a guessed record_id."""
     getter = _GETTERS.get(record_type)
-    return bool(getter and getter(record_id))
+    if not getter:
+        return False
+    record = getter(record_id)
+    return bool(tenancy.scoped_or_none(record, g.tenant.company_id))
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -70,10 +82,10 @@ def _record_exists(record_type: str, record_id: int) -> bool:
 @bp.route("/dashboard")
 def dashboard():
     """Unified stats across Document Control, Deviations, CAPA, and Change Control."""
-    doc_stats = qdocdb.get_dashboard_stats()
-    dev_stats = qdevdb.get_dashboard_stats()
-    capa_stats = qcapadb.get_dashboard_stats()
-    cc_stats = qccdb.get_dashboard_stats()
+    doc_stats = qdocdb.get_dashboard_stats(g.tenant.company_id)
+    dev_stats = qdevdb.get_dashboard_stats(g.tenant.company_id)
+    capa_stats = qcapadb.get_dashboard_stats(g.tenant.company_id)
+    cc_stats = qccdb.get_dashboard_stats(g.tenant.company_id)
     return jsonify({
         "documents": doc_stats,
         "deviations": dev_stats,
@@ -165,7 +177,7 @@ def upload_attachment(record_type, record_id):
 @bp.route("/attachments/<int:attachment_id>/download", methods=["GET"])
 def download_attachment(attachment_id):
     attachment = qmsdb.get_attachment(attachment_id)
-    if not attachment:
+    if not attachment or not _record_exists(attachment["record_type"], attachment["record_id"]):
         return jsonify({"error": "Not found"}), 404
     path = os.path.join(_qms_upload_dir(attachment["record_type"], attachment["record_id"]), attachment["filename"])
     if not os.path.exists(path):
@@ -179,9 +191,10 @@ def download_attachment(attachment_id):
 
 
 @bp.route("/attachments/<int:attachment_id>", methods=["DELETE"])
+@require_role("company_admin")
 def delete_attachment(attachment_id):
     attachment = qmsdb.get_attachment(attachment_id)
-    if not attachment:
+    if not attachment or not _record_exists(attachment["record_type"], attachment["record_id"]):
         return jsonify({"error": "Not found"}), 404
     path = os.path.join(_qms_upload_dir(attachment["record_type"], attachment["record_id"]), attachment["filename"])
     if os.path.exists(path):

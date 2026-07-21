@@ -19,15 +19,17 @@ from pharmagpt.qms_database import generate_capa_number
 
 # ── CAPAs ──────────────────────────────────────────────────────────────────────
 
-def create_capa(data: dict) -> dict:
+def create_capa(data: dict, *, company_id: str) -> dict:
+    """`company_id` must be the caller's authenticated tenant
+    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py."""
     conn = get_connection()
     capa_number = data.get("capa_number") or generate_capa_number()
     cur = conn.execute(
         """INSERT INTO qms_capas
            (capa_number, title, capa_source, source_reference, department, project_id,
             problem_statement, root_cause, initiated_by, date_initiated, target_closure_date,
-            status, qa_reviewer, approver, form_data)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            status, qa_reviewer, approver, form_data, company_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             capa_number,
             data.get("title", "Untitled CAPA").strip() or "Untitled CAPA",
@@ -44,6 +46,7 @@ def create_capa(data: dict) -> dict:
             data.get("qa_reviewer", ""),
             data.get("approver", ""),
             json.dumps(data.get("form_data", {})),
+            company_id,
         ),
     )
     conn.commit()
@@ -63,9 +66,13 @@ def get_capa(capa_id: int) -> dict | None:
     return d
 
 
-def get_all_capas(filters: dict | None = None) -> list[dict]:
+def get_all_capas(company_id: str | None = None, filters: dict | None = None) -> list[dict]:
+    """`company_id` must come from the authenticated TenantContext, never
+    from client input (pharmagpt/tenancy.py). `company_id=None` is reserved
+    for offline backfill/parity scripts (service-role key, not a live
+    request); every live route must always pass a company_id."""
     conn = get_connection()
-    clauses, params = [], []
+    clauses, params = ([], []) if company_id is None else (["company_id = ?"], [company_id])
     if filters:
         for field in ("capa_source", "status", "department"):
             val = filters.get(field)
@@ -134,9 +141,14 @@ def set_capa_postgres_id(capa_id: int, postgres_id: str) -> None:
     conn.close()
 
 
-def get_dashboard_stats() -> dict:
+def get_dashboard_stats(company_id: str) -> dict:
+    """`company_id` must come from the authenticated TenantContext, never
+    from client input (pharmagpt/tenancy.py)."""
     conn = get_connection()
-    rows = conn.execute("SELECT id, status, date_initiated, target_closure_date FROM qms_capas").fetchall()
+    rows = conn.execute(
+        "SELECT id, status, date_initiated, target_closure_date FROM qms_capas WHERE company_id = ?",
+        (company_id,),
+    ).fetchall()
     stats = {"total": len(rows), "open": 0, "closed": 0, "overdue": 0, "by_status": {}}
     for r in rows:
         d = dict(r)
@@ -154,23 +166,33 @@ def get_dashboard_stats() -> dict:
            WHERE status != 'Closed' AND status != 'Rejected'
              AND target_closure_date IS NOT NULL AND target_closure_date != ''
              AND target_closure_date < date('now')
-           ORDER BY target_closure_date ASC"""
+             AND company_id = ?
+           ORDER BY target_closure_date ASC""",
+        (company_id,),
     ).fetchall()
     stats["overdue"] = len(overdue)
     stats["overdue_capas"] = [dict(r) for r in overdue[:10]]
 
     pending_actions = conn.execute(
-        "SELECT COUNT(*) AS cnt FROM qms_capa_actions WHERE status IN ('Pending','In Progress')"
+        """SELECT COUNT(*) AS cnt FROM qms_capa_actions a
+           JOIN qms_capas c ON c.id = a.capa_id
+           WHERE a.status IN ('Pending','In Progress') AND c.company_id = ?""",
+        (company_id,),
     ).fetchone()
     stats["pending_actions"] = pending_actions["cnt"] if pending_actions else 0
 
     escalated_actions = conn.execute(
-        "SELECT COUNT(*) AS cnt FROM qms_capa_actions WHERE escalated = 1"
+        """SELECT COUNT(*) AS cnt FROM qms_capa_actions a
+           JOIN qms_capas c ON c.id = a.capa_id
+           WHERE a.escalated = 1 AND c.company_id = ?""",
+        (company_id,),
     ).fetchone()
     stats["escalated_actions"] = escalated_actions["cnt"] if escalated_actions else 0
 
     recent = conn.execute(
-        "SELECT id, capa_number, title, capa_source, status, created_at FROM qms_capas ORDER BY created_at DESC LIMIT 5"
+        "SELECT id, capa_number, title, capa_source, status, created_at FROM qms_capas "
+        "WHERE company_id = ? ORDER BY created_at DESC LIMIT 5",
+        (company_id,),
     ).fetchall()
     stats["recent"] = [dict(r) for r in recent]
     conn.close()

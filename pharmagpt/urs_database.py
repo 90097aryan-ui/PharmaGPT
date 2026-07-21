@@ -149,7 +149,7 @@ def _next_document_number(series: str, prefix: str) -> str:
 
 # ── URS Projects ──────────────────────────────────────────────────────────────
 
-def create_urs(data: dict) -> dict:
+def create_urs(data: dict, *, company_id: str) -> dict:
     """Create a new URS. Document-control fields are entirely system-issued:
     urs_number/doc_number are auto-numbered, revision/version always start
     at 'A'/'1.0', status always starts at 'draft', and reviewed_by/
@@ -158,7 +158,11 @@ def create_urs(data: dict) -> dict:
     a client could POST {"status": "approved"} directly at creation time).
     prepared_by is still read from `data`; routes/urs.py's create_urs() is
     responsible for populating it from the authenticated user before calling
-    this function."""
+    this function.
+
+    `company_id` must be the caller's authenticated tenant
+    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py.
+    """
     urs_number = _next_document_number("urs_number", "URS")
     doc_number = _next_document_number("doc_number", "QA-URS")
     conn = get_connection()
@@ -168,8 +172,8 @@ def create_urs(data: dict) -> dict:
                (urs_number, doc_number, title, revision, version, status, department, site, location,
                 equipment_name, equipment_id, manufacturer, model, capacity, category,
                 equipment_type, validation_type, purpose, intended_use, process_description,
-                prepared_by, reviewed_by, approved_by, effective_date, linked_project_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                prepared_by, reviewed_by, approved_by, effective_date, linked_project_id, company_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 urs_number,
                 doc_number,
@@ -196,6 +200,7 @@ def create_urs(data: dict) -> dict:
                 "",
                 "",
                 data.get("linked_project_id"),
+                company_id,
             ),
         )
         new_id = cur.lastrowid
@@ -216,9 +221,13 @@ def get_urs(urs_id: int) -> dict | None:
     return d
 
 
-def get_all_urs(filters: dict | None = None) -> list[dict]:
+def get_all_urs(company_id: str | None = None, filters: dict | None = None) -> list[dict]:
+    """`company_id` must come from the authenticated TenantContext, never
+    from client input (pharmagpt/tenancy.py). `company_id=None` is reserved
+    for offline backfill/parity scripts (service-role key, not a live
+    request); every live route must always pass a company_id."""
     conn = get_connection()
-    where_clauses, params = [], []
+    where_clauses, params = ([], []) if company_id is None else (["company_id = ?"], [company_id])
     if filters:
         for field in ("status", "category", "department", "equipment_type"):
             if filters.get(field):
@@ -360,24 +369,32 @@ def delete_urs(urs_id: int) -> bool:
     return True
 
 
-def get_dashboard_stats() -> dict:
+def get_dashboard_stats(company_id: str) -> dict:
+    """`company_id` must come from the authenticated TenantContext, never
+    from client input (pharmagpt/tenancy.py)."""
     conn = get_connection()
-    total       = conn.execute("SELECT COUNT(*) FROM urs_projects").fetchone()[0]
-    draft       = conn.execute("SELECT COUNT(*) FROM urs_projects WHERE status='draft'").fetchone()[0]
-    under_review= conn.execute("SELECT COUNT(*) FROM urs_projects WHERE status='under_review'").fetchone()[0]
-    approved    = conn.execute("SELECT COUNT(*) FROM urs_projects WHERE status='approved'").fetchone()[0]
-    obsolete    = conn.execute("SELECT COUNT(*) FROM urs_projects WHERE status='obsolete'").fetchone()[0]
-    total_reqs  = conn.execute("SELECT COUNT(*) FROM urs_requirements").fetchone()[0]
+    total       = conn.execute("SELECT COUNT(*) FROM urs_projects WHERE company_id = ?", (company_id,)).fetchone()[0]
+    draft       = conn.execute("SELECT COUNT(*) FROM urs_projects WHERE status='draft' AND company_id = ?", (company_id,)).fetchone()[0]
+    under_review= conn.execute("SELECT COUNT(*) FROM urs_projects WHERE status='under_review' AND company_id = ?", (company_id,)).fetchone()[0]
+    approved    = conn.execute("SELECT COUNT(*) FROM urs_projects WHERE status='approved' AND company_id = ?", (company_id,)).fetchone()[0]
+    obsolete    = conn.execute("SELECT COUNT(*) FROM urs_projects WHERE status='obsolete' AND company_id = ?", (company_id,)).fetchone()[0]
+    total_reqs  = conn.execute(
+        "SELECT COUNT(*) FROM urs_requirements r JOIN urs_projects p ON p.id = r.urs_id WHERE p.company_id = ?",
+        (company_id,),
+    ).fetchone()[0]
     by_category = {}
     for row in conn.execute(
-        "SELECT category, COUNT(*) FROM urs_projects GROUP BY category"
+        "SELECT category, COUNT(*) FROM urs_projects WHERE company_id = ? GROUP BY category", (company_id,)
     ).fetchall():
         by_category[row[0] or "Other"] = row[1]
     recent = conn.execute(
-        "SELECT id, title, status, equipment_name, category, created_at FROM urs_projects ORDER BY created_at DESC LIMIT 8"
+        "SELECT id, title, status, equipment_name, category, created_at FROM urs_projects "
+        "WHERE company_id = ? ORDER BY created_at DESC LIMIT 8",
+        (company_id,),
     ).fetchall()
     pending_approval = conn.execute(
-        "SELECT COUNT(*) FROM urs_projects WHERE status IN ('under_review','pending_approval')"
+        "SELECT COUNT(*) FROM urs_projects WHERE status IN ('under_review','pending_approval') AND company_id = ?",
+        (company_id,),
     ).fetchone()[0]
     conn.close()
     return {

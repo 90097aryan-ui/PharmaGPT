@@ -24,7 +24,8 @@ from flask import Blueprint, g, jsonify, request
 from pharmagpt import config
 from pharmagpt import database as db
 from pharmagpt import qms_database as qmsdb
-from pharmagpt.auth.decorators import extract_bearer_token
+from pharmagpt import tenancy
+from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import projects_repo
 from pharmagpt.state import history_cache
 
@@ -97,8 +98,8 @@ def _dual_write_delete(project: dict) -> None:
 
 @bp.route("/projects", methods=["GET"])
 def list_projects():
-    """Return all projects as a JSON array, newest first."""
-    return jsonify(db.get_all_projects())
+    """Return all projects belonging to the caller's company, newest first."""
+    return jsonify(db.get_all_projects(g.tenant.company_id))
 
 
 @bp.route("/projects", methods=["POST"])
@@ -110,6 +111,9 @@ def create_project():
             location?, protocol_number?, report_number? }
     Returns the new project dict with its auto-assigned id.
     """
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
+
     data = request.get_json() or {}
     name = data.get("name", "").strip()
     if not name:
@@ -121,6 +125,7 @@ def create_project():
         manufacturer=data.get("manufacturer", "").strip(),
         department=data.get("department", "").strip(),
         validation_type=data.get("validation_type", "").strip(),
+        company_id=g.tenant.company_id,
         owner=data.get("owner", "").strip(),
         approver=data.get("approver", "").strip(),
         target_date=data.get("target_date") or None,
@@ -138,8 +143,8 @@ def create_project():
 
 @bp.route("/projects/<int:project_id>", methods=["GET"])
 def get_project(project_id):
-    """Return a single project by ID."""
-    project = db.get_project(project_id)
+    """Return a single project by ID, scoped to the caller's company."""
+    project = tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
     return jsonify(project)
@@ -148,7 +153,7 @@ def get_project(project_id):
 @bp.route("/projects/<int:project_id>", methods=["PUT"])
 def update_project(project_id):
     """Update a project's mutable fields (see module docstring for the field list)."""
-    if not db.get_project(project_id):
+    if not tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id):
         return jsonify({"error": "Project not found"}), 404
     data    = request.get_json() or {}
     updated = db.update_project(project_id, data)
@@ -158,9 +163,10 @@ def update_project(project_id):
 
 
 @bp.route("/projects/<int:project_id>", methods=["DELETE"])
+@require_role("company_admin")
 def delete_project(project_id):
     """Delete a project and cascade to its messages, documents, and generated docs."""
-    existing = db.get_project(project_id)
+    existing = tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id)
     if not existing:
         return jsonify({"error": "Project not found"}), 404
     qmsdb.add_audit_entry("project", project_id, "Project deleted")
@@ -173,7 +179,7 @@ def delete_project(project_id):
 @bp.route("/projects/<int:project_id>/messages", methods=["GET"])
 def project_messages(project_id):
     """Return all saved messages for a project so the UI can replay them on load."""
-    if not db.get_project(project_id):
+    if not tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id):
         return jsonify({"error": "Project not found"}), 404
     return jsonify(db.get_project_messages(project_id))
 
@@ -183,7 +189,7 @@ def clear_conversation():
     """Clear all messages for the given project (DB and in-memory cache)."""
     data       = request.get_json() or {}
     project_id = data.get("project_id")
-    if project_id:
+    if project_id and tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id):
         db.clear_project_messages(project_id)
         history_cache.pop(project_id, None)
     return jsonify({"status": "cleared"})

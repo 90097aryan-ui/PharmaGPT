@@ -176,7 +176,9 @@ STANDARD_SECTIONS = [
 
 # ── Reports ───────────────────────────────────────────────────────────────────
 
-def create_report(data: dict) -> dict:
+def create_report(data: dict, *, company_id: str) -> dict:
+    """`company_id` must be the caller's authenticated tenant
+    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py."""
     conn = get_connection()
     with conn:
         cur = conn.execute(
@@ -186,8 +188,8 @@ def create_report(data: dict) -> dict:
                 serial_number, department, site, location, validation_type, scope, purpose,
                 linked_qual_id, linked_urs_id, linked_risk_id, linked_project_id,
                 prepared_by, reviewed_by, approved_by, effective_date, report_date,
-                planned_start, planned_end)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                planned_start, planned_end, company_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 data.get("report_number", ""),
                 data.get("doc_number", ""),
@@ -218,6 +220,7 @@ def create_report(data: dict) -> dict:
                 data.get("report_date", ""),
                 data.get("planned_start", ""),
                 data.get("planned_end", ""),
+                company_id,
             ),
         )
         new_id = cur.lastrowid
@@ -254,9 +257,13 @@ def get_report(report_id: int) -> dict | None:
     return d
 
 
-def get_all_reports(filters: dict | None = None) -> list[dict]:
+def get_all_reports(company_id: str | None = None, filters: dict | None = None) -> list[dict]:
+    """`company_id` must come from the authenticated TenantContext, never
+    from client input (pharmagpt/tenancy.py). `company_id=None` is reserved
+    for offline backfill/parity scripts; every live route must always pass
+    a company_id."""
     conn = get_connection()
-    where_clauses, params = [], []
+    where_clauses, params = ([], []) if company_id is None else (["company_id = ?"], [company_id])
     if filters:
         for field in ("status", "report_type", "department", "equipment_type", "validation_type"):
             if filters.get(field):
@@ -325,34 +332,42 @@ def delete_report(report_id: int) -> bool:
     return True
 
 
-def get_dashboard_stats() -> dict:
+def get_dashboard_stats(company_id: str) -> dict:
+    """`company_id` must come from the authenticated TenantContext, never
+    from client input (pharmagpt/tenancy.py)."""
     conn = get_connection()
-    total       = conn.execute("SELECT COUNT(*) FROM val_reports").fetchone()[0]
-    draft       = conn.execute("SELECT COUNT(*) FROM val_reports WHERE status='draft'").fetchone()[0]
-    under_review= conn.execute("SELECT COUNT(*) FROM val_reports WHERE status='under_review'").fetchone()[0]
-    approved    = conn.execute("SELECT COUNT(*) FROM val_reports WHERE status='approved'").fetchone()[0]
-    released    = conn.execute("SELECT COUNT(*) FROM val_reports WHERE status='released'").fetchone()[0]
-    archived    = conn.execute("SELECT COUNT(*) FROM val_reports WHERE status='archived'").fetchone()[0]
-    ai_gen      = conn.execute("SELECT COUNT(*) FROM val_reports WHERE ai_generated=1").fetchone()[0]
+    total       = conn.execute("SELECT COUNT(*) FROM val_reports WHERE company_id = ?", (company_id,)).fetchone()[0]
+    draft       = conn.execute("SELECT COUNT(*) FROM val_reports WHERE status='draft' AND company_id = ?", (company_id,)).fetchone()[0]
+    under_review= conn.execute("SELECT COUNT(*) FROM val_reports WHERE status='under_review' AND company_id = ?", (company_id,)).fetchone()[0]
+    approved    = conn.execute("SELECT COUNT(*) FROM val_reports WHERE status='approved' AND company_id = ?", (company_id,)).fetchone()[0]
+    released    = conn.execute("SELECT COUNT(*) FROM val_reports WHERE status='released' AND company_id = ?", (company_id,)).fetchone()[0]
+    archived    = conn.execute("SELECT COUNT(*) FROM val_reports WHERE status='archived' AND company_id = ?", (company_id,)).fetchone()[0]
+    ai_gen      = conn.execute("SELECT COUNT(*) FROM val_reports WHERE ai_generated=1 AND company_id = ?", (company_id,)).fetchone()[0]
 
-    avg_compliance   = conn.execute("SELECT AVG(compliance_score) FROM val_reports WHERE compliance_score > 0").fetchone()[0] or 0
-    avg_completeness = conn.execute("SELECT AVG(completeness_score) FROM val_reports WHERE completeness_score > 0").fetchone()[0] or 0
-    avg_readiness    = conn.execute("SELECT AVG(ai_readiness_score) FROM val_reports WHERE ai_readiness_score > 0").fetchone()[0] or 0
+    avg_compliance   = conn.execute("SELECT AVG(compliance_score) FROM val_reports WHERE compliance_score > 0 AND company_id = ?", (company_id,)).fetchone()[0] or 0
+    avg_completeness = conn.execute("SELECT AVG(completeness_score) FROM val_reports WHERE completeness_score > 0 AND company_id = ?", (company_id,)).fetchone()[0] or 0
+    avg_readiness    = conn.execute("SELECT AVG(ai_readiness_score) FROM val_reports WHERE ai_readiness_score > 0 AND company_id = ?", (company_id,)).fetchone()[0] or 0
 
     by_dept = conn.execute(
-        "SELECT department, COUNT(*) as cnt FROM val_reports WHERE department != '' GROUP BY department ORDER BY cnt DESC LIMIT 8"
+        "SELECT department, COUNT(*) as cnt FROM val_reports WHERE department != '' AND company_id = ? "
+        "GROUP BY department ORDER BY cnt DESC LIMIT 8",
+        (company_id,),
     ).fetchall()
     by_type = conn.execute(
-        "SELECT validation_type, COUNT(*) as cnt FROM val_reports WHERE validation_type != '' GROUP BY validation_type ORDER BY cnt DESC"
+        "SELECT validation_type, COUNT(*) as cnt FROM val_reports WHERE validation_type != '' AND company_id = ? "
+        "GROUP BY validation_type ORDER BY cnt DESC",
+        (company_id,),
     ).fetchall()
     by_status = conn.execute(
-        "SELECT status, COUNT(*) as cnt FROM val_reports GROUP BY status"
+        "SELECT status, COUNT(*) as cnt FROM val_reports WHERE company_id = ? GROUP BY status",
+        (company_id,),
     ).fetchall()
 
     recent = conn.execute(
         """SELECT id, report_number, title, equipment_name, department, status,
                   compliance_score, ai_readiness_score, created_at
-           FROM val_reports ORDER BY created_at DESC LIMIT 8"""
+           FROM val_reports WHERE company_id = ? ORDER BY created_at DESC LIMIT 8""",
+        (company_id,),
     ).fetchall()
     conn.close()
 

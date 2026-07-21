@@ -88,6 +88,8 @@ def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, dd
 
 def init_db() -> None:
     """Create tables if they do not already exist. Safe to call on every startup."""
+    from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID  # noqa: F401 (used by several tenant-isolation blocks below)
+
     conn = get_connection()
     conn.executescript("""
         -- ── projects ──────────────────────────────────────────────────────────
@@ -261,6 +263,15 @@ def init_db() -> None:
     _add_column_if_missing(conn, "risk_assessments", "postgres_id", "TEXT DEFAULT NULL")
     conn.commit()
 
+    # ── Tenant isolation (security fix, docs/SECURITY_REVIEW.md) ──────────────
+    from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID as _BOOTSTRAP_COMPANY_ID
+    _add_column_if_missing(conn, "risk_assessments", "company_id", "TEXT DEFAULT NULL")
+    _add_column_if_missing(conn, "risk_library", "company_id", "TEXT DEFAULT NULL")
+    conn.commit()
+    conn.execute("UPDATE risk_assessments SET company_id = ? WHERE company_id IS NULL", (_BOOTSTRAP_COMPANY_ID,))
+    conn.execute("UPDATE risk_library SET company_id = ? WHERE company_id IS NULL", (_BOOTSTRAP_COMPANY_ID,))
+    conn.commit()
+
     # ── URS Management Suite tables ───────────────────────────────────────────
     from pharmagpt.urs_database import URS_SCHEMA
     conn.executescript(URS_SCHEMA)
@@ -292,14 +303,32 @@ def init_db() -> None:
     _add_column_if_missing(conn, "urs_projects", "version", "TEXT NOT NULL DEFAULT '1.0'")
     conn.commit()
 
+    # ── Tenant isolation (security fix, docs/SECURITY_REVIEW.md) ──────────────
+    _add_column_if_missing(conn, "urs_projects", "company_id", "TEXT DEFAULT NULL")
+    conn.commit()
+    conn.execute("UPDATE urs_projects SET company_id = ? WHERE company_id IS NULL", (BOOTSTRAP_COMPANY_ID,))
+    conn.commit()
+
     # ── Qualification Management Suite tables ─────────────────────────────────
     from pharmagpt.qual_database import QUAL_SCHEMA
     conn.executescript(QUAL_SCHEMA)
     conn.commit()
 
+    # ── Tenant isolation (security fix, docs/SECURITY_REVIEW.md) ──────────────
+    _add_column_if_missing(conn, "qual_qualifications", "company_id", "TEXT DEFAULT NULL")
+    conn.commit()
+    conn.execute("UPDATE qual_qualifications SET company_id = ? WHERE company_id IS NULL", (BOOTSTRAP_COMPANY_ID,))
+    conn.commit()
+
     # ── Validation Report Management Suite tables ──────────────────────────────
     from pharmagpt.report_database import REPORT_SCHEMA
     conn.executescript(REPORT_SCHEMA)
+    conn.commit()
+
+    # ── Tenant isolation (security fix, docs/SECURITY_REVIEW.md) ──────────────
+    _add_column_if_missing(conn, "val_reports", "company_id", "TEXT DEFAULT NULL")
+    conn.commit()
+    conn.execute("UPDATE val_reports SET company_id = ? WHERE company_id IS NULL", (BOOTSTRAP_COMPANY_ID,))
     conn.commit()
 
     # ── Quality Management Suite tables (Document Control, Deviation, CAPA) ────
@@ -311,6 +340,14 @@ def init_db() -> None:
     _add_column_if_missing(conn, "qms_deviations", "postgres_id", "TEXT DEFAULT NULL")
     _add_column_if_missing(conn, "qms_capas", "postgres_id", "TEXT DEFAULT NULL")
     _add_column_if_missing(conn, "qms_change_controls", "postgres_id", "TEXT DEFAULT NULL")
+    conn.commit()
+
+    # ── Tenant isolation (security fix, docs/SECURITY_REVIEW.md) ──────────────
+    for _qms_table in ("qms_deviations", "qms_capas", "qms_change_controls", "qms_documents"):
+        _add_column_if_missing(conn, _qms_table, "company_id", "TEXT DEFAULT NULL")
+    conn.commit()
+    for _qms_table in ("qms_deviations", "qms_capas", "qms_change_controls", "qms_documents"):
+        conn.execute(f"UPDATE {_qms_table} SET company_id = ? WHERE company_id IS NULL", (BOOTSTRAP_COMPANY_ID,))
     conn.commit()
 
     # ── Equipment entity (PharmaGPT v1.0 Module 2) ─────────────────────────────
@@ -345,6 +382,24 @@ def init_db() -> None:
         _add_column_if_missing(conn, "projects", _col, _ddl)
     conn.commit()
 
+    # ── Tenant isolation (security fix, docs/SECURITY_REVIEW.md) ──────────────
+    # SQLite predates company_id entirely — see pharmagpt/tenancy.py's module
+    # docstring. These columns are additive/backfilled, never destructive:
+    # any row created before this column existed lands on the same bootstrap
+    # company Postgres already uses for its own pre-migration backfill, so a
+    # legacy row is never left orphaned (invisible to everyone) or globally
+    # visible (visible to everyone).
+    #
+    # projects.company_id must exist BEFORE _migrate_val_projects() runs
+    # (below) — that function inserts into projects with an explicit
+    # company_id value, so the column has to already be there.
+    _add_column_if_missing(conn, "projects", "company_id", "TEXT DEFAULT NULL")
+    _add_column_if_missing(conn, "kb_documents", "company_id", "TEXT DEFAULT NULL")
+    conn.commit()
+    conn.execute("UPDATE projects SET company_id = ? WHERE company_id IS NULL", (BOOTSTRAP_COMPANY_ID,))
+    conn.execute("UPDATE kb_documents SET company_id = ? WHERE company_id IS NULL", (BOOTSTRAP_COMPANY_ID,))
+    conn.commit()
+
     _migrate_val_projects(conn)
 
     conn.close()
@@ -360,6 +415,8 @@ def _migrate_val_projects(conn: sqlite3.Connection) -> None:
     unchanged — no destructive migration, no data loss if this needs to be
     re-run or audited later.
     """
+    from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID
+
     already_migrated = {
         row["migrated_from_val_project_id"]
         for row in conn.execute(
@@ -375,13 +432,14 @@ def _migrate_val_projects(conn: sqlite3.Connection) -> None:
                (name, equipment_name, manufacturer, department, validation_type,
                 owner, approver, target_date, risk_category, status, model,
                 location, protocol_number, report_number, equipment_id,
-                migrated_from_val_project_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                migrated_from_val_project_id, company_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 vp["name"], vp["equipment_name"], vp["manufacturer"], vp["department"],
                 vp["validation_type"], vp["owner"], vp["approver"], vp["target_date"],
                 vp["risk_category"], vp["status"], vp["model"], vp["location"],
                 vp["protocol_number"], vp["report_number"], vp["equipment_id"], vp["id"],
+                BOOTSTRAP_COMPANY_ID,
             ),
         )
         new_project_id = cur.lastrowid
@@ -401,7 +459,7 @@ def _migrate_val_projects(conn: sqlite3.Connection) -> None:
 # ── Project CRUD ──────────────────────────────────────────────────────────────
 
 def create_project(name: str, equipment_name: str, manufacturer: str,
-                   department: str, validation_type: str, *,
+                   department: str, validation_type: str, *, company_id: str,
                    owner: str = "", approver: str = "", target_date: str | None = None,
                    risk_category: str = "", status: str = "In Progress",
                    model: str = "", location: str = "",
@@ -409,22 +467,27 @@ def create_project(name: str, equipment_name: str, manufacturer: str,
     """
     Insert a new project row and return the full project dict.
 
-    The keyword-only fields (owner, approver, target_date, risk_category,
-    status, model, location, protocol_number, report_number) were formerly
-    exclusive to the separate Validation Workspace project entity
-    (val_projects) — Phase 2 Module 1 merged that entity into this one, so
-    every project can now carry them. All are optional so existing callers
-    that only pass the original five positional fields keep working.
+    `company_id` must be the caller's authenticated tenant
+    (`g.tenant.company_id`) — never a client-supplied value — see
+    pharmagpt/tenancy.py. It is keyword-only and required (no default) so a
+    call site cannot silently create an unscoped row by omission.
+
+    The other keyword-only fields (owner, approver, target_date,
+    risk_category, status, model, location, protocol_number, report_number)
+    were formerly exclusive to the separate Validation Workspace project
+    entity (val_projects) — Phase 2 Module 1 merged that entity into this
+    one, so every project can now carry them. All are optional so existing
+    callers that only pass the original five positional fields keep working.
     """
     conn = get_connection()
     cur = conn.execute(
         """INSERT INTO projects
            (name, equipment_name, manufacturer, department, validation_type,
-            owner, approver, target_date, risk_category, status, model,
+            company_id, owner, approver, target_date, risk_category, status, model,
             location, protocol_number, report_number)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (name, equipment_name, manufacturer, department, validation_type,
-         owner, approver, target_date, risk_category, status, model,
+         company_id, owner, approver, target_date, risk_category, status, model,
          location, protocol_number, report_number),
     )
     conn.commit()
@@ -435,12 +498,24 @@ def create_project(name: str, equipment_name: str, manufacturer: str,
     return project
 
 
-def get_all_projects() -> list[dict]:
-    """Return all projects ordered newest-first."""
+def get_all_projects(company_id: str | None = None) -> list[dict]:
+    """Return all projects belonging to `company_id`, ordered newest-first.
+
+    `company_id` must come from the authenticated TenantContext, never from
+    client input (pharmagpt/tenancy.py) — this is the primary list endpoint
+    a cross-tenant enumeration attack would target. `company_id=None` is
+    reserved for offline backfill/parity scripts (service-role key, not a
+    live request — see scripts/backfill_projects.py) which need a
+    cross-company view; every live route must always pass a company_id.
+    """
     conn = get_connection()
-    rows = conn.execute(
-        "SELECT * FROM projects ORDER BY created_at DESC"
-    ).fetchall()
+    if company_id is None:
+        rows = conn.execute("SELECT * FROM projects ORDER BY created_at DESC").fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM projects WHERE company_id = ? ORDER BY created_at DESC",
+            (company_id,),
+        ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -839,16 +914,20 @@ KB_FOLDERS = [
 def create_kb_document(title: str, folder: str, tags: str, doc_version: str,
                        effective_date: str | None, review_date: str | None,
                        original_name: str, stored_filename: str,
-                       file_type: str, file_size: int) -> dict:
-    """Insert a new KB document row and return the full row dict."""
+                       file_type: str, file_size: int, *, company_id: str) -> dict:
+    """Insert a new KB document row and return the full row dict.
+
+    `company_id` must be the caller's authenticated tenant
+    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py.
+    """
     conn = get_connection()
     cur = conn.execute(
         """INSERT INTO kb_documents
            (title, folder, tags, doc_version, effective_date, review_date,
-            original_name, stored_filename, file_type, file_size)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            original_name, stored_filename, file_type, file_size, company_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (title, folder, tags, doc_version, effective_date or None,
-         review_date or None, original_name, stored_filename, file_type, file_size),
+         review_date or None, original_name, stored_filename, file_type, file_size, company_id),
     )
     conn.commit()
     row = dict(conn.execute(
@@ -858,13 +937,24 @@ def create_kb_document(title: str, folder: str, tags: str, doc_version: str,
     return row
 
 
-def get_kb_documents(folder: str | None = None, tag: str | None = None,
+def get_kb_documents(company_id: str | None = None, folder: str | None = None, tag: str | None = None,
                      file_type: str | None = None,
                      keyword: str | None = None,
                      title: str | None = None) -> list[dict]:
-    """Return KB documents with optional filters. Excludes text_content for performance."""
+    """Return KB documents belonging to `company_id`, with optional filters.
+    Excludes text_content for performance.
+
+    `company_id` must come from the authenticated TenantContext, never from
+    client input (pharmagpt/tenancy.py). `company_id=None` is reserved for
+    offline backfill/parity scripts (service-role key, not a live request —
+    see scripts/backfill_kb_documents.py) which need a cross-company view;
+    every live route must always pass a company_id.
+    """
     conditions: list[str] = []
     params: list = []
+    if company_id is not None:
+        conditions.append("company_id = ?")
+        params.append(company_id)
 
     if folder:
         conditions.append("folder = ?")
@@ -994,11 +1084,16 @@ def set_kb_document_postgres_id(kb_id: int, postgres_id: str) -> None:
     conn.close()
 
 
-def get_kb_folder_counts() -> dict:
-    """Return {folder: count} for all KB folders."""
+def get_kb_folder_counts(company_id: str) -> dict:
+    """Return {folder: count} for all KB folders belonging to `company_id`.
+
+    `company_id` must come from the authenticated TenantContext, never from
+    client input (pharmagpt/tenancy.py).
+    """
     conn = get_connection()
     rows = conn.execute(
-        "SELECT folder, COUNT(*) AS cnt FROM kb_documents GROUP BY folder"
+        "SELECT folder, COUNT(*) AS cnt FROM kb_documents WHERE company_id = ? GROUP BY folder",
+        (company_id,),
     ).fetchall()
     conn.close()
     return {r["folder"]: r["cnt"] for r in rows}
@@ -1006,25 +1101,39 @@ def get_kb_folder_counts() -> dict:
 
 # ── Dashboard stats ───────────────────────────────────────────────────────────
 
-def get_dashboard_stats() -> dict:
-    """Return all data needed by the Home Dashboard in one query round-trip."""
+def get_dashboard_stats(company_id: str) -> dict:
+    """Return all data needed by the Home Dashboard in one query round-trip,
+    scoped to `company_id`.
+
+    `company_id` must come from the authenticated TenantContext, never from
+    client input (pharmagpt/tenancy.py) — this aggregates project names,
+    chat message snippets, and document titles across the whole system, so
+    an unscoped query here would be one of the more serious cross-tenant
+    content leaks in the app, not just a count leak.
+    """
     conn = get_connection()
 
     counts = conn.execute("""
         SELECT
-            (SELECT COUNT(*) FROM projects)                                   AS projects,
+            (SELECT COUNT(*) FROM projects WHERE company_id = :cid)                AS projects,
             (SELECT COUNT(*) FROM projects
-               WHERE target_date IS NOT NULL
-                  OR migrated_from_val_project_id IS NOT NULL)                AS val_projects,
-            (SELECT COUNT(*) FROM kb_documents)                               AS kb_documents,
-            (SELECT COUNT(*) FROM generated_documents)                        AS protocols_generated,
-            (SELECT COUNT(*) FROM qms_capas WHERE status NOT IN ('Closed','Rejected'))      AS pending_capas,
-            (SELECT COUNT(*) FROM qms_deviations WHERE status NOT IN ('Closed','Rejected')) AS pending_deviations
-    """).fetchone()
+               WHERE company_id = :cid
+                 AND (target_date IS NOT NULL
+                      OR migrated_from_val_project_id IS NOT NULL))                AS val_projects,
+            (SELECT COUNT(*) FROM kb_documents WHERE company_id = :cid)            AS kb_documents,
+            (SELECT COUNT(*) FROM generated_documents gd
+               JOIN projects p ON p.id = gd.project_id
+               WHERE p.company_id = :cid)                                          AS protocols_generated,
+            (SELECT COUNT(*) FROM qms_capas
+               WHERE status NOT IN ('Closed','Rejected') AND company_id = :cid)     AS pending_capas,
+            (SELECT COUNT(*) FROM qms_deviations
+               WHERE status NOT IN ('Closed','Rejected') AND company_id = :cid)     AS pending_deviations
+    """, {"cid": company_id}).fetchone()
 
     recent_projects = conn.execute(
         """SELECT id, name, equipment_name, validation_type, created_at
-           FROM projects ORDER BY created_at DESC LIMIT 5"""
+           FROM projects WHERE company_id = ? ORDER BY created_at DESC LIMIT 5""",
+        (company_id,),
     ).fetchall()
 
     recent_convs = conn.execute(
@@ -1032,49 +1141,62 @@ def get_dashboard_stats() -> dict:
                   SUBSTR(m.content, 1, 160) AS snippet, m.created_at
            FROM messages m
            JOIN projects p ON p.id = m.project_id
-           WHERE m.role = 'model'
-           ORDER BY m.created_at DESC LIMIT 5"""
+           WHERE m.role = 'model' AND p.company_id = ?
+           ORDER BY m.created_at DESC LIMIT 5""",
+        (company_id,),
     ).fetchall()
 
     recent_activity = conn.execute(
         """SELECT 'audit'    AS type, qat.action  AS title, p.name   AS context, qat.created_at
            FROM qms_audit_trail qat JOIN projects p ON p.id = qat.record_id
-           WHERE qat.record_type = 'project'
+           WHERE qat.record_type = 'project' AND p.company_id = ?
            UNION ALL
            SELECT 'document' AS type, d.original_name AS title, p.name AS context, d.upload_date AS created_at
            FROM documents d JOIN projects p ON p.id = d.project_id
+           WHERE p.company_id = ?
            UNION ALL
            SELECT 'kb'       AS type, kb.title AS title, kb.folder AS context, kb.upload_date AS created_at
            FROM kb_documents kb
+           WHERE kb.company_id = ?
            UNION ALL
            SELECT 'protocol' AS type, gd.title AS title, p.name AS context, gd.created_at
            FROM generated_documents gd JOIN projects p ON p.id = gd.project_id
-           ORDER BY created_at DESC LIMIT 10"""
+           WHERE p.company_id = ?
+           ORDER BY created_at DESC LIMIT 10""",
+        (company_id, company_id, company_id, company_id),
     ).fetchall()
 
     upcoming_reviews = conn.execute(
         """SELECT title, folder, review_date, doc_version
            FROM kb_documents
-           WHERE review_date IS NOT NULL AND review_date >= date('now')
-           ORDER BY review_date ASC LIMIT 5"""
+           WHERE review_date IS NOT NULL AND review_date >= date('now') AND company_id = ?
+           ORDER BY review_date ASC LIMIT 5""",
+        (company_id,),
     ).fetchall()
 
     upcoming_val = conn.execute(
         """SELECT name, equipment_name, target_date, status, validation_type
            FROM projects
            WHERE target_date IS NOT NULL AND target_date >= date('now') AND status != 'Completed'
-           ORDER BY target_date ASC LIMIT 5"""
+             AND company_id = ?
+           ORDER BY target_date ASC LIMIT 5""",
+        (company_id,),
     ).fetchall()
 
     health = conn.execute("""
         SELECT
-            (SELECT COUNT(*) FROM documents)                                        AS total_docs,
-            (SELECT COUNT(*) FROM document_text WHERE extraction_status = 'ok')     AS extracted_ok,
-            (SELECT COUNT(*) FROM document_text WHERE extraction_status = 'error')  AS extracted_error,
-            (SELECT COUNT(*) FROM messages)                                         AS total_messages,
-            (SELECT COUNT(*) FROM qms_audit_trail WHERE record_type = 'project')    AS audit_entries,
-            (SELECT COUNT(*) FROM kb_documents WHERE extraction_status = 'ok')      AS kb_extracted_ok
-    """).fetchone()
+            (SELECT COUNT(*) FROM documents d JOIN projects p ON p.id = d.project_id
+               WHERE p.company_id = :cid)                                          AS total_docs,
+            (SELECT COUNT(*) FROM document_text dt JOIN projects p ON p.id = dt.project_id
+               WHERE dt.extraction_status = 'ok' AND p.company_id = :cid)          AS extracted_ok,
+            (SELECT COUNT(*) FROM document_text dt JOIN projects p ON p.id = dt.project_id
+               WHERE dt.extraction_status = 'error' AND p.company_id = :cid)       AS extracted_error,
+            (SELECT COUNT(*) FROM messages m JOIN projects p ON p.id = m.project_id
+               WHERE p.company_id = :cid)                                          AS total_messages,
+            (SELECT COUNT(*) FROM qms_audit_trail qat JOIN projects p ON p.id = qat.record_id
+               WHERE qat.record_type = 'project' AND p.company_id = :cid)          AS audit_entries,
+            (SELECT COUNT(*) FROM kb_documents WHERE extraction_status = 'ok' AND company_id = :cid) AS kb_extracted_ok
+    """, {"cid": company_id}).fetchone()
 
     conn.close()
 

@@ -13,19 +13,19 @@ pharmagpt.database at a fresh temp SQLite file before any QMS module is used.
 def test_create_document_generates_number_and_defaults(db_path):
     from pharmagpt import qms_document_database as qdb
 
-    doc = qdb.create_document({"doc_type": "SOP", "title": "Cleaning SOP", "department": "Quality Assurance"})
+    doc = qdb.create_document({"doc_type": "SOP", "title": "Cleaning SOP", "department": "Quality Assurance"}, company_id="test-company-1")
     assert doc["doc_number"] == "SOP-QA-0001"
     assert doc["status"] == "Draft"
     assert doc["version"] == "1.0"
 
-    doc2 = qdb.create_document({"doc_type": "SOP", "title": "Second SOP", "department": "Quality Assurance"})
+    doc2 = qdb.create_document({"doc_type": "SOP", "title": "Second SOP", "department": "Quality Assurance"}, company_id="test-company-1")
     assert doc2["doc_number"] == "SOP-QA-0002"
 
 
 def test_document_update_and_form_data_roundtrip(db_path):
     from pharmagpt import qms_document_database as qdb
 
-    doc = qdb.create_document({"title": "Doc", "form_data": {"a": 1}})
+    doc = qdb.create_document({"title": "Doc", "form_data": {"a": 1}}, company_id="test-company-1")
     assert doc["form_data"] == {"a": 1}
 
     updated = qdb.update_document(doc["id"], {"status": "Effective", "form_data": {"a": 2}})
@@ -36,7 +36,7 @@ def test_document_update_and_form_data_roundtrip(db_path):
 def test_document_versions_training_distribution(db_path):
     from pharmagpt import qms_document_database as qdb
 
-    doc = qdb.create_document({"title": "Doc"})
+    doc = qdb.create_document({"title": "Doc"}, company_id="test-company-1")
     qdb.create_version(doc["id"], "1.0", "Initial", "content snapshot", "J Doe")
     versions = qdb.get_versions(doc["id"])
     assert len(versions) == 1
@@ -57,9 +57,9 @@ def test_document_versions_training_distribution(db_path):
 def test_document_dashboard_stats(db_path):
     from pharmagpt import qms_document_database as qdb
 
-    qdb.create_document({"doc_type": "SOP", "title": "A", "status": "Draft"})
-    qdb.create_document({"doc_type": "Policy", "title": "B", "status": "Effective"})
-    stats = qdb.get_dashboard_stats()
+    qdb.create_document({"doc_type": "SOP", "title": "A", "status": "Draft"}, company_id="test-company-1")
+    qdb.create_document({"doc_type": "Policy", "title": "B", "status": "Effective"}, company_id="test-company-1")
+    stats = qdb.get_dashboard_stats("test-company-1")
     assert stats["total"] == 2
     assert stats["draft"] == 1
     assert stats["effective"] == 1
@@ -69,7 +69,7 @@ def test_document_dashboard_stats(db_path):
 def test_document_delete(db_path):
     from pharmagpt import qms_document_database as qdb
 
-    doc = qdb.create_document({"title": "To delete"})
+    doc = qdb.create_document({"title": "To delete"}, company_id="test-company-1")
     qdb.delete_document(doc["id"])
     assert qdb.get_document(doc["id"]) is None
 
@@ -79,7 +79,7 @@ def test_document_delete(db_path):
 def test_create_deviation_generates_number(db_path):
     from pharmagpt import qms_deviation_database as ddb
 
-    dev = ddb.create_deviation({"title": "Temp excursion", "deviation_type": "Major"})
+    dev = ddb.create_deviation({"title": "Temp excursion", "deviation_type": "Major"}, company_id="test-company-1")
     assert dev["deviation_number"].startswith("DEV-")
     assert dev["status"] == "Initiated"
 
@@ -87,7 +87,7 @@ def test_create_deviation_generates_number(db_path):
 def test_deviation_investigation_upsert_and_json_fields(db_path):
     from pharmagpt import qms_deviation_database as ddb
 
-    dev = ddb.create_deviation({"title": "Dev"})
+    dev = ddb.create_deviation({"title": "Dev"}, company_id="test-company-1")
     ddb.upsert_investigation(dev["id"], {
         "root_cause_statement": "RC",
         "fishbone_data": {"man": ["fatigue"]},
@@ -109,7 +109,7 @@ def test_deviation_investigation_upsert_and_json_fields(db_path):
 def test_deviation_impact_entries(db_path):
     from pharmagpt import qms_deviation_database as ddb
 
-    dev = ddb.create_deviation({"title": "Dev"})
+    dev = ddb.create_deviation({"title": "Dev"}, company_id="test-company-1")
     ddb.add_impact(dev["id"], {"impact_area": "Product Quality", "risk_level": "Low"})
     impacts = ddb.get_impacts(dev["id"])
     assert len(impacts) == 1
@@ -120,8 +120,8 @@ def test_deviation_capa_linkage(db_path):
     from pharmagpt import qms_deviation_database as ddb
     from pharmagpt import qms_capa_database as cdb
 
-    dev = ddb.create_deviation({"title": "Dev"})
-    capa = cdb.create_capa({"title": "CAPA", "capa_source": "Deviation"})
+    dev = ddb.create_deviation({"title": "Dev"}, company_id="test-company-1")
+    capa = cdb.create_capa({"title": "CAPA", "capa_source": "Deviation"}, company_id="test-company-1")
     ddb.link_capa(dev["id"], capa["id"])
 
     linked_capas = ddb.get_linked_capas(dev["id"])
@@ -136,10 +136,10 @@ def test_deviation_capa_linkage(db_path):
 def test_deviation_dashboard_stats(db_path):
     from pharmagpt import qms_deviation_database as ddb
 
-    ddb.create_deviation({"title": "A", "deviation_type": "Minor"})
-    d2 = ddb.create_deviation({"title": "B", "deviation_type": "Major"})
+    ddb.create_deviation({"title": "A", "deviation_type": "Minor"}, company_id="test-company-1")
+    d2 = ddb.create_deviation({"title": "B", "deviation_type": "Major"}, company_id="test-company-1")
     ddb.update_deviation(d2["id"], {"status": "Closed"})
-    stats = ddb.get_dashboard_stats()
+    stats = ddb.get_dashboard_stats("test-company-1")
     assert stats["total"] == 2
     assert stats["open"] == 1
     assert stats["closed"] == 1
@@ -150,7 +150,7 @@ def test_deviation_dashboard_stats(db_path):
 def test_create_capa_generates_number(db_path):
     from pharmagpt import qms_capa_database as cdb
 
-    capa = cdb.create_capa({"title": "CAPA A"})
+    capa = cdb.create_capa({"title": "CAPA A"}, company_id="test-company-1")
     assert capa["capa_number"].startswith("CAPA-")
     assert capa["status"] == "Open"
 
@@ -158,7 +158,7 @@ def test_create_capa_generates_number(db_path):
 def test_capa_actions_upsert_and_escalate(db_path):
     from pharmagpt import qms_capa_database as cdb
 
-    capa = cdb.create_capa({"title": "CAPA"})
+    capa = cdb.create_capa({"title": "CAPA"}, company_id="test-company-1")
     action = cdb.upsert_action(capa["id"], {"action_type": "Corrective", "description": "Fix it", "owner": "QA"})
     assert action["status"] == "Pending"
 
@@ -178,7 +178,7 @@ def test_capa_actions_upsert_and_escalate(db_path):
 def test_capa_effectiveness_upsert(db_path):
     from pharmagpt import qms_capa_database as cdb
 
-    capa = cdb.create_capa({"title": "CAPA"})
+    capa = cdb.create_capa({"title": "CAPA"}, company_id="test-company-1")
     entry = cdb.upsert_effectiveness(capa["id"], {"check_criterion": "No recurrence", "method": "Trend monitoring"})
     assert entry["status"] == "Pending"
     checks = cdb.get_effectiveness(capa["id"])
@@ -188,9 +188,9 @@ def test_capa_effectiveness_upsert(db_path):
 def test_capa_dashboard_stats_and_overdue(db_path):
     from pharmagpt import qms_capa_database as cdb
 
-    cdb.create_capa({"title": "A", "target_closure_date": "2020-01-01"})  # overdue (past date)
-    cdb.create_capa({"title": "B", "target_closure_date": "2099-01-01"})  # not overdue
-    stats = cdb.get_dashboard_stats()
+    cdb.create_capa({"title": "A", "target_closure_date": "2020-01-01"}, company_id="test-company-1")  # overdue (past date)
+    cdb.create_capa({"title": "B", "target_closure_date": "2099-01-01"}, company_id="test-company-1")  # not overdue
+    stats = cdb.get_dashboard_stats("test-company-1")
     assert stats["total"] == 2
     assert stats["open"] == 2
     assert stats["overdue"] == 1
@@ -199,7 +199,7 @@ def test_capa_dashboard_stats_and_overdue(db_path):
 def test_capa_delete(db_path):
     from pharmagpt import qms_capa_database as cdb
 
-    capa = cdb.create_capa({"title": "To delete"})
+    capa = cdb.create_capa({"title": "To delete"}, company_id="test-company-1")
     cdb.delete_capa(capa["id"])
     assert cdb.get_capa(capa["id"]) is None
 
@@ -209,18 +209,18 @@ def test_capa_delete(db_path):
 def test_create_change_control_generates_number(db_path):
     from pharmagpt import qms_change_control_database as ccdb
 
-    cc = ccdb.create_change_control({"title": "Upgrade HVAC firmware", "change_type": "Major"})
+    cc = ccdb.create_change_control({"title": "Upgrade HVAC firmware", "change_type": "Major"}, company_id="test-company-1")
     assert cc["cc_number"].startswith("CC-")
     assert cc["status"] == "Draft"
 
-    cc2 = ccdb.create_change_control({"title": "Second change"})
+    cc2 = ccdb.create_change_control({"title": "Second change"}, company_id="test-company-1")
     assert cc2["cc_number"] != cc["cc_number"]
 
 
 def test_change_control_update_and_form_data_roundtrip(db_path):
     from pharmagpt import qms_change_control_database as ccdb
 
-    cc = ccdb.create_change_control({"title": "Change", "form_data": {"a": 1}})
+    cc = ccdb.create_change_control({"title": "Change", "form_data": {"a": 1}}, company_id="test-company-1")
     assert cc["form_data"] == {"a": 1}
 
     updated = ccdb.update_change_control(cc["id"], {"status": "Submitted", "form_data": {"a": 2}})
@@ -231,7 +231,7 @@ def test_change_control_update_and_form_data_roundtrip(db_path):
 def test_change_control_narratives_roundtrip(db_path):
     from pharmagpt import qms_change_control_database as ccdb
 
-    cc = ccdb.create_change_control({"title": "Change"})
+    cc = ccdb.create_change_control({"title": "Change"}, company_id="test-company-1")
     ccdb.set_narrative(cc["id"], "risk_summary", "Risk text")
     ccdb.set_narrative(cc["id"], "rollback_plan", "Rollback text")
     updated = ccdb.get_change_control(cc["id"])
@@ -242,7 +242,7 @@ def test_change_control_narratives_roundtrip(db_path):
 def test_change_control_impact_entries(db_path):
     from pharmagpt import qms_change_control_database as ccdb
 
-    cc = ccdb.create_change_control({"title": "Change"})
+    cc = ccdb.create_change_control({"title": "Change"}, company_id="test-company-1")
     ccdb.add_impact(cc["id"], {"impact_area": "Validation", "impacted": "Yes"})
     impacts = ccdb.get_impacts(cc["id"])
     assert len(impacts) == 1
@@ -252,7 +252,7 @@ def test_change_control_impact_entries(db_path):
 def test_change_control_actions_upsert(db_path):
     from pharmagpt import qms_change_control_database as ccdb
 
-    cc = ccdb.create_change_control({"title": "Change"})
+    cc = ccdb.create_change_control({"title": "Change"}, company_id="test-company-1")
     action = ccdb.upsert_action(cc["id"], {"step_no": 1, "activity": "Procure parts", "responsible": "Engineering"})
     assert action["status"] == "Pending"
 
@@ -269,9 +269,9 @@ def test_change_control_deviation_capa_linkage(db_path):
     from pharmagpt import qms_deviation_database as ddb
     from pharmagpt import qms_capa_database as cdb
 
-    cc = ccdb.create_change_control({"title": "Change"})
-    dev = ddb.create_deviation({"title": "Dev"})
-    capa = cdb.create_capa({"title": "CAPA"})
+    cc = ccdb.create_change_control({"title": "Change"}, company_id="test-company-1")
+    dev = ddb.create_deviation({"title": "Dev"}, company_id="test-company-1")
+    capa = cdb.create_capa({"title": "CAPA"}, company_id="test-company-1")
 
     ccdb.link_record(cc["id"], "deviation", dev["id"])
     ccdb.link_record(cc["id"], "capa", capa["id"])
@@ -288,10 +288,10 @@ def test_change_control_deviation_capa_linkage(db_path):
 def test_change_control_dashboard_stats(db_path):
     from pharmagpt import qms_change_control_database as ccdb
 
-    ccdb.create_change_control({"title": "A", "change_type": "Minor"})
-    c2 = ccdb.create_change_control({"title": "B", "change_type": "Emergency"})
+    ccdb.create_change_control({"title": "A", "change_type": "Minor"}, company_id="test-company-1")
+    c2 = ccdb.create_change_control({"title": "B", "change_type": "Emergency"}, company_id="test-company-1")
     ccdb.update_change_control(c2["id"], {"status": "Closed"})
-    stats = ccdb.get_dashboard_stats()
+    stats = ccdb.get_dashboard_stats("test-company-1")
     assert stats["total"] == 2
     assert stats["open"] == 1
     assert stats["closed"] == 1
@@ -300,7 +300,7 @@ def test_change_control_dashboard_stats(db_path):
 def test_change_control_delete(db_path):
     from pharmagpt import qms_change_control_database as ccdb
 
-    cc = ccdb.create_change_control({"title": "To delete"})
+    cc = ccdb.create_change_control({"title": "To delete"}, company_id="test-company-1")
     ccdb.delete_change_control(cc["id"])
     assert ccdb.get_change_control(cc["id"]) is None
 
@@ -312,8 +312,8 @@ def test_shared_attachments_polymorphic(db_path):
     from pharmagpt import qms_document_database as qdb
     from pharmagpt import qms_deviation_database as ddb
 
-    doc = qdb.create_document({"title": "Doc"})
-    dev = ddb.create_deviation({"title": "Dev"})
+    doc = qdb.create_document({"title": "Doc"}, company_id="test-company-1")
+    dev = ddb.create_deviation({"title": "Dev"}, company_id="test-company-1")
 
     qmsdb.add_attachment("document", doc["id"], "a.pdf", "Original A.pdf", "pdf", 1024)
     qmsdb.add_attachment("deviation", dev["id"], "b.pdf", "Original B.pdf", "pdf", 2048)
@@ -329,7 +329,7 @@ def test_shared_comments_audit_approvals(db_path):
     from pharmagpt import qms_database as qmsdb
     from pharmagpt import qms_capa_database as cdb
 
-    capa = cdb.create_capa({"title": "CAPA"})
+    capa = cdb.create_capa({"title": "CAPA"}, company_id="test-company-1")
 
     qmsdb.add_comment("capa", capa["id"], "J Doe", "Looks good", "QA")
     comments = qmsdb.get_comments("capa", capa["id"])

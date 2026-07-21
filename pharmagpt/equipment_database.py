@@ -82,6 +82,27 @@ def get_equipment(equipment_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+def get_equipment_scoped(equipment_id: int, company_id: str) -> dict | None:
+    """Return the equipment row only if it exists AND its owning Project
+    belongs to `company_id`. `equipment` has no company_id column of its own
+    (it inherits tenancy from its Project, project_id is NOT NULL) — this
+    joins rather than trusting a caller-supplied company match.
+
+    `company_id` must come from the authenticated TenantContext, never from
+    client input (pharmagpt/tenancy.py) — every flat /equipment/<id> route
+    must use this instead of get_equipment() alone.
+    """
+    conn = get_connection()
+    row = conn.execute(
+        """SELECT e.* FROM equipment e
+           JOIN projects p ON p.id = e.project_id
+           WHERE e.id = ? AND p.company_id = ?""",
+        (equipment_id, company_id),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def get_project_equipment(project_id: int) -> list[dict]:
     """All Equipment records belonging to a Project, newest first."""
     conn = get_connection()
@@ -92,13 +113,27 @@ def get_project_equipment(project_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_all_equipment() -> list[dict]:
+def get_all_equipment(company_id: str | None = None) -> list[dict]:
     """Every Equipment record across every Project (Phase 3.4,
     docs/PHASE3_EXECUTION_PLAN.md — the backfill/parity scripts need a
     company-wide view, not a per-project one, since Postgres equipment is
-    company-owned)."""
+    company-owned).
+
+    `company_id=None` is reserved for the offline backfill/parity scripts,
+    which intentionally run company-by-company using the service-role key,
+    not a live request — see scripts/backfill_equipment.py. Any live route
+    must always pass the authenticated tenant's company_id.
+    """
     conn = get_connection()
-    rows = conn.execute("SELECT * FROM equipment ORDER BY created_at DESC").fetchall()
+    if company_id is None:
+        rows = conn.execute("SELECT * FROM equipment ORDER BY created_at DESC").fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT e.* FROM equipment e
+               JOIN projects p ON p.id = e.project_id
+               WHERE p.company_id = ? ORDER BY e.created_at DESC""",
+            (company_id,),
+        ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -152,19 +187,23 @@ def set_equipment_postgres_id(equipment_id: int, postgres_id: str) -> None:
     conn.close()
 
 
-def search_equipment(query: str, project_id: int | None = None) -> list[dict]:
+def search_equipment(query: str, company_id: str, project_id: int | None = None) -> list[dict]:
     """Keyword search across name/equipment_code/tag_number/serial_number/manufacturer,
-    optionally scoped to a single project."""
+    scoped to `company_id` (must come from the authenticated TenantContext,
+    never client input — pharmagpt/tenancy.py) and optionally further to a
+    single project."""
     conn = get_connection()
     like = f"%{query}%"
-    sql = """SELECT * FROM equipment
-             WHERE (name LIKE ? OR equipment_code LIKE ? OR tag_number LIKE ?
-                    OR serial_number LIKE ? OR manufacturer LIKE ? OR asset_number LIKE ?)"""
-    params: list = [like, like, like, like, like, like]
+    sql = """SELECT e.* FROM equipment e
+             JOIN projects p ON p.id = e.project_id
+             WHERE p.company_id = ?
+               AND (e.name LIKE ? OR e.equipment_code LIKE ? OR e.tag_number LIKE ?
+                    OR e.serial_number LIKE ? OR e.manufacturer LIKE ? OR e.asset_number LIKE ?)"""
+    params: list = [company_id, like, like, like, like, like, like]
     if project_id is not None:
-        sql += " AND project_id = ?"
+        sql += " AND e.project_id = ?"
         params.append(project_id)
-    sql += " ORDER BY created_at DESC"
+    sql += " ORDER BY e.created_at DESC"
     rows = conn.execute(sql, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]

@@ -60,7 +60,7 @@ def _make_urs():
     return udb.create_urs({
         "title": "URS - Autoclave", "equipment_name": "Autoclave-01",
         "equipment_type": "Autoclave", "category": "Equipment",
-    })
+    }, company_id="test-company-1")
 
 
 def _req_json(section):

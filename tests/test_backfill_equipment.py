@@ -12,7 +12,7 @@ from scripts.backfill_equipment import backfill_equipment, backfill_equipment_li
 
 
 def _project(db_path):
-    return db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ")
+    return db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ", company_id="test-company-1")
 
 
 def test_backfill_equipment_migrates_and_records_postgres_id(db_path):
@@ -75,7 +75,7 @@ def test_backfill_equipment_links_skips_unmigrated_kb_document(db_path):
         title="SOP-1", folder="SOP", tags="", doc_version="1.0",
         effective_date=None, review_date=None, original_name="sop1.pdf",
         stored_filename="stored1.pdf", file_type="pdf", file_size=1024,
-    )
+    company_id="test-company-1")
     equipdb.link_equipment_document(equipment["id"], "sop", "kb", kb_doc["id"], "SOP-1")
 
     client = MagicMock()
@@ -95,7 +95,7 @@ def test_backfill_equipment_links_migrates_kb_sourced_when_ready(db_path):
         title="SOP-1", folder="SOP", tags="", doc_version="1.0",
         effective_date=None, review_date=None, original_name="sop1.pdf",
         stored_filename="stored1.pdf", file_type="pdf", file_size=1024,
-    )
+    company_id="test-company-1")
     db.set_kb_document_postgres_id(kb_doc["id"], "pg-kb-doc-1")
     link = equipdb.link_equipment_document(equipment["id"], "sop", "kb", kb_doc["id"], "SOP-1")
 

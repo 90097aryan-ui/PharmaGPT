@@ -18,7 +18,9 @@ from pharmagpt.qms_database import generate_document_number
 
 # ── Documents ──────────────────────────────────────────────────────────────────
 
-def create_document(data: dict) -> dict:
+def create_document(data: dict, *, company_id: str) -> dict:
+    """`company_id` must be the caller's authenticated tenant
+    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py."""
     conn = get_connection()
     doc_number = data.get("doc_number") or generate_document_number(
         data.get("doc_type", "SOP"), data.get("department", "")
@@ -27,8 +29,8 @@ def create_document(data: dict) -> dict:
         """INSERT INTO qms_documents
            (doc_number, doc_type, title, department, category, version, status,
             effective_date, review_date, expiry_date, owner, reviewer, approver,
-            content, form_data, project_id)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            content, form_data, project_id, company_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             doc_number,
             data.get("doc_type", "SOP"),
@@ -46,6 +48,7 @@ def create_document(data: dict) -> dict:
             data.get("content", ""),
             json.dumps(data.get("form_data", {})),
             data.get("project_id") or None,
+            company_id,
         ),
     )
     conn.commit()
@@ -66,9 +69,13 @@ def get_document(document_id: int) -> dict | None:
     return d
 
 
-def get_all_documents(filters: dict | None = None) -> list[dict]:
+def get_all_documents(company_id: str | None = None, filters: dict | None = None) -> list[dict]:
+    """`company_id` must come from the authenticated TenantContext, never
+    from client input (pharmagpt/tenancy.py). `company_id=None` is reserved
+    for offline backfill/parity scripts (service-role key, not a live
+    request); every live route must always pass a company_id."""
     conn = get_connection()
-    clauses, params = [], []
+    clauses, params = ([], []) if company_id is None else (["company_id = ?"], [company_id])
     if filters:
         for field in ("doc_type", "status", "department", "category"):
             val = filters.get(field)
@@ -128,9 +135,11 @@ def delete_document(document_id: int) -> None:
     conn.close()
 
 
-def get_dashboard_stats() -> dict:
+def get_dashboard_stats(company_id: str) -> dict:
+    """`company_id` must come from the authenticated TenantContext, never
+    from client input (pharmagpt/tenancy.py)."""
     conn = get_connection()
-    rows = conn.execute("SELECT status, doc_type FROM qms_documents").fetchall()
+    rows = conn.execute("SELECT status, doc_type FROM qms_documents WHERE company_id = ?", (company_id,)).fetchall()
     stats = {
         "total": len(rows), "draft": 0, "under_review": 0, "pending_approval": 0,
         "effective": 0, "under_revision": 0, "obsolete": 0, "by_type": {},
@@ -152,20 +161,24 @@ def get_dashboard_stats() -> dict:
            WHERE status = 'Effective'
              AND ((review_date IS NOT NULL AND review_date != '' AND review_date <= date('now', '+30 days'))
                   OR (expiry_date IS NOT NULL AND expiry_date != '' AND expiry_date <= date('now', '+30 days')))
-           ORDER BY review_date ASC LIMIT 10"""
+             AND company_id = ?
+           ORDER BY review_date ASC LIMIT 10""",
+        (company_id,),
     ).fetchall()
     stats["due_for_review"] = [dict(r) for r in due_soon]
 
     recent = conn.execute(
-        "SELECT id, doc_number, title, doc_type, status, created_at FROM qms_documents ORDER BY created_at DESC LIMIT 5"
+        "SELECT id, doc_number, title, doc_type, status, created_at FROM qms_documents "
+        "WHERE company_id = ? ORDER BY created_at DESC LIMIT 5",
+        (company_id,),
     ).fetchall()
     stats["recent"] = [dict(r) for r in recent]
     conn.close()
     return stats
 
 
-def search_documents(keyword: str) -> list[dict]:
-    return get_all_documents({"keyword": keyword})
+def search_documents(keyword: str, company_id: str) -> list[dict]:
+    return get_all_documents(company_id, {"keyword": keyword})
 
 
 # ── Versions ───────────────────────────────────────────────────────────────────

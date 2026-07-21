@@ -16,7 +16,9 @@ import logging
 from io import BytesIO
 
 from pharmagpt import database as db
-from flask import Blueprint, jsonify, request, Response, send_file, stream_with_context
+from pharmagpt import tenancy
+from pharmagpt.auth.decorators import require_role
+from flask import Blueprint, g, jsonify, request, Response, send_file, stream_with_context
 from google.genai import errors, types
 from pharmagpt.prompts import PHARMA_SYSTEM_PROMPT
 from pharmagpt.review import run_review, get_avg_score
@@ -56,7 +58,7 @@ def validation_generate():
     if not project_id:
         return jsonify({"error": "project_id is required"}), 400
 
-    project = db.get_project(project_id)
+    project = tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
@@ -223,7 +225,7 @@ def validation_save():
     if not project_id or not content:
         return jsonify({"error": "project_id and content are required"}), 400
 
-    if not db.get_project(project_id):
+    if not tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id):
         return jsonify({"error": "Project not found"}), 404
 
     doc = db.save_generated_document(
@@ -239,24 +241,38 @@ def validation_save():
 @bp.route("/projects/<int:project_id>/generated-docs", methods=["GET"])
 def list_generated_docs(project_id):
     """Return all saved generated documents for a project (metadata only, no content)."""
-    if not db.get_project(project_id):
+    if not tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id):
         return jsonify({"error": "Project not found"}), 404
     return jsonify(db.get_project_generated_documents(project_id))
+
+
+def _generated_doc_scoped(doc_id):
+    """Return the generated document only if it exists AND its owning
+    Project belongs to the caller's company (generated_documents has no
+    company_id of its own — it inherits tenancy from project_id, which is
+    NOT NULL — pharmagpt/tenancy.py)."""
+    doc = db.get_generated_document(doc_id)
+    if not doc:
+        return None
+    if not tenancy.scoped_or_none(db.get_project(doc["project_id"]), g.tenant.company_id):
+        return None
+    return doc
 
 
 @bp.route("/generated-docs/<int:doc_id>", methods=["GET"])
 def get_generated_doc(doc_id):
     """Return a single generated document including its full markdown content."""
-    doc = db.get_generated_document(doc_id)
+    doc = _generated_doc_scoped(doc_id)
     if not doc:
         return jsonify({"error": "Document not found"}), 404
     return jsonify(doc)
 
 
 @bp.route("/generated-docs/<int:doc_id>", methods=["DELETE"])
+@require_role("company_admin")
 def delete_generated_doc(doc_id):
     """Delete a saved generated document by ID."""
-    if not db.get_generated_document(doc_id):
+    if not _generated_doc_scoped(doc_id):
         return jsonify({"error": "Document not found"}), 404
     db.delete_generated_document(doc_id)
     return jsonify({"status": "deleted"})

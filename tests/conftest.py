@@ -16,6 +16,39 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))  # repo root, so 
 
 from fixtures.generate_fixtures import build_all  # noqa: E402
 
+# ── Tenant-scoping test shim (security fix, docs/SECURITY_REVIEW.md) ─────────
+# Routes now read g.tenant.company_id (pharmagpt/tenancy.py) to enforce
+# per-company data isolation. The `client` fixture below predates tenancy
+# entirely and patches is_exempt() to bypass the real auth gate for every
+# request, which means the real hook returns before ever setting g.tenant.
+# This hook fills that gap with a fixed, permissive fake tenant so the 300+
+# existing business-logic tests keep exercising exactly the same behavior as
+# before, without simulating a real Supabase-authenticated session. It only
+# fires when the real auth hook did NOT already set g.tenant — i.e. never for
+# tests/test_app_auth_integration.py's own `client` fixture, which does not
+# patch is_exempt and exercises the real 401/invalid-token paths (a
+# before_request hook that returns a response short-circuits Flask before
+# this one runs). Registered once at import time, not per-test, so it can
+# never accumulate duplicate registrations across the session.
+import pharmagpt.app as _appmod  # noqa: E402
+from flask import g as _g  # noqa: E402
+from pharmagpt.auth.context import TenantContext as _TenantContext  # noqa: E402
+from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID as _TEST_COMPANY_ID  # noqa: E402
+
+_TEST_TENANT = _TenantContext(
+    user_id="00000000-0000-0000-0000-000000000001",
+    email="test@example.com",
+    display_name="Test User",
+    role="company_admin",
+    company_id=_TEST_COMPANY_ID,
+)
+
+
+@_appmod.app.before_request
+def _fill_in_fake_tenant_for_auth_bypassed_tests():
+    if not hasattr(_g, "tenant"):
+        _g.tenant = _TEST_TENANT
+
 
 @pytest.fixture(scope="session")
 def fixtures_dir(tmp_path_factory) -> dict:

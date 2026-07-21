@@ -31,12 +31,14 @@ GET    /report/linked/<qual_id>               Get or create report for qualifica
 
 import json
 import io
-from flask import Blueprint, jsonify, request, Response, stream_with_context, send_file
+from flask import Blueprint, g, jsonify, request, Response, stream_with_context, send_file
 
 from pharmagpt import report_database as rdb
 from pharmagpt import qual_database as qdb
 from pharmagpt import urs_database as udb
 from pharmagpt import risk_database as risdb
+from pharmagpt import tenancy
+from pharmagpt.auth.decorators import require_role
 from pharmagpt.services import report_service as svc
 from pharmagpt.services.doc_exporter import markdown_to_docx
 from pharmagpt.state import gemini_client
@@ -51,7 +53,7 @@ bp = Blueprint("report", __name__, url_prefix="/report")
 
 @bp.route("/dashboard")
 def dashboard():
-    return jsonify(rdb.get_dashboard_stats())
+    return jsonify(rdb.get_dashboard_stats(g.tenant.company_id))
 
 
 # ── Report CRUD ───────────────────────────────────────────────────────────────
@@ -67,17 +69,19 @@ def list_reports():
         "keyword":         request.args.get("q"),
         "linked_qual_id":  request.args.get("linked_qual_id"),
     }
-    return jsonify(rdb.get_all_reports({k: v for k, v in filters.items() if v}))
+    return jsonify(rdb.get_all_reports(g.tenant.company_id, {k: v for k, v in filters.items() if v}))
 
 
 @bp.route("/", methods=["POST"])
 def create_report():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     data = request.get_json() or {}
 
     # Auto-populate from linked qualification if provided
     linked_qual_id = data.get("linked_qual_id")
     if linked_qual_id:
-        qual = qdb.get_qualification(int(linked_qual_id))
+        qual = tenancy.scoped_or_none(qdb.get_qualification(int(linked_qual_id)), g.tenant.company_id)
         if qual:
             for field in ("equipment_name", "equipment_id", "equipment_type", "manufacturer",
                           "model", "serial_number", "department", "site", "location",
@@ -96,13 +100,13 @@ def create_report():
     if not data.get("title", "").strip():
         data["title"] = f"Validation Report — {data.get('equipment_name','New Equipment')}"
 
-    report = rdb.create_report(data)
+    report = rdb.create_report(data, company_id=g.tenant.company_id)
     return jsonify(report), 201
 
 
 @bp.route("/<int:rid>", methods=["GET"])
 def get_report(rid):
-    report = rdb.get_report(rid)
+    report = tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id)
     if not report:
         return jsonify({"error": "Report not found"}), 404
     return jsonify(report)
@@ -110,6 +114,8 @@ def get_report(rid):
 
 @bp.route("/<int:rid>", methods=["PUT"])
 def update_report(rid):
+    if not tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id):
+        return jsonify({"error": "Report not found"}), 404
     data = request.get_json() or {}
     report = rdb.update_report(rid, data)
     if not report:
@@ -118,7 +124,10 @@ def update_report(rid):
 
 
 @bp.route("/<int:rid>", methods=["DELETE"])
+@require_role("company_admin")
 def delete_report(rid):
+    if not tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id):
+        return jsonify({"error": "Report not found"}), 404
     rdb.delete_report(rid)
     return jsonify({"success": True})
 
@@ -127,12 +136,16 @@ def delete_report(rid):
 
 @bp.route("/<int:rid>/sections", methods=["GET"])
 def get_sections(rid):
+    if not tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id):
+        return jsonify({"error": "Report not found"}), 404
     sections = rdb.get_sections(rid)
     return jsonify(sections)
 
 
 @bp.route("/<int:rid>/sections/<section_key>", methods=["PUT"])
 def update_section(rid, section_key):
+    if not tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id):
+        return jsonify({"error": "Report not found"}), 404
     data = request.get_json() or {}
     content = data.get("content", "")
     section = rdb.update_section(rid, section_key, content)
@@ -195,7 +208,7 @@ def _load_context(report: dict) -> dict:
 @bp.route("/<int:rid>/generate/<section_key>", methods=["POST"])
 def generate_section(rid, section_key):
     """AI-generate a single report section via SSE streaming."""
-    report = rdb.get_report(rid)
+    report = tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id)
     if not report:
         return jsonify({"error": "Report not found"}), 404
 
@@ -233,7 +246,7 @@ def generate_section(rid, section_key):
 @bp.route("/<int:rid>/generate", methods=["POST"])
 def generate_all_sections(rid):
     """AI-generate all report sections sequentially via SSE streaming."""
-    report = rdb.get_report(rid)
+    report = tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id)
     if not report:
         return jsonify({"error": "Report not found"}), 404
 
@@ -297,7 +310,7 @@ def generate_all_sections(rid):
 
 @bp.route("/<int:rid>/review", methods=["POST"])
 def review_report(rid):
-    report = rdb.get_report(rid)
+    report = tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id)
     if not report:
         return jsonify({"error": "Report not found"}), 404
 
@@ -336,7 +349,7 @@ def review_report(rid):
 
 @bp.route("/<int:rid>/traceability", methods=["GET"])
 def get_traceability(rid):
-    report = rdb.get_report(rid)
+    report = tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id)
     if not report:
         return jsonify({"error": "Report not found"}), 404
 
@@ -370,21 +383,19 @@ def get_approval(rid):
 
 
 @bp.route("/<int:rid>/approval", methods=["POST"])
+@require_role("company_admin", "reviewer_qa")
 def add_approval(rid):
-    report = rdb.get_report(rid)
+    report = tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id)
     if not report:
         return jsonify({"error": "Report not found"}), 404
 
     data = request.get_json() or {}
     action = data.get("action", "")
-    performed_by = data.get("performed_by", "")
-    role = data.get("role", "")
     comments = data.get("comments", "")
     version = data.get("version", report.get("version", "v1.0"))
-    electronic_sig = data.get("electronic_sig", "")
 
-    if not action or not performed_by:
-        return jsonify({"error": "action and performed_by are required"}), 400
+    if not action:
+        return jsonify({"error": "action is required"}), 400
 
     # Update report status based on action
     status_map = {
@@ -400,7 +411,10 @@ def add_approval(rid):
     if new_status:
         rdb.update_report(rid, {"status": new_status})
 
-    entry = rdb.add_approval_entry(rid, action, performed_by, role, comments, version, electronic_sig)
+    sig = tenancy.signing_identity(g.tenant)
+    entry = rdb.add_approval_entry(
+        rid, action, sig["performed_by"], sig["role"], comments, version, sig["electronic_sig"],
+    )
     return jsonify(entry), 201
 
 
@@ -426,7 +440,7 @@ def create_version(rid):
 
 @bp.route("/<int:rid>/export/docx", methods=["GET"])
 def export_docx(rid):
-    report = rdb.get_report(rid)
+    report = tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id)
     if not report:
         return jsonify({"error": "Report not found"}), 404
 
@@ -461,7 +475,7 @@ def export_docx(rid):
 @bp.route("/linked/<int:qual_id>", methods=["GET"])
 def get_linked_report(qual_id):
     """Find the validation report linked to a specific qualification."""
-    reports = rdb.get_all_reports({"linked_qual_id": str(qual_id)})
+    reports = rdb.get_all_reports(g.tenant.company_id, {"linked_qual_id": str(qual_id)})
     if reports:
         return jsonify(reports[0])
     return jsonify(None)

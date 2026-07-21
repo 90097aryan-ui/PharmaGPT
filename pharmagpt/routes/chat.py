@@ -9,7 +9,8 @@ POST /stream   stream a Gemini response, optionally injecting document context
 import json
 
 from pharmagpt import database as db
-from flask import Blueprint, jsonify, request, Response, stream_with_context
+from pharmagpt import tenancy
+from flask import Blueprint, g, jsonify, request, Response, stream_with_context
 from google.genai import errors, types
 from pharmagpt.prompts import PHARMA_SYSTEM_PROMPT
 from pharmagpt.services.document_search import search_project_documents
@@ -47,7 +48,7 @@ def stream():
     if not project_id:
         return jsonify({"error": "No project selected. Please select or create a project first."}), 400
 
-    project = db.get_project(project_id)
+    project = tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id)
     if not project:
         return jsonify({"error": "Project not found"}), 404
 

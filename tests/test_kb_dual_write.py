@@ -100,14 +100,17 @@ def test_dual_write_create_failure_does_not_break_response(client, authed, monke
     assert db.get_kb_document(kb_id)["postgres_id"] is None
 
 
-def test_dual_write_skips_super_admin_with_no_company(client, monkeypatch):
+def test_super_admin_cannot_upload_kb_document(client, monkeypatch):
+    """Super Admin has no standing access to tenant content (PLATFORM_ARCHITECTURE.md
+    §7) — this is enforced before the SQLite write, let alone the Postgres
+    dual-write, so there is nothing left for Postgres to skip."""
     monkeypatch.setattr(config, "KB_BACKEND", "dual")
     with patch(
         "pharmagpt.auth.middleware.resolve_tenant_context", return_value=SUPER_ADMIN_TENANT
     ), patch("pharmagpt.routes.knowledge_base.kb_repo.create_kb_document") as mock_create:
         resp = _upload(client)
 
-    assert resp.status_code == 201
+    assert resp.status_code == 403
     mock_create.assert_not_called()
 
 

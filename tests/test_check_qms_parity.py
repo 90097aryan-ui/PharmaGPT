@@ -20,7 +20,7 @@ def _query_mock(execute_return):
 
 
 def test_check_parity_skips_never_migrated(db_path):
-    ddb.create_deviation({"title": "Dev 1"})
+    ddb.create_deviation({"title": "Dev 1"}, company_id="test-company-1")
     client = MagicMock()
 
     drifted = check_record_type_parity(client, "deviation", ddb.get_all_deviations())
@@ -30,7 +30,7 @@ def test_check_parity_skips_never_migrated(db_path):
 
 
 def test_check_parity_flags_missing_in_postgres(db_path):
-    deviation = ddb.create_deviation({"title": "Dev 1"})
+    deviation = ddb.create_deviation({"title": "Dev 1"}, company_id="test-company-1")
     ddb.set_deviation_postgres_id(deviation["id"], "pg-dev-1")
 
     client = MagicMock()
@@ -43,7 +43,7 @@ def test_check_parity_flags_missing_in_postgres(db_path):
 
 
 def test_check_parity_passes_when_fields_match(db_path):
-    deviation = ddb.create_deviation({"title": "Dev 1", "status": "Initiated"})
+    deviation = ddb.create_deviation({"title": "Dev 1", "status": "Initiated"}, company_id="test-company-1")
     ddb.set_deviation_postgres_id(deviation["id"], "pg-dev-1")
 
     client = MagicMock()
@@ -57,7 +57,7 @@ def test_check_parity_passes_when_fields_match(db_path):
 
 
 def test_check_parity_flags_status_drift(db_path):
-    deviation = ddb.create_deviation({"title": "Dev 1", "status": "Initiated"})
+    deviation = ddb.create_deviation({"title": "Dev 1", "status": "Initiated"}, company_id="test-company-1")
     ddb.set_deviation_postgres_id(deviation["id"], "pg-dev-1")
 
     client = MagicMock()

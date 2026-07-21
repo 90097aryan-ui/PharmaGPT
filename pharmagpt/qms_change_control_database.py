@@ -24,7 +24,9 @@ from pharmagpt.qms_database import generate_change_control_number
 
 # ── Change Controls ───────────────────────────────────────────────────────────
 
-def create_change_control(data: dict) -> dict:
+def create_change_control(data: dict, *, company_id: str) -> dict:
+    """`company_id` must be the caller's authenticated tenant
+    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py."""
     conn = get_connection()
     cc_number = data.get("cc_number") or generate_change_control_number()
     cur = conn.execute(
@@ -32,8 +34,8 @@ def create_change_control(data: dict) -> dict:
            (cc_number, title, change_type, change_category, department, area,
             equipment_system, project_id, requested_by, date_requested,
             target_implementation_date, change_description, reason_for_change,
-            current_state, proposed_state, status, risk_level, form_data)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            current_state, proposed_state, status, risk_level, form_data, company_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             cc_number,
             data.get("title", "Untitled Change").strip() or "Untitled Change",
@@ -53,6 +55,7 @@ def create_change_control(data: dict) -> dict:
             data.get("status", "Draft"),
             data.get("risk_level", ""),
             json.dumps(data.get("form_data", {})),
+            company_id,
         ),
     )
     conn.commit()
@@ -73,9 +76,13 @@ def get_change_control(cc_id: int) -> dict | None:
     return d
 
 
-def get_all_change_controls(filters: dict | None = None) -> list[dict]:
+def get_all_change_controls(company_id: str | None = None, filters: dict | None = None) -> list[dict]:
+    """`company_id` must come from the authenticated TenantContext, never
+    from client input (pharmagpt/tenancy.py). `company_id=None` is reserved
+    for offline backfill/parity scripts (service-role key, not a live
+    request); every live route must always pass a company_id."""
     conn = get_connection()
-    clauses, params = [], []
+    clauses, params = ([], []) if company_id is None else (["company_id = ?"], [company_id])
     if filters:
         for field in ("change_type", "change_category", "status", "department"):
             val = filters.get(field)
@@ -160,10 +167,13 @@ def set_narrative(cc_id: int, key: str, text: str) -> dict:
     return update_change_control(cc_id, {"ai_narratives": narratives})
 
 
-def get_dashboard_stats() -> dict:
+def get_dashboard_stats(company_id: str) -> dict:
+    """`company_id` must come from the authenticated TenantContext, never
+    from client input (pharmagpt/tenancy.py)."""
     conn = get_connection()
     rows = conn.execute(
-        "SELECT status, change_type, change_category, created_at FROM qms_change_controls"
+        "SELECT status, change_type, change_category, created_at FROM qms_change_controls WHERE company_id = ?",
+        (company_id,),
     ).fetchall()
     stats = {"total": len(rows), "open": 0, "closed": 0, "by_type": {}, "by_category": {}, "by_status": {}}
     for r in rows:
@@ -179,7 +189,9 @@ def get_dashboard_stats() -> dict:
             stats["by_category"].get(d.get("change_category", "Equipment"), 0) + 1
 
     stats["emergency_open"] = conn.execute(
-        "SELECT COUNT(*) AS cnt FROM qms_change_controls WHERE change_type = 'Emergency' AND status NOT IN ('Closed','Rejected')"
+        "SELECT COUNT(*) AS cnt FROM qms_change_controls WHERE change_type = 'Emergency' "
+        "AND status NOT IN ('Closed','Rejected') AND company_id = ?",
+        (company_id,),
     ).fetchone()["cnt"]
 
     overdue = conn.execute(
@@ -188,18 +200,23 @@ def get_dashboard_stats() -> dict:
            WHERE status NOT IN ('Closed','Rejected')
              AND target_implementation_date IS NOT NULL AND target_implementation_date != ''
              AND target_implementation_date < date('now')
-           ORDER BY target_implementation_date ASC"""
+             AND company_id = ?
+           ORDER BY target_implementation_date ASC""",
+        (company_id,),
     ).fetchall()
     stats["overdue"] = len(overdue)
     stats["overdue_changes"] = [dict(r) for r in overdue[:10]]
 
     pending_approvals = conn.execute(
-        "SELECT COUNT(*) AS cnt FROM qms_change_controls WHERE status IN ('QA Review','Approval')"
+        "SELECT COUNT(*) AS cnt FROM qms_change_controls WHERE status IN ('QA Review','Approval') AND company_id = ?",
+        (company_id,),
     ).fetchone()
     stats["pending_approvals"] = pending_approvals["cnt"] if pending_approvals else 0
 
     recent = conn.execute(
-        "SELECT id, cc_number, title, change_type, status, created_at FROM qms_change_controls ORDER BY created_at DESC LIMIT 5"
+        "SELECT id, cc_number, title, change_type, status, created_at FROM qms_change_controls "
+        "WHERE company_id = ? ORDER BY created_at DESC LIMIT 5",
+        (company_id,),
     ).fetchall()
     stats["recent"] = [dict(r) for r in recent]
     conn.close()

@@ -93,8 +93,8 @@ def test_find_or_create_bootstrap_company_creates_when_missing():
 # ── backfill_projects ────────────────────────────────────────────────────
 
 def test_backfill_projects_migrates_and_records_postgres_id(db_path):
-    db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ")
-    db.create_project("Proj B", "GC", "Waters", "QC", "OQ")
+    db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ", company_id="company-1")
+    db.create_project("Proj B", "GC", "Waters", "QC", "OQ", company_id="company-1")
 
     client = MagicMock()
     inserted_ids = iter(["pg-a", "pg-b"])
@@ -111,7 +111,7 @@ def test_backfill_projects_migrates_and_records_postgres_id(db_path):
 
 
 def test_backfill_projects_skips_already_migrated(db_path):
-    project = db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ")
+    project = db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ", company_id="company-1")
     db.set_project_postgres_id(project["id"], "already-there")
 
     client = MagicMock()
@@ -125,6 +125,7 @@ def test_backfill_projects_skips_already_migrated(db_path):
 def test_backfill_projects_only_maps_target_schema_fields(db_path):
     db.create_project(
         "Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ",
+        company_id="company-1",
         owner="Jane Doe", approver="John Smith", risk_category="High",
         status="Approved", protocol_number="PROT-1", report_number="REP-1",
     )

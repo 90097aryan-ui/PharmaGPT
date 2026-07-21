@@ -15,16 +15,30 @@ GET    /projects/<id>/insights       aggregated document statistics
 
 from pharmagpt import database as db
 from pharmagpt import documents as doc_utils
+from pharmagpt import tenancy
+from pharmagpt.auth.decorators import require_role
 from pharmagpt.services.document_processor import process_document_async
-from flask import Blueprint, jsonify, request, send_file
+from flask import Blueprint, g, jsonify, request, send_file
 
 bp = Blueprint("documents", __name__)
+
+
+def _doc_scoped(doc_id):
+    """Return the document only if it exists AND its owning Project belongs
+    to the caller's company (documents have no company_id of their own —
+    they inherit tenancy from project_id, which is NOT NULL — pharmagpt/tenancy.py)."""
+    doc = db.get_document(doc_id)
+    if not doc:
+        return None
+    if not tenancy.scoped_or_none(db.get_project(doc["project_id"]), g.tenant.company_id):
+        return None
+    return doc
 
 
 @bp.route("/projects/<int:project_id>/documents", methods=["GET"])
 def list_documents(project_id):
     """Return all document metadata rows for a project, newest first."""
-    if not db.get_project(project_id):
+    if not tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id):
         return jsonify({"error": "Project not found"}), 404
     return jsonify(db.get_project_documents(project_id))
 
@@ -41,7 +55,7 @@ def upload_document(project_id):
     Form field: file  (PDF, DOCX, XLSX, or TXT — max 50 MB)
     Returns the new document metadata dict (extraction_status: "pending").
     """
-    if not db.get_project(project_id):
+    if not tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id):
         return jsonify({"error": "Project not found"}), 404
 
     if "file" not in request.files:
@@ -79,7 +93,7 @@ def upload_document(project_id):
 @bp.route("/documents/<int:doc_id>/status", methods=["GET"])
 def document_extraction_status(doc_id):
     """Poll extraction progress/result for a project document."""
-    if not db.get_document(doc_id):
+    if not _doc_scoped(doc_id):
         return jsonify({"error": "Document not found"}), 404
 
     status = db.get_document_text_status(doc_id)
@@ -95,7 +109,7 @@ def document_extraction_status(doc_id):
 def retry_document_extraction(doc_id):
     """Re-run extraction for a document whose previous attempt failed (or
     partially failed). Never deletes the stored file — it is retried in place."""
-    doc = db.get_document(doc_id)
+    doc = _doc_scoped(doc_id)
     if not doc:
         return jsonify({"error": "Document not found"}), 404
 
@@ -118,7 +132,7 @@ def view_document(doc_id):
     Serve a document so the browser can display it inline (PDF, TXT).
     DOCX and XLSX — which browsers cannot render — fall back to a download.
     """
-    doc = db.get_document(doc_id)
+    doc = _doc_scoped(doc_id)
     if not doc:
         return jsonify({"error": "Document not found"}), 404
 
@@ -138,7 +152,7 @@ def view_document(doc_id):
 @bp.route("/documents/<int:doc_id>/download")
 def download_document(doc_id):
     """Force-download a document regardless of file type."""
-    doc = db.get_document(doc_id)
+    doc = _doc_scoped(doc_id)
     if not doc:
         return jsonify({"error": "Document not found"}), 404
 
@@ -155,10 +169,11 @@ def download_document(doc_id):
 
 
 @bp.route("/documents/<int:doc_id>", methods=["DELETE"])
+@require_role("company_admin")
 def delete_document(doc_id):
     """Delete a document's metadata from the DB and its file from disk.
     ON DELETE CASCADE in the schema removes the document_text row automatically."""
-    doc = db.get_document(doc_id)
+    doc = _doc_scoped(doc_id)
     if not doc:
         return jsonify({"error": "Document not found"}), 404
 
@@ -175,6 +190,6 @@ def project_insights(project_id):
     Response: { document_count, total_pages, total_words,
                 extracted_count, last_upload, file_types: {ext: N} }
     """
-    if not db.get_project(project_id):
+    if not tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id):
         return jsonify({"error": "Project not found"}), 404
     return jsonify(db.get_project_insights(project_id))

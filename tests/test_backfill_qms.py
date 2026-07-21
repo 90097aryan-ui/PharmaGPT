@@ -13,9 +13,9 @@ from scripts.backfill_qms import backfill_record_type
 
 
 def test_backfill_record_type_migrates_deviation_with_resolved_project(db_path):
-    project = db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ")
+    project = db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ", company_id="test-company-1")
     db.set_project_postgres_id(project["id"], "pg-project-1")
-    deviation = ddb.create_deviation({"title": "Dev 1", "project_id": project["id"]})
+    deviation = ddb.create_deviation({"title": "Dev 1", "project_id": project["id"]}, company_id="test-company-1")
 
     client = MagicMock()
     q = MagicMock()
@@ -35,7 +35,7 @@ def test_backfill_record_type_migrates_deviation_with_resolved_project(db_path):
 
 
 def test_backfill_record_type_skips_already_migrated(db_path):
-    deviation = ddb.create_deviation({"title": "Dev 1"})
+    deviation = ddb.create_deviation({"title": "Dev 1"}, company_id="test-company-1")
     ddb.set_deviation_postgres_id(deviation["id"], "already-there")
 
     client = MagicMock()
@@ -49,7 +49,7 @@ def test_backfill_record_type_skips_already_migrated(db_path):
 
 
 def test_backfill_record_type_risk_assessment_has_no_project_id(db_path):
-    assessment = rdb.create_assessment({"title": "Risk 1"})
+    assessment = rdb.create_assessment({"title": "Risk 1"}, company_id="test-company-1")
 
     client = MagicMock()
     q = MagicMock()

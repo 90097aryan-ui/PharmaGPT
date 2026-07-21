@@ -21,7 +21,8 @@ from flask import Blueprint, g, jsonify, request, send_file
 from pharmagpt import config
 from pharmagpt import database as db
 from pharmagpt import documents as doc_utils
-from pharmagpt.auth.decorators import extract_bearer_token
+from pharmagpt import tenancy
+from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import kb_repo
 from pharmagpt.services.document_processor import process_document_async
 
@@ -87,6 +88,7 @@ def kb_list_documents():
     title     = request.args.get("title",     "").strip() or None
 
     return jsonify(db.get_kb_documents(
+        g.tenant.company_id,
         folder=folder, tag=tag, file_type=file_type,
         keyword=keyword, title=title,
     ))
@@ -106,6 +108,9 @@ def kb_upload_document():
         effective_date — ISO date YYYY-MM-DD (optional)
         review_date    — ISO date YYYY-MM-DD (optional)
     """
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
+
     if "file" not in request.files:
         return jsonify({"error": "No file part in the request"}), 400
 
@@ -140,6 +145,7 @@ def kb_upload_document():
         stored_filename=stored_filename,
         file_type=extension,
         file_size=file_size,
+        company_id=g.tenant.company_id,
     )
 
     db.mark_kb_pending(kb_doc["id"])
@@ -151,6 +157,8 @@ def kb_upload_document():
 @bp.route("/kb/documents/<int:kb_id>/status", methods=["GET"])
 def kb_extraction_status(kb_id):
     """Poll extraction progress/result for a Knowledge Base document."""
+    if not tenancy.scoped_or_none(db.get_kb_document(kb_id), g.tenant.company_id):
+        return jsonify({"error": "Document not found"}), 404
     status = db.get_kb_document_status(kb_id)
     if not status:
         return jsonify({"error": "Document not found"}), 404
@@ -161,7 +169,7 @@ def kb_extraction_status(kb_id):
 def kb_retry_extraction(kb_id):
     """Re-run extraction for a KB document whose previous attempt failed (or
     partially failed). Never deletes the stored file — it is retried in place."""
-    doc = db.get_kb_document(kb_id)
+    doc = tenancy.scoped_or_none(db.get_kb_document(kb_id), g.tenant.company_id)
     if not doc:
         return jsonify({"error": "Document not found"}), 404
 
@@ -178,7 +186,7 @@ def kb_retry_extraction(kb_id):
 @bp.route("/kb/documents/<int:kb_id>", methods=["GET"])
 def kb_get_document(kb_id):
     """Return a single KB document including its text_content for the preview panel."""
-    doc = db.get_kb_document(kb_id)
+    doc = tenancy.scoped_or_none(db.get_kb_document(kb_id), g.tenant.company_id)
     if not doc:
         return jsonify({"error": "Document not found"}), 404
     return jsonify(doc)
@@ -187,7 +195,7 @@ def kb_get_document(kb_id):
 @bp.route("/kb/documents/<int:kb_id>/view")
 def kb_view_document(kb_id):
     """Serve the KB file inline (PDF/TXT) or as a download (DOCX/XLSX)."""
-    doc = db.get_kb_document(kb_id)
+    doc = tenancy.scoped_or_none(db.get_kb_document(kb_id), g.tenant.company_id)
     if not doc:
         return jsonify({"error": "Document not found"}), 404
 
@@ -207,7 +215,7 @@ def kb_view_document(kb_id):
 @bp.route("/kb/documents/<int:kb_id>/download")
 def kb_download_document(kb_id):
     """Force-download a KB file."""
-    doc = db.get_kb_document(kb_id)
+    doc = tenancy.scoped_or_none(db.get_kb_document(kb_id), g.tenant.company_id)
     if not doc:
         return jsonify({"error": "Document not found"}), 404
 
@@ -224,9 +232,10 @@ def kb_download_document(kb_id):
 
 
 @bp.route("/kb/documents/<int:kb_id>", methods=["DELETE"])
+@require_role("company_admin")
 def kb_delete_document(kb_id):
     """Delete a KB document from the database and remove its file from disk."""
-    doc = db.get_kb_document(kb_id)
+    doc = tenancy.scoped_or_none(db.get_kb_document(kb_id), g.tenant.company_id)
     if not doc:
         return jsonify({"error": "Document not found"}), 404
 
@@ -239,4 +248,4 @@ def kb_delete_document(kb_id):
 @bp.route("/kb/folders/counts", methods=["GET"])
 def kb_folder_counts():
     """Return document count per folder for the KB sidebar badges."""
-    return jsonify(db.get_kb_folder_counts())
+    return jsonify(db.get_kb_folder_counts(g.tenant.company_id))

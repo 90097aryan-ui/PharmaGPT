@@ -43,3 +43,30 @@ def require_auth(view_func):
         return view_func(*args, **kwargs)
 
     return wrapped
+
+
+def require_role(*allowed_roles: str):
+    """Reject the request (403) unless `g.tenant.role` is one of
+    `allowed_roles`. The four roles are frozen at v1.0 (migrations/0001_
+    identity_tenancy_up.sql, PLATFORM_ARCHITECTURE.md §7):
+    super_admin | company_admin | reviewer_qa | user.
+
+    Must run after the global auth gate (pharmagpt/auth/middleware.py) has
+    already set `g.tenant` — every route reached in production already has
+    it; this decorator only narrows which roles may proceed.
+
+    Usage: @require_role("company_admin") or @require_role("company_admin", "reviewer_qa")
+    """
+
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapped(*args, **kwargs):
+            if g.tenant.role not in allowed_roles:
+                return jsonify({
+                    "error": f"This action requires one of these roles: {', '.join(allowed_roles)}",
+                }), 403
+            return view_func(*args, **kwargs)
+
+        return wrapped
+
+    return decorator

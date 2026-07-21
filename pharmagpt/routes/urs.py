@@ -44,6 +44,8 @@ from datetime import date, datetime
 from flask import Blueprint, g, jsonify, request
 
 from pharmagpt import urs_database as udb
+from pharmagpt import tenancy
+from pharmagpt.auth.decorators import require_role
 from pharmagpt.services import urs_service as svc
 from pharmagpt.services import urs_lifecycle as lifecycle
 from pharmagpt.services.urs_generation_job import submit_generation_job
@@ -96,7 +98,7 @@ bp = Blueprint("urs", __name__, url_prefix="/urs")
 
 @bp.route("/dashboard")
 def dashboard():
-    return jsonify(udb.get_dashboard_stats())
+    return jsonify(udb.get_dashboard_stats(g.tenant.company_id))
 
 
 # ── URS CRUD ──────────────────────────────────────────────────────────────────
@@ -110,11 +112,13 @@ def list_urs():
         "equipment_type": request.args.get("equipment_type"),
         "keyword":        request.args.get("q"),
     }
-    return jsonify(udb.get_all_urs({k: v for k, v in filters.items() if v}))
+    return jsonify(udb.get_all_urs(g.tenant.company_id, {k: v for k, v in filters.items() if v}))
 
 
 @bp.route("/", methods=["POST"])
 def create_urs():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     data = request.get_json() or {}
     if not data.get("title", "").strip() and not data.get("equipment_name", "").strip():
         return jsonify({"error": "Title or equipment name is required"}), 400
@@ -125,13 +129,13 @@ def create_urs():
     # ignores urs_number/doc_number/revision/status/reviewed_by/approved_by/
     # effective_date from `data` regardless of what's set here.
     data["prepared_by"] = _current_display_name(fallback=data.get("prepared_by", ""))
-    urs = udb.create_urs(data)
+    urs = udb.create_urs(data, company_id=g.tenant.company_id)
     return jsonify(urs), 201
 
 
 @bp.route("/<int:uid>", methods=["GET"])
 def get_urs(uid):
-    urs = udb.get_urs(uid)
+    urs = tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id)
     if not urs:
         return jsonify({"error": "URS not found"}), 404
     return jsonify(urs)
@@ -139,7 +143,7 @@ def get_urs(uid):
 
 @bp.route("/<int:uid>", methods=["PUT"])
 def update_urs(uid):
-    if not udb.get_urs(uid):
+    if not tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id):
         return jsonify({"error": "URS not found"}), 404
     data = request.get_json() or {}
     if "status" in data:
@@ -158,8 +162,9 @@ def update_urs(uid):
 
 
 @bp.route("/<int:uid>", methods=["DELETE"])
+@require_role("company_admin")
 def delete_urs(uid):
-    if not udb.get_urs(uid):
+    if not tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id):
         return jsonify({"error": "URS not found"}), 404
     udb.delete_urs(uid)
     return jsonify({"deleted": True})
@@ -169,14 +174,14 @@ def delete_urs(uid):
 
 @bp.route("/<int:uid>/requirements", methods=["GET"])
 def get_requirements(uid):
-    if not udb.get_urs(uid):
+    if not tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id):
         return jsonify({"error": "URS not found"}), 404
     return jsonify(udb.get_requirements(uid))
 
 
 @bp.route("/<int:uid>/requirements", methods=["POST"])
 def save_requirements(uid):
-    if not udb.get_urs(uid):
+    if not tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id):
         return jsonify({"error": "URS not found"}), 404
     reqs = request.get_json() or []
     saved = udb.save_requirements(uid, reqs)
@@ -185,7 +190,7 @@ def save_requirements(uid):
 
 @bp.route("/<int:uid>/requirements/add", methods=["POST"])
 def add_requirement(uid):
-    if not udb.get_urs(uid):
+    if not tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id):
         return jsonify({"error": "URS not found"}), 404
     req = request.get_json() or {}
     new_req = udb.add_requirement(uid, req)
@@ -202,6 +207,7 @@ def update_requirement(uid, rid):
 
 
 @bp.route("/<int:uid>/requirements/<int:rid>", methods=["DELETE"])
+@require_role("company_admin")
 def delete_requirement(uid, rid):
     udb.delete_requirement(rid)
     return jsonify({"deleted": True})
@@ -212,7 +218,7 @@ def delete_requirement(uid, rid):
 @bp.route("/<int:uid>/library", methods=["POST"])
 def load_library(uid):
     """Load pre-built library requirements for the URS equipment type."""
-    urs = udb.get_urs(uid)
+    urs = tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id)
     if not urs:
         return jsonify({"error": "URS not found"}), 404
     data = request.get_json() or {}
@@ -249,7 +255,7 @@ def generate_requirements(uid):
     get SIGKILLed mid-stream. See services/urs_generation_job.py.
     """
     route_start = time.perf_counter()
-    urs = udb.get_urs(uid)
+    urs = tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id)
     if not urs:
         return jsonify({"error": "URS not found"}), 404
 
@@ -279,7 +285,7 @@ def generate_requirements(uid):
 @bp.route("/<int:uid>/generate/status", methods=["GET"])
 def generation_status(uid):
     """Poll the background generation job's current status/progress."""
-    if not udb.get_urs(uid):
+    if not tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id):
         return jsonify({"error": "URS not found"}), 404
     status = udb.get_generation_status(uid)
     return jsonify(status)
@@ -299,7 +305,7 @@ def review_urs(uid):
     the frontend can render an explicit failure state instead of silently
     treating a broken response as "no review yet".
     """
-    urs = udb.get_urs(uid)
+    urs = tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id)
     if not urs:
         return jsonify({"error": "URS not found"}), 404
     requirements = udb.get_requirements(uid)
@@ -356,7 +362,7 @@ def review_urs(uid):
 
 @bp.route("/<int:uid>/approval", methods=["GET"])
 def get_approval(uid):
-    if not udb.get_urs(uid):
+    if not tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id):
         return jsonify({"error": "URS not found"}), 404
     return jsonify(udb.get_approval_trail(uid))
 
@@ -386,8 +392,9 @@ _APPROVAL_ACTIONS = {"Approved"}
 
 
 @bp.route("/<int:uid>/approval", methods=["POST"])
+@require_role("company_admin", "reviewer_qa")
 def add_approval(uid):
-    urs = udb.get_urs(uid)
+    urs = tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id)
     if not urs:
         return jsonify({"error": "URS not found"}), 404
     data = request.get_json() or {}
@@ -444,14 +451,14 @@ def add_approval(uid):
 
 @bp.route("/<int:uid>/versions", methods=["GET"])
 def get_versions(uid):
-    if not udb.get_urs(uid):
+    if not tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id):
         return jsonify({"error": "URS not found"}), 404
     return jsonify(udb.get_versions(uid))
 
 
 @bp.route("/<int:uid>/versions", methods=["POST"])
 def create_version(uid):
-    if not udb.get_urs(uid):
+    if not tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id):
         return jsonify({"error": "URS not found"}), 404
     data = request.get_json() or {}
     change_summary = data.get("change_summary", "Version snapshot")
@@ -484,7 +491,7 @@ def export_docx(uid):
     from flask import send_file
     import io
 
-    urs = udb.get_urs(uid)
+    urs = tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id)
     if not urs:
         return jsonify({"error": "URS not found"}), 404
 

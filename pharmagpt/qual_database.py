@@ -238,7 +238,9 @@ QUAL_SCHEMA = """
 
 # ── Qualifications ────────────────────────────────────────────────────────────
 
-def create_qualification(data: dict) -> dict:
+def create_qualification(data: dict, *, company_id: str) -> dict:
+    """`company_id` must be the caller's authenticated tenant
+    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py."""
     conn = get_connection()
     with conn:
         cur = conn.execute(
@@ -249,8 +251,8 @@ def create_qualification(data: dict) -> dict:
                 process_description, system_description, drawing_refs, document_refs,
                 manufacturer_details, linked_project_id, linked_urs_id, linked_risk_id,
                 prepared_by, reviewed_by, approved_by, effective_date,
-                planned_start, planned_end)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                planned_start, planned_end, company_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 data.get("qual_number", ""),
                 data.get("title", "Untitled Qualification"),
@@ -284,6 +286,7 @@ def create_qualification(data: dict) -> dict:
                 data.get("effective_date", ""),
                 data.get("planned_start", ""),
                 data.get("planned_end", ""),
+                company_id,
             ),
         )
         new_id = cur.lastrowid
@@ -300,9 +303,13 @@ def get_qualification(qual_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def get_all_qualifications(filters: dict | None = None) -> list[dict]:
+def get_all_qualifications(company_id: str | None = None, filters: dict | None = None) -> list[dict]:
+    """`company_id` must come from the authenticated TenantContext, never
+    from client input (pharmagpt/tenancy.py). `company_id=None` is reserved
+    for offline backfill/parity scripts; every live route must always pass
+    a company_id."""
     conn = get_connection()
-    where_clauses, params = [], []
+    where_clauses, params = ([], []) if company_id is None else (["company_id = ?"], [company_id])
     if filters:
         for field in ("status", "category", "department", "equipment_type", "iq_status", "oq_status", "pq_status"):
             if filters.get(field):
@@ -354,29 +361,53 @@ def delete_qualification(qual_id: int) -> bool:
     return True
 
 
-def get_dashboard_stats() -> dict:
+def get_dashboard_stats(company_id: str) -> dict:
+    """`company_id` must come from the authenticated TenantContext, never
+    from client input (pharmagpt/tenancy.py)."""
     conn = get_connection()
-    total       = conn.execute("SELECT COUNT(*) FROM qual_qualifications").fetchone()[0]
-    draft       = conn.execute("SELECT COUNT(*) FROM qual_qualifications WHERE status='draft'").fetchone()[0]
-    in_progress = conn.execute("SELECT COUNT(*) FROM qual_qualifications WHERE status='in_progress'").fetchone()[0]
-    completed   = conn.execute("SELECT COUNT(*) FROM qual_qualifications WHERE status='completed'").fetchone()[0]
-    approved    = conn.execute("SELECT COUNT(*) FROM qual_qualifications WHERE status='approved'").fetchone()[0]
+    total       = conn.execute("SELECT COUNT(*) FROM qual_qualifications WHERE company_id = ?", (company_id,)).fetchone()[0]
+    draft       = conn.execute("SELECT COUNT(*) FROM qual_qualifications WHERE status='draft' AND company_id = ?", (company_id,)).fetchone()[0]
+    in_progress = conn.execute("SELECT COUNT(*) FROM qual_qualifications WHERE status='in_progress' AND company_id = ?", (company_id,)).fetchone()[0]
+    completed   = conn.execute("SELECT COUNT(*) FROM qual_qualifications WHERE status='completed' AND company_id = ?", (company_id,)).fetchone()[0]
+    approved    = conn.execute("SELECT COUNT(*) FROM qual_qualifications WHERE status='approved' AND company_id = ?", (company_id,)).fetchone()[0]
 
-    iq_complete = conn.execute("SELECT COUNT(*) FROM qual_qualifications WHERE iq_status='completed'").fetchone()[0]
-    oq_complete = conn.execute("SELECT COUNT(*) FROM qual_qualifications WHERE oq_status='completed'").fetchone()[0]
-    pq_complete = conn.execute("SELECT COUNT(*) FROM qual_qualifications WHERE pq_status='completed'").fetchone()[0]
+    iq_complete = conn.execute("SELECT COUNT(*) FROM qual_qualifications WHERE iq_status='completed' AND company_id = ?", (company_id,)).fetchone()[0]
+    oq_complete = conn.execute("SELECT COUNT(*) FROM qual_qualifications WHERE oq_status='completed' AND company_id = ?", (company_id,)).fetchone()[0]
+    pq_complete = conn.execute("SELECT COUNT(*) FROM qual_qualifications WHERE pq_status='completed' AND company_id = ?", (company_id,)).fetchone()[0]
 
-    total_tests  = conn.execute("SELECT COUNT(*) FROM qual_test_cases").fetchone()[0]
-    pass_count   = conn.execute("SELECT COUNT(*) FROM qual_executions WHERE result='pass'").fetchone()[0]
-    fail_count   = conn.execute("SELECT COUNT(*) FROM qual_executions WHERE result='fail'").fetchone()[0]
-    open_devs    = conn.execute("SELECT COUNT(*) FROM qual_deviations WHERE status='open'").fetchone()[0]
+    total_tests  = conn.execute(
+        "SELECT COUNT(*) FROM qual_test_cases t JOIN qual_qualifications q ON q.id = t.qual_id WHERE q.company_id = ?",
+        (company_id,),
+    ).fetchone()[0]
+    pass_count   = conn.execute(
+        """SELECT COUNT(*) FROM qual_executions e
+           JOIN qual_test_cases t ON t.id = e.test_case_id
+           JOIN qual_qualifications q ON q.id = t.qual_id
+           WHERE e.result='pass' AND q.company_id = ?""",
+        (company_id,),
+    ).fetchone()[0]
+    fail_count   = conn.execute(
+        """SELECT COUNT(*) FROM qual_executions e
+           JOIN qual_test_cases t ON t.id = e.test_case_id
+           JOIN qual_qualifications q ON q.id = t.qual_id
+           WHERE e.result='fail' AND q.company_id = ?""",
+        (company_id,),
+    ).fetchone()[0]
+    open_devs    = conn.execute(
+        """SELECT COUNT(*) FROM qual_deviations d
+           JOIN qual_qualifications q ON q.id = d.qual_id
+           WHERE d.status='open' AND q.company_id = ?""",
+        (company_id,),
+    ).fetchone()[0]
     pending_approvals = conn.execute(
-        "SELECT COUNT(*) FROM qual_qualifications WHERE status IN ('under_review','pending_approval')"
+        "SELECT COUNT(*) FROM qual_qualifications WHERE status IN ('under_review','pending_approval') AND company_id = ?",
+        (company_id,),
     ).fetchone()[0]
 
     recent = conn.execute(
         """SELECT id, qual_number, title, equipment_name, status, iq_status, oq_status, pq_status, created_at
-           FROM qual_qualifications ORDER BY created_at DESC LIMIT 8"""
+           FROM qual_qualifications WHERE company_id = ? ORDER BY created_at DESC LIMIT 8""",
+        (company_id,),
     ).fetchall()
     conn.close()
 

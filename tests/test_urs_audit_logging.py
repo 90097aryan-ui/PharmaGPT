@@ -89,7 +89,7 @@ def test_docx_export_logs_download_failed_on_generation_error(client, monkeypatc
 
 
 def test_generation_logs_started_and_completed(db_path, monkeypatch):
-    urs = udb.create_urs({"title": "Audit Generation Test", "equipment_name": "Autoclave"})
+    urs = udb.create_urs({"title": "Audit Generation Test", "equipment_name": "Autoclave"}, company_id="test-company-1")
 
     def fake_generate_content(model, contents, config):
         return _FakeResponse(_req_json("Functional Requirements"))
@@ -121,7 +121,7 @@ def test_generation_logs_started_and_completed(db_path, monkeypatch):
 
 
 def test_generation_logs_failed_when_every_batch_errors(db_path, monkeypatch):
-    urs = udb.create_urs({"title": "Audit Generation Failure Test", "equipment_name": "X"})
+    urs = udb.create_urs({"title": "Audit Generation Failure Test", "equipment_name": "X"}, company_id="test-company-1")
 
     def fake_generate_content(model, contents, config):
         raise RuntimeError("Gemini is down")

@@ -56,7 +56,8 @@ from pharmagpt import qms_change_control_database as ccdb
 from pharmagpt import qms_deviation_database as ddb
 from pharmagpt import qms_capa_database as cdb
 from pharmagpt import qms_database as qmsdb
-from pharmagpt.auth.decorators import extract_bearer_token
+from pharmagpt import tenancy
+from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import qms_repo
 from pharmagpt.services import qms_change_control_service as svc
 
@@ -140,15 +141,17 @@ def list_change_controls():
         "department": request.args.get("department"),
         "keyword": request.args.get("q"),
     }
-    return jsonify(ccdb.get_all_change_controls({k: v for k, v in filters.items() if v}))
+    return jsonify(ccdb.get_all_change_controls(g.tenant.company_id, {k: v for k, v in filters.items() if v}))
 
 
 @bp.route("", methods=["POST"])
 def create_change_control():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     data = request.get_json() or {}
     if not data.get("title", "").strip():
         return jsonify({"error": "Change control title is required"}), 400
-    cc = ccdb.create_change_control(data)
+    cc = ccdb.create_change_control(data, company_id=g.tenant.company_id)
     qmsdb.add_audit_entry("change_control", cc["id"], "Change control drafted", data.get("requested_by", ""))
     _dual_write_create(cc, "Change control drafted", data.get("requested_by", ""))
     return jsonify(cc), 201
@@ -156,7 +159,7 @@ def create_change_control():
 
 @bp.route("/<int:cc_id>", methods=["GET"])
 def get_change_control(cc_id):
-    cc = ccdb.get_change_control(cc_id)
+    cc = tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id)
     if not cc:
         return jsonify({"error": "Not found"}), 404
     return jsonify(cc)
@@ -164,7 +167,7 @@ def get_change_control(cc_id):
 
 @bp.route("/<int:cc_id>", methods=["PUT"])
 def update_change_control(cc_id):
-    if not ccdb.get_change_control(cc_id):
+    if not tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     updated = ccdb.update_change_control(cc_id, data)
@@ -173,8 +176,9 @@ def update_change_control(cc_id):
 
 
 @bp.route("/<int:cc_id>", methods=["DELETE"])
+@require_role("company_admin")
 def delete_change_control(cc_id):
-    existing = ccdb.get_change_control(cc_id)
+    existing = tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id)
     if not existing:
         return jsonify({"error": "Not found"}), 404
     ccdb.delete_change_control(cc_id)
@@ -186,21 +190,21 @@ def delete_change_control(cc_id):
 
 @bp.route("/<int:cc_id>/suggest-impact", methods=["POST"])
 def suggest_impact(cc_id):
-    if not ccdb.get_change_control(cc_id):
+    if not tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(svc.ai_suggest_impact(cc_id))
 
 
 @bp.route("/<int:cc_id>/impact", methods=["GET"])
 def get_impacts(cc_id):
-    if not ccdb.get_change_control(cc_id):
+    if not tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(ccdb.get_impacts(cc_id))
 
 
 @bp.route("/<int:cc_id>/impact", methods=["POST"])
 def add_impact(cc_id):
-    if not ccdb.get_change_control(cc_id):
+    if not tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     entry = ccdb.add_impact(cc_id, data)
@@ -211,21 +215,21 @@ def add_impact(cc_id):
 
 @bp.route("/<int:cc_id>/suggest-implementation-plan", methods=["POST"])
 def suggest_implementation_plan(cc_id):
-    if not ccdb.get_change_control(cc_id):
+    if not tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(svc.ai_suggest_implementation_plan(cc_id))
 
 
 @bp.route("/<int:cc_id>/actions", methods=["GET"])
 def get_actions(cc_id):
-    if not ccdb.get_change_control(cc_id):
+    if not tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(ccdb.get_actions(cc_id))
 
 
 @bp.route("/<int:cc_id>/actions", methods=["POST"])
 def upsert_action(cc_id):
-    if not ccdb.get_change_control(cc_id):
+    if not tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     action = ccdb.upsert_action(cc_id, data)
@@ -260,11 +264,11 @@ for _path, _fn in _NARRATIVE_ENDPOINTS.items():
 
 @bp.route("/<int:cc_id>/link-deviation", methods=["POST"])
 def link_deviation(cc_id):
-    if not ccdb.get_change_control(cc_id):
+    if not tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     deviation_id = data.get("deviation_id")
-    deviation = deviation_id and ddb.get_deviation(deviation_id)
+    deviation = deviation_id and tenancy.scoped_or_none(ddb.get_deviation(deviation_id), g.tenant.company_id)
     if not deviation:
         return jsonify({"error": "Valid deviation_id is required"}), 400
     link = ccdb.link_record(cc_id, "deviation", deviation_id)
@@ -274,11 +278,11 @@ def link_deviation(cc_id):
 
 @bp.route("/<int:cc_id>/link-capa", methods=["POST"])
 def link_capa(cc_id):
-    if not ccdb.get_change_control(cc_id):
+    if not tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     capa_id = data.get("capa_id")
-    capa = capa_id and cdb.get_capa(capa_id)
+    capa = capa_id and tenancy.scoped_or_none(cdb.get_capa(capa_id), g.tenant.company_id)
     if not capa:
         return jsonify({"error": "Valid capa_id is required"}), 400
     link = ccdb.link_record(cc_id, "capa", capa_id)
@@ -288,7 +292,7 @@ def link_capa(cc_id):
 
 @bp.route("/<int:cc_id>/deviations", methods=["GET"])
 def get_linked_deviations(cc_id):
-    if not ccdb.get_change_control(cc_id):
+    if not tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     links = ccdb.get_linked_records(cc_id, "deviation")
     return jsonify([ddb.get_deviation(l["linked_id"]) for l in links if ddb.get_deviation(l["linked_id"])])
@@ -296,7 +300,7 @@ def get_linked_deviations(cc_id):
 
 @bp.route("/<int:cc_id>/capas", methods=["GET"])
 def get_linked_capas(cc_id):
-    if not ccdb.get_change_control(cc_id):
+    if not tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     links = ccdb.get_linked_records(cc_id, "capa")
     return jsonify([cdb.get_capa(l["linked_id"]) for l in links if cdb.get_capa(l["linked_id"])])
@@ -321,8 +325,9 @@ _STATUS_MAP = {
 
 
 @bp.route("/<int:cc_id>/approval", methods=["POST"])
+@require_role("company_admin", "reviewer_qa")
 def submit_approval(cc_id):
-    cc = ccdb.get_change_control(cc_id)
+    cc = tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id)
     if not cc:
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
@@ -330,13 +335,15 @@ def submit_approval(cc_id):
     if not action_name:
         return jsonify({"error": "Action is required"}), 400
 
+    sig = tenancy.signing_identity(g.tenant)
+
     updates = {}
     if action_name in _STATUS_MAP:
         updates["status"] = _STATUS_MAP[action_name]
     if action_name == "Submitted for QA Review":
-        updates["qa_reviewer"] = data.get("performed_by", cc.get("qa_reviewer", ""))
+        updates["qa_reviewer"] = sig["performed_by"]
     if action_name == "Approved":
-        updates["approver"] = data.get("performed_by", cc.get("approver", ""))
+        updates["approver"] = sig["performed_by"]
     if action_name == "Implementation Complete":
         updates["implementation_date"] = data.get("effective_date", "")
     if action_name == "Verified":
@@ -348,10 +355,10 @@ def submit_approval(cc_id):
 
     entry = qmsdb.add_approval_entry(
         "change_control", cc_id, action_name,
-        data.get("performed_by", ""), data.get("role", ""),
-        data.get("comments", ""), data.get("electronic_sig", ""),
+        sig["performed_by"], sig["role"],
+        data.get("comments", ""), sig["electronic_sig"],
     )
-    qmsdb.add_audit_entry("change_control", cc_id, action_name, data.get("performed_by", ""))
+    qmsdb.add_audit_entry("change_control", cc_id, action_name, sig["performed_by"])
     return jsonify(entry), 201
 
 
@@ -359,7 +366,7 @@ def submit_approval(cc_id):
 
 @bp.route("/<int:cc_id>/report", methods=["GET"])
 def get_report(cc_id):
-    cc = ccdb.get_change_control(cc_id)
+    cc = tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id)
     if not cc:
         return jsonify({"error": "Not found"}), 404
     md = svc.generate_report_markdown(cc_id)
@@ -368,7 +375,7 @@ def get_report(cc_id):
 
 @bp.route("/<int:cc_id>/export/docx", methods=["POST"])
 def export_docx(cc_id):
-    cc = ccdb.get_change_control(cc_id)
+    cc = tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id)
     if not cc:
         return jsonify({"error": "Not found"}), 404
     from pharmagpt.services.doc_exporter import markdown_to_docx

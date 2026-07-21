@@ -16,7 +16,7 @@ def _make_project(**overrides):
         department="QC", validation_type="IQ/OQ/PQ",
     )
     defaults.update(overrides)
-    return db.create_project(**defaults)
+    return db.create_project(**defaults, company_id="test-company-1")
 
 
 def test_create_and_get_equipment(db_path):
@@ -97,15 +97,15 @@ def test_search_equipment(db_path):
     equipdb.create_equipment(project["id"], {"name": "HPLC System 1", "manufacturer": "Agilent"})
     equipdb.create_equipment(project["id"], {"name": "Autoclave", "manufacturer": "Getinge"})
 
-    results = equipdb.search_equipment("Agilent")
+    results = equipdb.search_equipment("Agilent", "test-company-1")
     assert len(results) == 1
     assert results[0]["name"] == "HPLC System 1"
 
-    results_scoped = equipdb.search_equipment("Agilent", project_id=project["id"])
+    results_scoped = equipdb.search_equipment("Agilent", "test-company-1", project_id=project["id"])
     assert len(results_scoped) == 1
 
     other_project = _make_project(name="Other")
-    results_wrong_scope = equipdb.search_equipment("Agilent", project_id=other_project["id"])
+    results_wrong_scope = equipdb.search_equipment("Agilent", "test-company-1", project_id=other_project["id"])
     assert len(results_wrong_scope) == 0
 
 
@@ -124,7 +124,7 @@ def test_import_legacy_equipment_creates_prefilled_record(db_path):
 def test_import_legacy_equipment_no_legacy_data_returns_none(db_path):
     project = db.create_project(
         name="Blank Project", equipment_name="", manufacturer="", department="", validation_type="",
-    )
+    company_id="test-company-1")
     assert equipdb.import_legacy_equipment(project["id"]) is None
 
 
@@ -141,8 +141,7 @@ def test_link_and_list_equipment_documents(db_path):
         doc_version="1.0", effective_date=None, review_date=None,
         original_name="manual.pdf", stored_filename="manual.pdf",
         file_type="pdf", file_size=1024,
-    )
-
+    company_id="test-company-1")
     link = equipdb.link_equipment_document(equipment["id"], "user_manual", "kb", kb_doc["id"], "HPLC User Manual")
     assert link["document_role"] == "user_manual"
 

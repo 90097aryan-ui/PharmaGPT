@@ -20,13 +20,15 @@ from google.genai import types
 
 # ── AI generation ──────────────────────────────────────────────────────────────
 
-def generate_risk_items(info: dict) -> list[dict]:
-    """Call Gemini to generate risk items for the given assessment info."""
+def generate_risk_items(info: dict, company_id: str) -> list[dict]:
+    """Call Gemini to generate risk items for the given assessment info.
+    `company_id` must come from the authenticated TenantContext, never from
+    client input (pharmagpt/tenancy.py)."""
     methodology = info.get("methodology", "FMEA")
 
     # Pull relevant library entries as context
     category = rdb._type_to_category(info.get("assessment_type", ""))
-    library_entries = rdb.get_library(category=category, keyword=info.get("equipment", ""))
+    library_entries = rdb.get_library(company_id, category=category, keyword=info.get("equipment", ""))
     lib_context = _format_library_context(library_entries[:5])
 
     prompt = rp.get_generation_prompt(methodology, info, lib_context)

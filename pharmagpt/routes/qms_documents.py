@@ -39,10 +39,12 @@ POST   /qms/documents/<id>/export/docx       DOCX export
 import io
 import json
 import re
-from flask import Blueprint, jsonify, request, Response, stream_with_context, send_file
+from flask import Blueprint, g, jsonify, request, Response, stream_with_context, send_file
 
 from pharmagpt import qms_document_database as qdb
 from pharmagpt import qms_database as qmsdb
+from pharmagpt import tenancy
+from pharmagpt.auth.decorators import require_role
 from pharmagpt.services import qms_document_service as svc
 from pharmagpt.services.qms_shared import stream_gemini
 from pharmagpt.prompts import qms_document_prompt as qp
@@ -61,22 +63,24 @@ def list_documents():
         "category": request.args.get("category"),
         "keyword": request.args.get("q"),
     }
-    return jsonify(qdb.get_all_documents({k: v for k, v in filters.items() if v}))
+    return jsonify(qdb.get_all_documents(g.tenant.company_id, {k: v for k, v in filters.items() if v}))
 
 
 @bp.route("", methods=["POST"])
 def create_document():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     data = request.get_json() or {}
     if not data.get("title", "").strip():
         return jsonify({"error": "Document title is required"}), 400
-    document = qdb.create_document(data)
+    document = qdb.create_document(data, company_id=g.tenant.company_id)
     qmsdb.add_audit_entry("document", document["id"], "Document created", data.get("owner", ""))
     return jsonify(document), 201
 
 
 @bp.route("/<int:did>", methods=["GET"])
 def get_document(did):
-    d = qdb.get_document(did)
+    d = tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
     if not d:
         return jsonify({"error": "Not found"}), 404
     return jsonify(d)
@@ -84,7 +88,7 @@ def get_document(did):
 
 @bp.route("/<int:did>", methods=["PUT"])
 def update_document(did):
-    if not qdb.get_document(did):
+    if not tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     updated = qdb.update_document(did, data)
@@ -92,8 +96,9 @@ def update_document(did):
 
 
 @bp.route("/<int:did>", methods=["DELETE"])
+@require_role("company_admin")
 def delete_document(did):
-    if not qdb.get_document(did):
+    if not tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     qdb.delete_document(did)
     return jsonify({"deleted": True})
@@ -105,7 +110,7 @@ def delete_document(did):
 def generate_draft(did):
     """Stream AI-generated document content as SSE events, then persist it."""
     body = request.get_json() or {}
-    document = qdb.get_document(did)
+    document = tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
     if not document:
         return jsonify({"error": "Not found"}), 404
 
@@ -134,7 +139,7 @@ def generate_draft(did):
 
 @bp.route("/<int:did>/review", methods=["POST"])
 def review_document(did):
-    if not qdb.get_document(did):
+    if not tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     review = svc.ai_review_document(did)
     return jsonify(review)
@@ -144,14 +149,14 @@ def review_document(did):
 
 @bp.route("/<int:did>/versions", methods=["GET"])
 def get_versions(did):
-    if not qdb.get_document(did):
+    if not tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(qdb.get_versions(did))
 
 
 @bp.route("/<int:did>/versions", methods=["POST"])
 def create_version(did):
-    document = qdb.get_document(did)
+    document = tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
     if not document:
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
@@ -171,14 +176,14 @@ def create_version(did):
 
 @bp.route("/<int:did>/distribution", methods=["GET"])
 def get_distribution(did):
-    if not qdb.get_document(did):
+    if not tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(qdb.get_distribution(did))
 
 
 @bp.route("/<int:did>/distribution", methods=["POST"])
 def add_distribution(did):
-    if not qdb.get_document(did):
+    if not tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     entry = qdb.add_distribution(did, data)
@@ -198,14 +203,14 @@ def acknowledge_distribution(dist_id):
 
 @bp.route("/<int:did>/training", methods=["GET"])
 def get_training(did):
-    if not qdb.get_document(did):
+    if not tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(qdb.get_training(did))
 
 
 @bp.route("/<int:did>/training", methods=["POST"])
 def add_training(did):
-    if not qdb.get_document(did):
+    if not tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     entry = qdb.add_training(did, data)
@@ -235,8 +240,9 @@ _STATUS_MAP = {
 
 
 @bp.route("/<int:did>/approval", methods=["POST"])
+@require_role("company_admin", "reviewer_qa")
 def submit_approval(did):
-    document = qdb.get_document(did)
+    document = tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
     if not document:
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
@@ -247,12 +253,13 @@ def submit_approval(did):
     if action_name in _STATUS_MAP:
         qdb.update_document(did, {"status": _STATUS_MAP[action_name]})
 
+    sig = tenancy.signing_identity(g.tenant)
     entry = qmsdb.add_approval_entry(
         "document", did, action_name,
-        data.get("performed_by", ""), data.get("role", ""),
-        data.get("comments", ""), data.get("electronic_sig", ""),
+        sig["performed_by"], sig["role"],
+        data.get("comments", ""), sig["electronic_sig"],
     )
-    qmsdb.add_audit_entry("document", did, action_name, data.get("performed_by", ""))
+    qmsdb.add_audit_entry("document", did, action_name, sig["performed_by"])
     return jsonify(entry), 201
 
 
@@ -260,7 +267,7 @@ def submit_approval(did):
 
 @bp.route("/<int:did>/report", methods=["GET"])
 def get_report(did):
-    document = qdb.get_document(did)
+    document = tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
     if not document:
         return jsonify({"error": "Not found"}), 404
     md = svc.generate_report_markdown(did)
@@ -269,7 +276,7 @@ def get_report(did):
 
 @bp.route("/<int:did>/export/docx", methods=["POST"])
 def export_docx(did):
-    document = qdb.get_document(did)
+    document = tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
     if not document:
         return jsonify({"error": "Not found"}), 404
     from pharmagpt.services.doc_exporter import markdown_to_docx

@@ -100,14 +100,17 @@ def test_dual_write_create_failure_does_not_break_response(client, authed, monke
     assert db.get_project(project_id)["postgres_id"] is None
 
 
-def test_dual_write_skips_super_admin_with_no_company(client, monkeypatch):
+def test_super_admin_cannot_create_project(client, monkeypatch):
+    """Super Admin has no standing access to tenant content (PLATFORM_ARCHITECTURE.md
+    §7) — this is enforced before the SQLite write, let alone the Postgres
+    dual-write, so there is nothing left for Postgres to skip."""
     monkeypatch.setattr(config, "PROJECTS_BACKEND", "dual")
     with patch(
         "pharmagpt.auth.middleware.resolve_tenant_context", return_value=SUPER_ADMIN_TENANT
     ), patch("pharmagpt.routes.projects.projects_repo.create_project") as mock_create:
         resp = client.post("/projects", json=_create_payload(), headers=AUTH_HEADERS)
 
-    assert resp.status_code == 201
+    assert resp.status_code == 403
     mock_create.assert_not_called()
 
 

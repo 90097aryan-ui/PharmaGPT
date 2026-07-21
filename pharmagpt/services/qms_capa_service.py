@@ -36,10 +36,12 @@ def ai_suggest_effectiveness(capa_id: int) -> list[dict]:
     return parse_json_response(response_text, default=[])
 
 
-def ai_trend_summary() -> str:
-    """Quality Trend Summary across recent CAPAs and Deviations, for the unified QMS dashboard."""
-    capas = cdb.get_all_capas()
-    deviations = ddb.get_all_deviations()
+def ai_trend_summary(company_id: str) -> str:
+    """Quality Trend Summary across recent CAPAs and Deviations, for the
+    unified QMS dashboard. `company_id` must come from the authenticated
+    TenantContext, never from client input (pharmagpt/tenancy.py)."""
+    capas = cdb.get_all_capas(company_id)
+    deviations = ddb.get_all_deviations(company_id)
     prompt = cp.build_trend_prompt(capas, deviations)
     text = call_gemini(prompt, temperature=0.3)
     return text or "Trend summary unavailable."

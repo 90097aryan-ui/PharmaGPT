@@ -18,15 +18,17 @@ from pharmagpt.qms_database import generate_deviation_number
 
 # ── Deviations ─────────────────────────────────────────────────────────────────
 
-def create_deviation(data: dict) -> dict:
+def create_deviation(data: dict, *, company_id: str) -> dict:
+    """`company_id` must be the caller's authenticated tenant
+    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py."""
     conn = get_connection()
     deviation_number = data.get("deviation_number") or generate_deviation_number()
     cur = conn.execute(
         """INSERT INTO qms_deviations
            (deviation_number, title, deviation_type, deviation_category, department, area,
             product, batch_lot, equipment, project_id, date_of_occurrence, date_reported,
-            initiated_by, description, immediate_action, status, risk_level, form_data)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            initiated_by, description, immediate_action, status, risk_level, form_data, company_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             deviation_number,
             data.get("title", "Untitled Deviation").strip() or "Untitled Deviation",
@@ -46,6 +48,7 @@ def create_deviation(data: dict) -> dict:
             data.get("status", "Initiated"),
             data.get("risk_level", ""),
             json.dumps(data.get("form_data", {})),
+            company_id,
         ),
     )
     conn.commit()
@@ -66,9 +69,13 @@ def get_deviation(deviation_id: int) -> dict | None:
     return d
 
 
-def get_all_deviations(filters: dict | None = None) -> list[dict]:
+def get_all_deviations(company_id: str | None = None, filters: dict | None = None) -> list[dict]:
+    """`company_id` must come from the authenticated TenantContext, never
+    from client input (pharmagpt/tenancy.py). `company_id=None` is reserved
+    for offline backfill/parity scripts (service-role key, not a live
+    request); every live route must always pass a company_id."""
     conn = get_connection()
-    clauses, params = [], []
+    clauses, params = ([], []) if company_id is None else (["company_id = ?"], [company_id])
     if filters:
         for field in ("deviation_type", "deviation_category", "status", "department"):
             val = filters.get(field)
@@ -142,9 +149,14 @@ def set_deviation_postgres_id(deviation_id: int, postgres_id: str) -> None:
     conn.close()
 
 
-def get_dashboard_stats() -> dict:
+def get_dashboard_stats(company_id: str) -> dict:
+    """`company_id` must come from the authenticated TenantContext, never
+    from client input (pharmagpt/tenancy.py)."""
     conn = get_connection()
-    rows = conn.execute("SELECT status, deviation_type, deviation_category, created_at FROM qms_deviations").fetchall()
+    rows = conn.execute(
+        "SELECT status, deviation_type, deviation_category, created_at FROM qms_deviations WHERE company_id = ?",
+        (company_id,),
+    ).fetchall()
     stats = {"total": len(rows), "open": 0, "closed": 0, "by_type": {}, "by_category": {}, "by_status": {}}
     for r in rows:
         d = dict(r)
@@ -162,13 +174,16 @@ def get_dashboard_stats() -> dict:
     trend = conn.execute(
         """SELECT strftime('%Y-%m', created_at) AS month, COUNT(*) AS cnt
            FROM qms_deviations
-           WHERE created_at >= date('now', '-6 months')
-           GROUP BY month ORDER BY month ASC"""
+           WHERE created_at >= date('now', '-6 months') AND company_id = ?
+           GROUP BY month ORDER BY month ASC""",
+        (company_id,),
     ).fetchall()
     stats["monthly_trend"] = [dict(r) for r in trend]
 
     recent = conn.execute(
-        "SELECT id, deviation_number, title, deviation_type, status, created_at FROM qms_deviations ORDER BY created_at DESC LIMIT 5"
+        "SELECT id, deviation_number, title, deviation_type, status, created_at FROM qms_deviations "
+        "WHERE company_id = ? ORDER BY created_at DESC LIMIT 5",
+        (company_id,),
     ).fetchall()
     stats["recent"] = [dict(r) for r in recent]
     conn.close()

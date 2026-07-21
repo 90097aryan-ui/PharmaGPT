@@ -16,7 +16,9 @@ from pharmagpt.database import get_connection
 
 # ── Assessments ───────────────────────────────────────────────────────────────
 
-def create_assessment(data: dict) -> dict:
+def create_assessment(data: dict, *, company_id: str) -> dict:
+    """`company_id` must be the caller's authenticated tenant
+    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py."""
     conn = get_connection()
     with conn:
         cur = conn.execute(
@@ -25,8 +27,8 @@ def create_assessment(data: dict) -> dict:
                 department, area, equipment, product, process,
                 protocol_reference, change_control_reference,
                 assessment_owner, reviewer, approver, assessment_date,
-                revision, status, priority, reason_for_assessment, form_data)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                revision, status, priority, reason_for_assessment, form_data, company_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 data.get("title", "Untitled Assessment"),
                 data.get("assessment_type", ""),
@@ -48,6 +50,7 @@ def create_assessment(data: dict) -> dict:
                 data.get("priority", "Medium"),
                 data.get("reason_for_assessment", ""),
                 json.dumps(data.get("form_data", {})),
+                company_id,
             ),
         )
         new_id = cur.lastrowid
@@ -68,10 +71,13 @@ def get_assessment(assessment_id: int) -> dict | None:
     return d
 
 
-def get_all_assessments(filters: dict | None = None) -> list[dict]:
+def get_all_assessments(company_id: str | None = None, filters: dict | None = None) -> list[dict]:
+    """`company_id` must come from the authenticated TenantContext, never
+    from client input (pharmagpt/tenancy.py). `company_id=None` is reserved
+    for offline backfill/parity scripts (service-role key, not a live
+    request); every live route must always pass a company_id."""
     conn = get_connection()
-    where_clauses = []
-    params = []
+    where_clauses, params = ([], []) if company_id is None else (["company_id = ?"], [company_id])
     if filters:
         for field in ("assessment_type", "methodology", "status", "priority", "department"):
             val = filters.get(field)
@@ -146,9 +152,14 @@ def set_assessment_postgres_id(assessment_id: int, postgres_id: str) -> None:
         )
 
 
-def get_dashboard_stats() -> dict:
+def get_dashboard_stats(company_id: str) -> dict:
+    """`company_id` must come from the authenticated TenantContext, never
+    from client input (pharmagpt/tenancy.py)."""
     conn = get_connection()
-    rows = conn.execute("SELECT status, priority, COUNT(*) as cnt FROM risk_assessments GROUP BY status, priority").fetchall()
+    rows = conn.execute(
+        "SELECT status, priority, COUNT(*) as cnt FROM risk_assessments WHERE company_id = ? GROUP BY status, priority",
+        (company_id,),
+    ).fetchall()
 
     stats = {
         "total": 0, "draft": 0, "in_review": 0, "approved": 0, "closed": 0,
@@ -156,7 +167,7 @@ def get_dashboard_stats() -> dict:
         "by_type": {}, "by_department": {},
     }
 
-    all_rows = conn.execute("SELECT * FROM risk_assessments").fetchall()
+    all_rows = conn.execute("SELECT * FROM risk_assessments WHERE company_id = ?", (company_id,)).fetchall()
     stats["total"] = len(all_rows)
 
     for row in all_rows:
@@ -174,19 +185,27 @@ def get_dashboard_stats() -> dict:
 
     # High RPN items
     high_rpn = conn.execute(
-        "SELECT COUNT(*) as cnt FROM risk_items WHERE rpn >= 100 AND status != 'Closed'"
+        """SELECT COUNT(*) as cnt FROM risk_items i
+           JOIN risk_assessments a ON a.id = i.assessment_id
+           WHERE i.rpn >= 100 AND i.status != 'Closed' AND a.company_id = ?""",
+        (company_id,),
     ).fetchone()
     stats["high_rpn"] = high_rpn["cnt"] if high_rpn else 0
 
     # Pending actions
     pending = conn.execute(
-        "SELECT COUNT(*) as cnt FROM risk_actions WHERE status IN ('Pending','In Progress')"
+        """SELECT COUNT(*) as cnt FROM risk_actions r
+           JOIN risk_assessments a ON a.id = r.assessment_id
+           WHERE r.status IN ('Pending','In Progress') AND a.company_id = ?""",
+        (company_id,),
     ).fetchone()
     stats["pending_actions"] = pending["cnt"] if pending else 0
 
     # Recent assessments
     recent = conn.execute(
-        "SELECT id, title, assessment_type, status, priority, created_at FROM risk_assessments ORDER BY created_at DESC LIMIT 5"
+        "SELECT id, title, assessment_type, status, priority, created_at FROM risk_assessments "
+        "WHERE company_id = ? ORDER BY created_at DESC LIMIT 5",
+        (company_id,),
     ).fetchall()
     stats["recent"] = [dict(r) for r in recent]
 
@@ -284,11 +303,17 @@ def save_items(assessment_id: int, items: list[dict]) -> list[dict]:
 
 # ── Risk Library ──────────────────────────────────────────────────────────────
 
-def get_library(category: str = None, keyword: str = None) -> list[dict]:
+def get_library(company_id: str, category: str = None, keyword: str = None) -> list[dict]:
+    """`company_id` must come from the authenticated TenantContext, never
+    from client input (pharmagpt/tenancy.py) — risk_library entries are
+    populated from a company's own approved assessments (see
+    publish_assessment_to_library) and can contain that company's specific
+    equipment/process names, so this catalog must not be shared across
+    companies despite being a "library"."""
     conn = get_connection()
     sql = "SELECT * FROM risk_library"
-    params = []
-    clauses = []
+    params = [company_id]
+    clauses = ["company_id = ?"]
     if category:
         clauses.append("category = ?")
         params.append(category)
@@ -302,7 +327,9 @@ def get_library(category: str = None, keyword: str = None) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def add_library_entry(data: dict) -> dict:
+def add_library_entry(data: dict, *, company_id: str) -> dict:
+    """`company_id` must be the caller's authenticated tenant
+    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py."""
     conn = get_connection()
     with conn:
         cur = conn.execute(
@@ -310,8 +337,9 @@ def add_library_entry(data: dict) -> dict:
                (category, subcategory, assessment_type, methodology, process_step,
                 failure_mode, failure_effect, potential_cause, current_controls,
                 recommended_action, typical_severity, typical_occurrence,
-                typical_detection, typical_rpn, regulatory_reference, source_assessment_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                typical_detection, typical_rpn, regulatory_reference, source_assessment_id,
+                company_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 data.get("category", "General"),
                 data.get("subcategory", ""),
@@ -329,6 +357,7 @@ def add_library_entry(data: dict) -> dict:
                 data.get("typical_rpn"),
                 data.get("regulatory_reference", ""),
                 data.get("source_assessment_id"),
+                company_id,
             ),
         )
         new_id = cur.lastrowid
@@ -361,7 +390,7 @@ def publish_assessment_to_library(assessment_id: int) -> int:
                 "typical_detection": item.get("detection"),
                 "typical_rpn": item.get("rpn"),
                 "source_assessment_id": assessment_id,
-            })
+            }, company_id=assessment["company_id"])
             count += 1
     return count
 

@@ -15,7 +15,7 @@ def test_backfill_kb_documents_migrates_and_records_postgres_id(db_path):
         title="SOP-1", folder="SOP", tags="quality,sop", doc_version="1.0",
         effective_date=None, review_date=None, original_name="sop1.pdf",
         stored_filename="stored1.pdf", file_type="pdf", file_size=1024,
-    )
+    company_id="test-company-1")
     db.update_kb_document_text(kb_doc["id"], "extracted text here", 3, 1, "ok")
 
     responses = iter([
@@ -60,7 +60,7 @@ def test_backfill_kb_documents_skips_already_migrated(db_path):
         title="SOP-1", folder="SOP", tags="", doc_version="1.0",
         effective_date=None, review_date=None, original_name="sop1.pdf",
         stored_filename="stored1.pdf", file_type="pdf", file_size=1024,
-    )
+    company_id="test-company-1")
     db.set_kb_document_postgres_id(kb_doc["id"], "already-there")
 
     client = MagicMock()

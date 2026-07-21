@@ -21,7 +21,7 @@ def _query_mock(execute_return):
 
 
 def _project():
-    return db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ")
+    return db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ", company_id="test-company-1")
 
 
 def test_check_parity_skips_equipment_never_migrated(db_path):

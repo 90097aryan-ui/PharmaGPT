@@ -10,6 +10,7 @@ unchanged by the re-sourcing.
 
 from pharmagpt import database as db
 from pharmagpt import qms_database
+from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID
 
 
 def test_create_project_accepts_merged_fields(db_path):
@@ -19,7 +20,7 @@ def test_create_project_accepts_merged_fields(db_path):
         owner="Jane Doe", approver="John Smith", target_date="2026-12-01",
         risk_category="High", status="In Progress", model="1260 Infinity",
         location="Lab 3", protocol_number="PRO-001", report_number="REP-001",
-    )
+    company_id="test-company-1")
     assert project["owner"] == "Jane Doe"
     assert project["target_date"] == "2026-12-01"
     assert project["status"] == "In Progress"
@@ -34,7 +35,7 @@ def test_create_project_backward_compatible_without_merged_fields(db_path):
     project = db.create_project(
         name="Legacy Project", equipment_name="GC", manufacturer="Shimadzu",
         department="QC", validation_type="OQ",
-    )
+    company_id="test-company-1")
     assert project["owner"] == ""
     assert project["target_date"] is None
     assert project["status"] == "In Progress"
@@ -44,7 +45,7 @@ def test_update_project_merged_fields(db_path):
     project = db.create_project(
         name="Autoclave PQ", equipment_name="Autoclave", manufacturer="Getinge",
         department="Sterile", validation_type="PQ",
-    )
+    company_id="test-company-1")
     updated = db.update_project(project["id"], {
         "name": "Autoclave PQ", "equipment_name": "Autoclave", "manufacturer": "Getinge",
         "department": "Sterile", "validation_type": "PQ",
@@ -124,7 +125,7 @@ def test_migrate_val_projects_is_idempotent(db_path):
 
 
 def test_dashboard_stats_shape_unchanged(db_path):
-    stats = db.get_dashboard_stats()
+    stats = db.get_dashboard_stats("test-company-1")
     assert set(stats.keys()) == {
         "counts", "recent_projects", "recent_conversations", "recent_activity",
         "upcoming_reviews", "upcoming_validations", "system_health",
@@ -137,10 +138,13 @@ def test_dashboard_stats_shape_unchanged(db_path):
 
 
 def test_dashboard_stats_val_projects_count_reflects_migrated_and_dated_projects(db_path):
+    # Legacy-migrated rows always land on BOOTSTRAP_COMPANY_ID (see
+    # _migrate_val_projects) — use the same company here so all three
+    # projects are visible in one company-scoped dashboard query.
     db.create_project(name="Plain project", equipment_name="", manufacturer="",
-                       department="", validation_type="")
+                       department="", validation_type="", company_id=BOOTSTRAP_COMPANY_ID)
     db.create_project(name="Dated project", equipment_name="", manufacturer="",
-                       department="", validation_type="", target_date="2027-06-01")
+                       department="", validation_type="", target_date="2027-06-01", company_id=BOOTSTRAP_COMPANY_ID)
 
     conn = db.get_connection()
     conn.execute("INSERT INTO val_projects (name) VALUES ('Legacy')")
@@ -148,7 +152,7 @@ def test_dashboard_stats_val_projects_count_reflects_migrated_and_dated_projects
     db._migrate_val_projects(conn)
     conn.close()
 
-    stats = db.get_dashboard_stats()
+    stats = db.get_dashboard_stats(BOOTSTRAP_COMPANY_ID)
     # Plain project (no target_date, not migrated) must NOT count; the other two must.
     assert stats["counts"]["val_projects"] == 2
     assert stats["counts"]["projects"] == 3

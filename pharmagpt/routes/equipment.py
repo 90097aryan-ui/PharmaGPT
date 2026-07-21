@@ -25,7 +25,8 @@ from flask import Blueprint, g, jsonify, request
 from pharmagpt import config
 from pharmagpt import database as db
 from pharmagpt import equipment_database as equipdb
-from pharmagpt.auth.decorators import extract_bearer_token
+from pharmagpt import tenancy
+from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import equipment_repo
 from pharmagpt.services import equipment_service
 
@@ -127,14 +128,14 @@ def _dual_write_unlink(link: dict) -> None:
 
 @bp.route("/projects/<int:project_id>/equipment", methods=["GET"])
 def list_project_equipment(project_id):
-    if not db.get_project(project_id):
+    if not tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id):
         return jsonify({"error": "Project not found"}), 404
     return jsonify(equipdb.get_project_equipment(project_id))
 
 
 @bp.route("/projects/<int:project_id>/equipment", methods=["POST"])
 def create_equipment(project_id):
-    if not db.get_project(project_id):
+    if not tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id):
         return jsonify({"error": "Project not found"}), 404
 
     data = request.get_json() or {}
@@ -150,7 +151,7 @@ def create_equipment(project_id):
 def import_legacy_equipment(project_id):
     """Create an Equipment record pre-filled from this project's legacy
     equipment_name/manufacturer/model/equipment_id free-text fields."""
-    if not db.get_project(project_id):
+    if not tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id):
         return jsonify({"error": "Project not found"}), 404
 
     equipment = equipdb.import_legacy_equipment(project_id)
@@ -168,7 +169,7 @@ def search_equipment():
     if not query:
         return jsonify([])
     project_id = request.args.get("project_id", type=int)
-    return jsonify(equipdb.search_equipment(query, project_id))
+    return jsonify(equipdb.search_equipment(query, g.tenant.company_id, project_id))
 
 
 @bp.route("/equipment/types", methods=["GET"])
@@ -182,7 +183,7 @@ def equipment_types():
 
 @bp.route("/equipment/<int:equipment_id>", methods=["GET"])
 def get_equipment(equipment_id):
-    equipment = equipdb.get_equipment(equipment_id)
+    equipment = equipdb.get_equipment_scoped(equipment_id, g.tenant.company_id)
     if not equipment:
         return jsonify({"error": "Equipment not found"}), 404
     return jsonify(equipment)
@@ -190,7 +191,7 @@ def get_equipment(equipment_id):
 
 @bp.route("/equipment/<int:equipment_id>", methods=["PUT"])
 def update_equipment(equipment_id):
-    if not equipdb.get_equipment(equipment_id):
+    if not equipdb.get_equipment_scoped(equipment_id, g.tenant.company_id):
         return jsonify({"error": "Equipment not found"}), 404
     data = request.get_json() or {}
     if "name" in data and not (data.get("name") or "").strip():
@@ -201,8 +202,9 @@ def update_equipment(equipment_id):
 
 
 @bp.route("/equipment/<int:equipment_id>", methods=["DELETE"])
+@require_role("company_admin")
 def delete_equipment(equipment_id):
-    existing = equipdb.get_equipment(equipment_id)
+    existing = equipdb.get_equipment_scoped(equipment_id, g.tenant.company_id)
     if not existing:
         return jsonify({"error": "Equipment not found"}), 404
     equipdb.delete_equipment(equipment_id)
@@ -214,14 +216,14 @@ def delete_equipment(equipment_id):
 
 @bp.route("/equipment/<int:equipment_id>/documents", methods=["GET"])
 def list_equipment_documents(equipment_id):
-    if not equipdb.get_equipment(equipment_id):
+    if not equipdb.get_equipment_scoped(equipment_id, g.tenant.company_id):
         return jsonify({"error": "Equipment not found"}), 404
     return jsonify(equipdb.list_equipment_documents(equipment_id))
 
 
 @bp.route("/equipment/<int:equipment_id>/documents", methods=["POST"])
 def link_equipment_document(equipment_id):
-    if not equipdb.get_equipment(equipment_id):
+    if not equipdb.get_equipment_scoped(equipment_id, g.tenant.company_id):
         return jsonify({"error": "Equipment not found"}), 404
 
     data = request.get_json() or {}
@@ -236,8 +238,15 @@ def link_equipment_document(equipment_id):
     if not source_id:
         return jsonify({"error": "source_id is required"}), 400
 
-    # Verify the referenced document actually exists before linking.
-    source_doc = db.get_kb_document(source_id) if source_type == "kb" else db.get_document(source_id)
+    # Verify the referenced document actually exists AND belongs to this
+    # tenant before linking — otherwise a caller could link another
+    # company's kb/project document into their own equipment record.
+    if source_type == "kb":
+        source_doc = tenancy.scoped_or_none(db.get_kb_document(source_id), g.tenant.company_id)
+    else:
+        doc = db.get_document(source_id)
+        owning_project = tenancy.scoped_or_none(db.get_project(doc["project_id"]), g.tenant.company_id) if doc else None
+        source_doc = doc if owning_project else None
     if not source_doc:
         return jsonify({"error": "Referenced document not found"}), 404
 
@@ -248,8 +257,9 @@ def link_equipment_document(equipment_id):
 
 
 @bp.route("/equipment/<int:equipment_id>/documents/<int:link_id>", methods=["DELETE"])
+@require_role("company_admin")
 def unlink_equipment_document(equipment_id, link_id):
-    if not equipdb.get_equipment(equipment_id):
+    if not equipdb.get_equipment_scoped(equipment_id, g.tenant.company_id):
         return jsonify({"error": "Equipment not found"}), 404
     existing_link = equipdb.get_equipment_document_link(link_id)
     equipdb.unlink_equipment_document(link_id)
@@ -262,6 +272,8 @@ def unlink_equipment_document(equipment_id, link_id):
 
 @bp.route("/equipment/<int:equipment_id>/ai-context", methods=["GET"])
 def equipment_ai_context(equipment_id):
+    if not equipdb.get_equipment_scoped(equipment_id, g.tenant.company_id):
+        return jsonify({"error": "Equipment not found"}), 404
     bundle = equipment_service.get_equipment_context_bundle(equipment_id)
     if not bundle:
         return jsonify({"error": "Equipment not found"}), 404

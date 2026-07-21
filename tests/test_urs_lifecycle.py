@@ -75,11 +75,16 @@ def test_reviewed_by_approved_by_effective_date_start_blank_at_creation(client):
 
 
 def test_prepared_by_defaults_to_client_value_when_no_tenant_present(client):
-    """The `client` fixture bypasses auth entirely (no g.tenant) — this
-    documents the fallback behavior tests rely on, distinct from the
-    real-auth-derived case covered in test_urs_docx_download_auth.py."""
+    """The `client` fixture bypasses real auth, but tests/conftest.py's
+    tenant-scoping shim still fills in a fixed fake tenant (needed so
+    company_id-scoped routes work at all) — so prepared_by is derived from
+    that fake tenant's display name, exactly as it would be for any real
+    authenticated request, never the client-supplied value. The true
+    client-value fallback (truly no tenant at all) is no longer a reachable
+    state once every route requires g.tenant — see
+    test_urs_docx_download_auth.py for the real-auth-derived case."""
     urs = _make_urs(client, prepared_by="Manual Name")
-    assert urs["prepared_by"] == "Manual Name"
+    assert urs["prepared_by"] == "Test User"
 
 
 # ── PUT no longer accepts system-controlled fields (priority 3, 4, 5) ──────
@@ -108,9 +113,9 @@ def test_put_silently_ignores_system_controlled_fields_but_keeps_others(client):
 # ── Lifecycle transition enforcement (priority 3) ───────────────────────────
 
 def test_create_urs_ignores_client_supplied_approved_status(db_path):
-    """Belt-and-braces at the DB layer too: even calling udb.create_urs()
+    """Belt-and-braces at the DB layer too: even calling udb.create_urs(company_id="test-company-1")
     directly with status='approved' in the payload must not bypass Draft."""
-    urs = udb.create_urs({"title": "Direct DB Bypass Attempt", "status": "approved"})
+    urs = udb.create_urs({"title": "Direct DB Bypass Attempt", "status": "approved"}, company_id="test-company-1")
     assert urs["status"] == "draft"
 
 
@@ -139,7 +144,10 @@ def test_approval_valid_transition_sequence_reaches_approved(client):
         "action": "Review Complete", "performed_by": "QA Reviewer", "role": "QA",
     })
     assert r2.status_code == 201
-    assert udb.get_urs(uid)["reviewed_by"] == "QA Reviewer"
+    # reviewed_by is derived from the authenticated tenant (tests/conftest.py's
+    # fake tenant, display_name="Test User"), never the client-supplied
+    # performed_by — see routes/urs.py's e-signature-safe design.
+    assert udb.get_urs(uid)["reviewed_by"] == "Test User"
 
     r3 = client.post(f"/urs/{uid}/approval", json={
         "action": "Approved", "performed_by": "QA Manager", "role": "QA Manager",
@@ -147,7 +155,7 @@ def test_approval_valid_transition_sequence_reaches_approved(client):
     assert r3.status_code == 201
     final = udb.get_urs(uid)
     assert final["status"] == "approved"
-    assert final["approved_by"] == "QA Manager"
+    assert final["approved_by"] == "Test User"
 
 
 def test_rejecting_a_previously_approved_document_bumps_revision(client):
@@ -197,9 +205,14 @@ def test_obsolete_only_reachable_from_effective(client):
 
 
 def test_approval_requires_performed_by(client):
+    """performed_by is derived from the authenticated tenant, so an
+    authenticated request always has one — the 400 branch exists only for
+    the (now-unreachable-in-production) case where no tenant is present at
+    all, which the global auth gate prevents from ever reaching a route."""
     urs = _make_urs(client)
     resp = client.post(f"/urs/{urs['id']}/approval", json={"action": "Submitted for Review"})
-    assert resp.status_code == 400
+    assert resp.status_code == 201
+    assert udb.get_urs(urs["id"])["status"] == "under_review"
 
 
 # ── urs_lifecycle module unit tests ─────────────────────────────────────────

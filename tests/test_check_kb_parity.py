@@ -24,7 +24,7 @@ def test_check_parity_skips_documents_never_migrated(db_path):
         title="SOP-1", folder="SOP", tags="", doc_version="1.0",
         effective_date=None, review_date=None, original_name="sop1.pdf",
         stored_filename="stored1.pdf", file_type="pdf", file_size=1024,
-    )
+    company_id="test-company-1")
     client = MagicMock()
 
     drifted = check_kb_parity(client)
@@ -38,7 +38,7 @@ def test_check_parity_flags_missing_in_postgres(db_path):
         title="SOP-1", folder="SOP", tags="", doc_version="1.0",
         effective_date=None, review_date=None, original_name="sop1.pdf",
         stored_filename="stored1.pdf", file_type="pdf", file_size=1024,
-    )
+    company_id="test-company-1")
     db.set_kb_document_postgres_id(kb_doc["id"], "pg-doc-1")
 
     client = MagicMock()
@@ -55,7 +55,7 @@ def test_check_parity_passes_when_folder_and_status_match(db_path):
         title="SOP-1", folder="SOP", tags="", doc_version="1.0",
         effective_date=None, review_date=None, original_name="sop1.pdf",
         stored_filename="stored1.pdf", file_type="pdf", file_size=1024,
-    )
+    company_id="test-company-1")
     db.set_kb_document_postgres_id(kb_doc["id"], "pg-doc-1")
 
     client = MagicMock()
@@ -73,7 +73,7 @@ def test_check_parity_flags_folder_drift(db_path):
         title="SOP-1", folder="SOP", tags="", doc_version="1.0",
         effective_date=None, review_date=None, original_name="sop1.pdf",
         stored_filename="stored1.pdf", file_type="pdf", file_size=1024,
-    )
+    company_id="test-company-1")
     db.set_kb_document_postgres_id(kb_doc["id"], "pg-doc-1")
 
     client = MagicMock()
@@ -92,7 +92,7 @@ def test_check_parity_flags_unexpected_status(db_path):
         title="SOP-1", folder="SOP", tags="", doc_version="1.0",
         effective_date=None, review_date=None, original_name="sop1.pdf",
         stored_filename="stored1.pdf", file_type="pdf", file_size=1024,
-    )
+    company_id="test-company-1")
     db.set_kb_document_postgres_id(kb_doc["id"], "pg-doc-1")
 
     client = MagicMock()

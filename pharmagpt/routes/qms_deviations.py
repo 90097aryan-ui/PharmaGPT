@@ -43,7 +43,8 @@ from pharmagpt import database as db
 from pharmagpt import qms_deviation_database as ddb
 from pharmagpt import qms_capa_database as cdb
 from pharmagpt import qms_database as qmsdb
-from pharmagpt.auth.decorators import extract_bearer_token
+from pharmagpt import tenancy
+from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import qms_repo
 from pharmagpt.services import qms_deviation_service as svc
 
@@ -129,15 +130,17 @@ def list_deviations():
         "department": request.args.get("department"),
         "keyword": request.args.get("q"),
     }
-    return jsonify(ddb.get_all_deviations({k: v for k, v in filters.items() if v}))
+    return jsonify(ddb.get_all_deviations(g.tenant.company_id, {k: v for k, v in filters.items() if v}))
 
 
 @bp.route("", methods=["POST"])
 def create_deviation():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     data = request.get_json() or {}
     if not data.get("title", "").strip():
         return jsonify({"error": "Deviation title is required"}), 400
-    deviation = ddb.create_deviation(data)
+    deviation = ddb.create_deviation(data, company_id=g.tenant.company_id)
     qmsdb.add_audit_entry("deviation", deviation["id"], "Deviation initiated", data.get("initiated_by", ""))
     _dual_write_create(deviation, "Deviation initiated", data.get("initiated_by", ""))
     return jsonify(deviation), 201
@@ -145,7 +148,7 @@ def create_deviation():
 
 @bp.route("/<int:did>", methods=["GET"])
 def get_deviation(did):
-    d = ddb.get_deviation(did)
+    d = tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id)
     if not d:
         return jsonify({"error": "Not found"}), 404
     return jsonify(d)
@@ -153,7 +156,7 @@ def get_deviation(did):
 
 @bp.route("/<int:did>", methods=["PUT"])
 def update_deviation(did):
-    if not ddb.get_deviation(did):
+    if not tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     updated = ddb.update_deviation(did, data)
@@ -162,8 +165,9 @@ def update_deviation(did):
 
 
 @bp.route("/<int:did>", methods=["DELETE"])
+@require_role("company_admin")
 def delete_deviation(did):
-    existing = ddb.get_deviation(did)
+    existing = tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id)
     if not existing:
         return jsonify({"error": "Not found"}), 404
     ddb.delete_deviation(did)
@@ -175,7 +179,7 @@ def delete_deviation(did):
 
 @bp.route("/<int:did>/investigate", methods=["POST"])
 def run_investigation(did):
-    if not ddb.get_deviation(did):
+    if not tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     investigation = svc.ai_run_investigation(did)
     qmsdb.add_audit_entry("deviation", did, "AI investigation run")
@@ -184,7 +188,7 @@ def run_investigation(did):
 
 @bp.route("/<int:did>/investigation", methods=["GET"])
 def get_investigation(did):
-    if not ddb.get_deviation(did):
+    if not tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     investigation = ddb.get_investigation(did)
     return jsonify(investigation or {})
@@ -192,7 +196,7 @@ def get_investigation(did):
 
 @bp.route("/<int:did>/investigation", methods=["PUT"])
 def update_investigation(did):
-    if not ddb.get_deviation(did):
+    if not tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     return jsonify(ddb.upsert_investigation(did, data))
@@ -202,21 +206,21 @@ def update_investigation(did):
 
 @bp.route("/<int:did>/suggest-impact", methods=["POST"])
 def suggest_impact(did):
-    if not ddb.get_deviation(did):
+    if not tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(svc.ai_suggest_impact(did))
 
 
 @bp.route("/<int:did>/impact", methods=["GET"])
 def get_impacts(did):
-    if not ddb.get_deviation(did):
+    if not tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(ddb.get_impacts(did))
 
 
 @bp.route("/<int:did>/impact", methods=["POST"])
 def add_impact(did):
-    if not ddb.get_deviation(did):
+    if not tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     entry = ddb.add_impact(did, data)
@@ -227,28 +231,29 @@ def add_impact(did):
 
 @bp.route("/<int:did>/suggest-capa", methods=["POST"])
 def suggest_capa(did):
-    if not ddb.get_deviation(did):
+    if not tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(svc.ai_suggest_capa(did))
 
 
 @bp.route("/<int:did>/link-capa", methods=["POST"])
 def link_capa(did):
-    if not ddb.get_deviation(did):
+    if not tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     capa_id = data.get("capa_id")
-    if not capa_id or not cdb.get_capa(capa_id):
+    capa = tenancy.scoped_or_none(cdb.get_capa(capa_id), g.tenant.company_id) if capa_id else None
+    if not capa:
         return jsonify({"error": "Valid capa_id is required"}), 400
     link = ddb.link_capa(did, capa_id)
     ddb.update_deviation(did, {"status": "CAPA Assigned"})
-    qmsdb.add_audit_entry("deviation", did, "Linked to CAPA", detail=cdb.get_capa(capa_id).get("capa_number", ""))
+    qmsdb.add_audit_entry("deviation", did, "Linked to CAPA", detail=capa.get("capa_number", ""))
     return jsonify(link), 201
 
 
 @bp.route("/<int:did>/capas", methods=["GET"])
 def get_linked_capas(did):
-    if not ddb.get_deviation(did):
+    if not tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(ddb.get_linked_capas(did))
 
@@ -269,8 +274,9 @@ _STATUS_MAP = {
 
 
 @bp.route("/<int:did>/approval", methods=["POST"])
+@require_role("company_admin", "reviewer_qa")
 def submit_approval(did):
-    deviation = ddb.get_deviation(did)
+    deviation = tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id)
     if not deviation:
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
@@ -278,24 +284,26 @@ def submit_approval(did):
     if not action_name:
         return jsonify({"error": "Action is required"}), 400
 
+    sig = tenancy.signing_identity(g.tenant)
+
     updates = {}
     if action_name in _STATUS_MAP:
         updates["status"] = _STATUS_MAP[action_name]
     if action_name == "Closed":
         updates["closure_date"] = data.get("closure_date", "")
     if action_name == "Submitted for QA Review":
-        updates["qa_reviewer"] = data.get("performed_by", deviation.get("qa_reviewer", ""))
+        updates["qa_reviewer"] = sig["performed_by"]
     if action_name == "Approved":
-        updates["approver"] = data.get("performed_by", deviation.get("approver", ""))
+        updates["approver"] = sig["performed_by"]
     if updates:
         ddb.update_deviation(did, updates)
 
     entry = qmsdb.add_approval_entry(
         "deviation", did, action_name,
-        data.get("performed_by", ""), data.get("role", ""),
-        data.get("comments", ""), data.get("electronic_sig", ""),
+        sig["performed_by"], sig["role"],
+        data.get("comments", ""), sig["electronic_sig"],
     )
-    qmsdb.add_audit_entry("deviation", did, action_name, data.get("performed_by", ""))
+    qmsdb.add_audit_entry("deviation", did, action_name, sig["performed_by"])
     return jsonify(entry), 201
 
 
@@ -303,7 +311,7 @@ def submit_approval(did):
 
 @bp.route("/<int:did>/report", methods=["GET"])
 def get_report(did):
-    deviation = ddb.get_deviation(did)
+    deviation = tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id)
     if not deviation:
         return jsonify({"error": "Not found"}), 404
     md = svc.generate_report_markdown(did)
@@ -312,7 +320,7 @@ def get_report(did):
 
 @bp.route("/<int:did>/export/docx", methods=["POST"])
 def export_docx(did):
-    deviation = ddb.get_deviation(did)
+    deviation = tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id)
     if not deviation:
         return jsonify({"error": "Not found"}), 404
     from pharmagpt.services.doc_exporter import markdown_to_docx

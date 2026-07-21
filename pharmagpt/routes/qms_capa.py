@@ -44,7 +44,8 @@ from pharmagpt import database as db
 from pharmagpt import qms_capa_database as cdb
 from pharmagpt import qms_deviation_database as ddb
 from pharmagpt import qms_database as qmsdb
-from pharmagpt.auth.decorators import extract_bearer_token
+from pharmagpt import tenancy
+from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import qms_repo
 from pharmagpt.services import qms_capa_service as svc
 
@@ -127,15 +128,17 @@ def list_capas():
         "department": request.args.get("department"),
         "keyword": request.args.get("q"),
     }
-    return jsonify(cdb.get_all_capas({k: v for k, v in filters.items() if v}))
+    return jsonify(cdb.get_all_capas(g.tenant.company_id, {k: v for k, v in filters.items() if v}))
 
 
 @bp.route("", methods=["POST"])
 def create_capa():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     data = request.get_json() or {}
     if not data.get("title", "").strip():
         return jsonify({"error": "CAPA title is required"}), 400
-    capa = cdb.create_capa(data)
+    capa = cdb.create_capa(data, company_id=g.tenant.company_id)
     qmsdb.add_audit_entry("capa", capa["id"], "CAPA created", data.get("initiated_by", ""))
     _dual_write_create(capa, "CAPA created", data.get("initiated_by", ""))
     return jsonify(capa), 201
@@ -143,12 +146,12 @@ def create_capa():
 
 @bp.route("/trend-summary", methods=["GET"])
 def trend_summary():
-    return jsonify({"summary": svc.ai_trend_summary()})
+    return jsonify({"summary": svc.ai_trend_summary(g.tenant.company_id)})
 
 
 @bp.route("/<int:cid>", methods=["GET"])
 def get_capa(cid):
-    c = cdb.get_capa(cid)
+    c = tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id)
     if not c:
         return jsonify({"error": "Not found"}), 404
     return jsonify(c)
@@ -156,7 +159,7 @@ def get_capa(cid):
 
 @bp.route("/<int:cid>", methods=["PUT"])
 def update_capa(cid):
-    if not cdb.get_capa(cid):
+    if not tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     updated = cdb.update_capa(cid, data)
@@ -165,8 +168,9 @@ def update_capa(cid):
 
 
 @bp.route("/<int:cid>", methods=["DELETE"])
+@require_role("company_admin")
 def delete_capa(cid):
-    existing = cdb.get_capa(cid)
+    existing = tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id)
     if not existing:
         return jsonify({"error": "Not found"}), 404
     cdb.delete_capa(cid)
@@ -178,14 +182,14 @@ def delete_capa(cid):
 
 @bp.route("/<int:cid>/suggest-draft", methods=["POST"])
 def suggest_draft(cid):
-    if not cdb.get_capa(cid):
+    if not tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(svc.ai_suggest_draft(cid))
 
 
 @bp.route("/<int:cid>/suggest-effectiveness", methods=["POST"])
 def suggest_effectiveness(cid):
-    if not cdb.get_capa(cid):
+    if not tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(svc.ai_suggest_effectiveness(cid))
 
@@ -194,14 +198,14 @@ def suggest_effectiveness(cid):
 
 @bp.route("/<int:cid>/actions", methods=["GET"])
 def get_actions(cid):
-    if not cdb.get_capa(cid):
+    if not tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(cdb.get_actions(cid))
 
 
 @bp.route("/<int:cid>/actions", methods=["POST"])
 def upsert_action(cid):
-    if not cdb.get_capa(cid):
+    if not tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     action = cdb.upsert_action(cid, data)
@@ -221,14 +225,14 @@ def escalate_action(aid):
 
 @bp.route("/<int:cid>/effectiveness", methods=["GET"])
 def get_effectiveness(cid):
-    if not cdb.get_capa(cid):
+    if not tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(cdb.get_effectiveness(cid))
 
 
 @bp.route("/<int:cid>/effectiveness", methods=["POST"])
 def upsert_effectiveness(cid):
-    if not cdb.get_capa(cid):
+    if not tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     entry = cdb.upsert_effectiveness(cid, data)
@@ -239,7 +243,7 @@ def upsert_effectiveness(cid):
 
 @bp.route("/<int:cid>/deviations", methods=["GET"])
 def get_linked_deviations(cid):
-    if not cdb.get_capa(cid):
+    if not tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(ddb.get_linked_deviations(cid))
 
@@ -259,8 +263,9 @@ _STATUS_MAP = {
 
 
 @bp.route("/<int:cid>/approval", methods=["POST"])
+@require_role("company_admin", "reviewer_qa")
 def submit_approval(cid):
-    capa = cdb.get_capa(cid)
+    capa = tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id)
     if not capa:
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
@@ -268,24 +273,26 @@ def submit_approval(cid):
     if not action_name:
         return jsonify({"error": "Action is required"}), 400
 
+    sig = tenancy.signing_identity(g.tenant)
+
     updates = {}
     if action_name in _STATUS_MAP:
         updates["status"] = _STATUS_MAP[action_name]
     if action_name == "Closed":
         updates["closure_date"] = data.get("closure_date", "")
     if action_name == "Submitted for QA Review":
-        updates["qa_reviewer"] = data.get("performed_by", capa.get("qa_reviewer", ""))
+        updates["qa_reviewer"] = sig["performed_by"]
     if action_name == "Closed":
-        updates["approver"] = data.get("performed_by", capa.get("approver", ""))
+        updates["approver"] = sig["performed_by"]
     if updates:
         cdb.update_capa(cid, updates)
 
     entry = qmsdb.add_approval_entry(
         "capa", cid, action_name,
-        data.get("performed_by", ""), data.get("role", ""),
-        data.get("comments", ""), data.get("electronic_sig", ""),
+        sig["performed_by"], sig["role"],
+        data.get("comments", ""), sig["electronic_sig"],
     )
-    qmsdb.add_audit_entry("capa", cid, action_name, data.get("performed_by", ""))
+    qmsdb.add_audit_entry("capa", cid, action_name, sig["performed_by"])
     return jsonify(entry), 201
 
 
@@ -293,7 +300,7 @@ def submit_approval(cid):
 
 @bp.route("/<int:cid>/report", methods=["GET"])
 def get_report(cid):
-    capa = cdb.get_capa(cid)
+    capa = tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id)
     if not capa:
         return jsonify({"error": "Not found"}), 404
     md = svc.generate_report_markdown(cid)
@@ -302,7 +309,7 @@ def get_report(cid):
 
 @bp.route("/<int:cid>/export/docx", methods=["POST"])
 def export_docx(cid):
-    capa = cdb.get_capa(cid)
+    capa = tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id)
     if not capa:
         return jsonify({"error": "Not found"}), 404
     from pharmagpt.services.doc_exporter import markdown_to_docx

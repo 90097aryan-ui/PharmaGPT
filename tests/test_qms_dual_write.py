@@ -218,14 +218,17 @@ def test_risk_assessment_dual_write_disabled_by_default(client, authed, monkeypa
     mock_create.assert_not_called()
 
 
-def test_risk_assessment_dual_write_skips_super_admin(client, monkeypatch):
+def test_super_admin_cannot_create_risk_assessment(client, monkeypatch):
+    """Super Admin has no standing access to tenant content (PLATFORM_ARCHITECTURE.md
+    §7) — this is enforced before the SQLite write, let alone the Postgres
+    dual-write, so there is nothing left for Postgres to skip."""
     monkeypatch.setattr(config, "QMS_BACKEND", "dual")
     with patch(
         "pharmagpt.auth.middleware.resolve_tenant_context", return_value=SUPER_ADMIN_TENANT
     ), patch("pharmagpt.routes.risk.qms_repo.create_record") as mock_create:
         resp = client.post("/risk/assessments", json={"title": "Risk 1"}, headers=AUTH_HEADERS)
 
-    assert resp.status_code == 201
+    assert resp.status_code == 403
     mock_create.assert_not_called()
 
 

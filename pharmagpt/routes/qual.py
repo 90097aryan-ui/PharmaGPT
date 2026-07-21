@@ -48,9 +48,11 @@ GET    /qual/<id>/traceability/export/docx           Export traceability matrix 
 
 import json
 import io
-from flask import Blueprint, jsonify, request, Response, stream_with_context, send_file
+from flask import Blueprint, g, jsonify, request, Response, stream_with_context, send_file
 
 from pharmagpt import qual_database as qdb
+from pharmagpt import tenancy
+from pharmagpt.auth.decorators import require_role
 from pharmagpt.services import qual_service as svc
 from pharmagpt.state import gemini_client
 from pharmagpt.config import GEMINI_MODEL
@@ -65,7 +67,7 @@ bp = Blueprint("qual", __name__, url_prefix="/qual")
 
 @bp.route("/dashboard")
 def dashboard():
-    return jsonify(qdb.get_dashboard_stats())
+    return jsonify(qdb.get_dashboard_stats(g.tenant.company_id))
 
 
 # ── Qualification CRUD ────────────────────────────────────────────────────────
@@ -82,23 +84,25 @@ def list_qualifications():
         "pq_status":      request.args.get("pq_status"),
         "keyword":        request.args.get("q"),
     }
-    return jsonify(qdb.get_all_qualifications({k: v for k, v in filters.items() if v}))
+    return jsonify(qdb.get_all_qualifications(g.tenant.company_id, {k: v for k, v in filters.items() if v}))
 
 
 @bp.route("/", methods=["POST"])
 def create_qualification():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     data = request.get_json() or {}
     if not data.get("equipment_name", "").strip() and not data.get("title", "").strip():
         return jsonify({"error": "Equipment name or title is required"}), 400
     if not data.get("title", "").strip():
         data["title"] = f"Qualification — {data.get('equipment_name', 'New Equipment')}"
-    qual = qdb.create_qualification(data)
+    qual = qdb.create_qualification(data, company_id=g.tenant.company_id)
     return jsonify(qual), 201
 
 
 @bp.route("/<int:qid>", methods=["GET"])
 def get_qualification(qid):
-    qual = qdb.get_qualification(qid)
+    qual = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
     if not qual:
         return jsonify({"error": "Qualification not found"}), 404
     return jsonify(qual)
@@ -106,7 +110,7 @@ def get_qualification(qid):
 
 @bp.route("/<int:qid>", methods=["PUT"])
 def update_qualification(qid):
-    if not qdb.get_qualification(qid):
+    if not tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id):
         return jsonify({"error": "Qualification not found"}), 404
     data = request.get_json() or {}
     updated = qdb.update_qualification(qid, data)
@@ -114,8 +118,9 @@ def update_qualification(qid):
 
 
 @bp.route("/<int:qid>", methods=["DELETE"])
+@require_role("company_admin")
 def delete_qualification(qid):
-    if not qdb.get_qualification(qid):
+    if not tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id):
         return jsonify({"error": "Qualification not found"}), 404
     qdb.delete_qualification(qid)
     return jsonify({"deleted": True})
@@ -125,14 +130,14 @@ def delete_qualification(qid):
 
 @bp.route("/<int:qid>/protocols", methods=["GET"])
 def get_protocols(qid):
-    if not qdb.get_qualification(qid):
+    if not tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id):
         return jsonify({"error": "Qualification not found"}), 404
     return jsonify(qdb.get_protocols_for_qual(qid))
 
 
 @bp.route("/<int:qid>/protocols", methods=["POST"])
 def create_protocol(qid):
-    qual = qdb.get_qualification(qid)
+    qual = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
     if not qual:
         return jsonify({"error": "Qualification not found"}), 404
     data = request.get_json() or {}
@@ -165,6 +170,7 @@ def update_protocol(qid, pid):
 
 
 @bp.route("/<int:qid>/protocols/<int:pid>", methods=["DELETE"])
+@require_role("company_admin")
 def delete_protocol(qid, pid):
     protocol = qdb.get_protocol(pid)
     if not protocol or protocol.get("qual_id") != qid:
@@ -213,6 +219,7 @@ def update_test_case(qid, pid, tcid):
 
 
 @bp.route("/<int:qid>/protocols/<int:pid>/test-cases/<int:tcid>", methods=["DELETE"])
+@require_role("company_admin")
 def delete_test_case(qid, pid, tcid):
     qdb.delete_test_case(tcid)
     return jsonify({"deleted": True})
@@ -223,7 +230,7 @@ def delete_test_case(qid, pid, tcid):
 @bp.route("/<int:qid>/protocols/<int:pid>/generate", methods=["POST"])
 def generate_test_cases(qid, pid):
     """Stream AI-generated test cases for IQ/OQ/PQ protocol."""
-    qual = qdb.get_qualification(qid)
+    qual = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
     if not qual:
         return jsonify({"error": "Qualification not found"}), 404
     protocol = qdb.get_protocol(pid)
@@ -318,7 +325,7 @@ def generate_test_cases(qid, pid):
 
 @bp.route("/<int:qid>/protocols/<int:pid>/review", methods=["POST"])
 def review_protocol(qid, pid):
-    qual = qdb.get_qualification(qid)
+    qual = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
     if not qual:
         return jsonify({"error": "Qualification not found"}), 404
     protocol = qdb.get_protocol(pid)
@@ -381,7 +388,7 @@ def execute_test_case(qid, pid, tcid):
     result = qdb.save_execution(tcid, pid, qid, data)
 
     # Auto-update protocol status to in_progress
-    qual = qdb.get_qualification(qid)
+    qual = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
     if qual:
         ptype = protocol.get("protocol_type", "IQ").lower()
         status_field = f"{ptype}_status"
@@ -423,7 +430,7 @@ def complete_protocol(qid, pid):
     qdb.update_protocol(pid, {"status": overall_status})
 
     # Update qualification phase status
-    qual = qdb.get_qualification(qid)
+    qual = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
     if qual:
         ptype = protocol.get("protocol_type", "IQ").lower()
         updates = {f"{ptype}_status": overall_status}
@@ -449,14 +456,14 @@ def complete_protocol(qid, pid):
 
 @bp.route("/<int:qid>/deviations", methods=["GET"])
 def get_deviations(qid):
-    if not qdb.get_qualification(qid):
+    if not tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id):
         return jsonify({"error": "Qualification not found"}), 404
     return jsonify(qdb.get_deviations(qid))
 
 
 @bp.route("/<int:qid>/deviations", methods=["POST"])
 def create_deviation(qid):
-    if not qdb.get_qualification(qid):
+    if not tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id):
         return jsonify({"error": "Qualification not found"}), 404
     data = request.get_json() or {}
     dev = qdb.create_deviation(qid, data)
@@ -476,21 +483,21 @@ def update_deviation(qid, did):
 
 @bp.route("/<int:qid>/approval", methods=["GET"])
 def get_approval(qid):
-    if not qdb.get_qualification(qid):
+    if not tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id):
         return jsonify({"error": "Qualification not found"}), 404
     return jsonify(qdb.get_approval_trail(qid))
 
 
 @bp.route("/<int:qid>/approval", methods=["POST"])
+@require_role("company_admin", "reviewer_qa")
 def add_approval(qid):
-    qual = qdb.get_qualification(qid)
+    qual = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
     if not qual:
         return jsonify({"error": "Qualification not found"}), 404
     data = request.get_json() or {}
     action = data.get("action", "")
-    performed_by = data.get("performed_by", "")
-    if not action or not performed_by:
-        return jsonify({"error": "action and performed_by are required"}), 400
+    if not action:
+        return jsonify({"error": "action is required"}), 400
 
     # Status transitions
     status_map = {
@@ -505,13 +512,14 @@ def add_approval(qid):
     if action in status_map:
         qdb.update_qualification(qid, {"status": status_map[action]})
 
+    sig = tenancy.signing_identity(g.tenant)
     entry = qdb.add_approval_entry(
         qid, data.get("protocol_id"),
-        action, performed_by,
-        data.get("role", ""),
+        action, sig["performed_by"],
+        sig["role"],
         data.get("comments", ""),
         qual.get("revision", "A"),
-        data.get("electronic_sig", ""),
+        sig["electronic_sig"],
     )
     return jsonify(entry), 201
 
@@ -520,7 +528,7 @@ def add_approval(qid):
 
 @bp.route("/<int:qid>/versions", methods=["GET"])
 def get_versions(qid):
-    if not qdb.get_qualification(qid):
+    if not tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id):
         return jsonify({"error": "Qualification not found"}), 404
     return jsonify(qdb.get_versions(qid))
 
@@ -539,7 +547,7 @@ def create_version(qid, pid):
 
 @bp.route("/<int:qid>/traceability", methods=["GET"])
 def get_traceability(qid):
-    qual = qdb.get_qualification(qid)
+    qual = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
     if not qual:
         return jsonify({"error": "Qualification not found"}), 404
 
@@ -568,7 +576,7 @@ def get_traceability(qid):
 
 @bp.route("/<int:qid>/traceability/export/docx", methods=["GET", "POST"])
 def export_traceability_docx(qid):
-    qual = qdb.get_qualification(qid)
+    qual = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
     if not qual:
         return jsonify({"error": "Qualification not found"}), 404
 
@@ -615,7 +623,7 @@ def export_traceability_docx(qid):
 
 @bp.route("/<int:qid>/protocols/<int:pid>/export/docx", methods=["GET", "POST"])
 def export_protocol_docx(qid, pid):
-    qual = qdb.get_qualification(qid)
+    qual = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
     if not qual:
         return jsonify({"error": "Qualification not found"}), 404
     protocol = qdb.get_protocol(pid)

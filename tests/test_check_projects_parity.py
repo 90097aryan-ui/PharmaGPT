@@ -37,7 +37,7 @@ def _query_mock(execute_return):
 
 
 def test_check_parity_skips_projects_never_migrated(db_path):
-    db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ")
+    db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ", company_id="test-company-1")
     client = MagicMock()
 
     drifted = check_projects_parity(client)
@@ -47,7 +47,7 @@ def test_check_parity_skips_projects_never_migrated(db_path):
 
 
 def test_check_parity_flags_missing_in_postgres(db_path):
-    project = db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ")
+    project = db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ", company_id="test-company-1")
     db.set_project_postgres_id(project["id"], "pg-a")
 
     client = MagicMock()
@@ -65,7 +65,7 @@ def test_check_parity_passes_when_fields_match(db_path):
         "Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ",
         status="Approved", risk_category="High",
         protocol_number="PROT-1", report_number="REP-1",
-    )
+    company_id="test-company-1")
     db.set_project_postgres_id(project["id"], "pg-a")
 
     client = MagicMock()
@@ -81,7 +81,7 @@ def test_check_parity_passes_when_fields_match(db_path):
 
 
 def test_check_parity_flags_name_drift(db_path):
-    project = db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ")
+    project = db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ", company_id="test-company-1")
     db.set_project_postgres_id(project["id"], "pg-a")
 
     client = MagicMock()
@@ -98,7 +98,7 @@ def test_check_parity_flags_name_drift(db_path):
 
 
 def test_check_parity_treats_none_and_empty_string_as_equal(db_path):
-    project = db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ")
+    project = db.create_project("Proj A", "HPLC", "Agilent", "QC", "IQ/OQ/PQ", company_id="test-company-1")
     db.set_project_postgres_id(project["id"], "pg-a")
 
     client = MagicMock()

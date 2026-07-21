@@ -8,7 +8,7 @@ GET /dashboard/validation-score   average validation score across reviewed docum
 """
 
 from pharmagpt import database as db
-from flask import Blueprint, jsonify
+from flask import Blueprint, g, jsonify
 from pharmagpt.review import get_avg_score, get_score_cache
 
 bp = Blueprint("dashboard", __name__)
@@ -16,8 +16,8 @@ bp = Blueprint("dashboard", __name__)
 
 @bp.route("/dashboard/stats", methods=["GET"])
 def dashboard_stats():
-    """Return aggregated system-wide statistics for the Home Dashboard."""
-    return jsonify(db.get_dashboard_stats())
+    """Return aggregated statistics for the Home Dashboard, scoped to the caller's company."""
+    return jsonify(db.get_dashboard_stats(g.tenant.company_id))
 
 
 @bp.route("/dashboard/validation-score", methods=["GET"])

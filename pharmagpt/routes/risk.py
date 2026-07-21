@@ -39,7 +39,8 @@ from flask import Blueprint, g, jsonify, request, Response, stream_with_context
 
 from pharmagpt import config
 from pharmagpt import risk_database as rdb
-from pharmagpt.auth.decorators import extract_bearer_token
+from pharmagpt import tenancy
+from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import qms_repo
 from pharmagpt.services import risk_service as svc
 from pharmagpt.state import gemini_client
@@ -113,7 +114,7 @@ def _dual_write_delete(assessment: dict) -> None:
 
 @bp.route("/dashboard")
 def dashboard():
-    return jsonify(rdb.get_dashboard_stats())
+    return jsonify(rdb.get_dashboard_stats(g.tenant.company_id))
 
 
 # ── Assessments ───────────────────────────────────────────────────────────────
@@ -128,15 +129,17 @@ def list_assessments():
         "department": request.args.get("department"),
         "keyword": request.args.get("q"),
     }
-    return jsonify(rdb.get_all_assessments({k: v for k, v in filters.items() if v}))
+    return jsonify(rdb.get_all_assessments(g.tenant.company_id, {k: v for k, v in filters.items() if v}))
 
 
 @bp.route("/assessments", methods=["POST"])
 def create_assessment():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     data = request.get_json() or {}
     if not data.get("title", "").strip():
         return jsonify({"error": "Assessment title is required"}), 400
-    assessment = rdb.create_assessment(data)
+    assessment = rdb.create_assessment(data, company_id=g.tenant.company_id)
     rdb.add_approval_entry(assessment["id"], "Assessment created", data.get("assessment_owner", ""), "Owner")
     _dual_write_create(assessment)
     return jsonify(assessment), 201
@@ -144,7 +147,7 @@ def create_assessment():
 
 @bp.route("/assessments/<int:aid>", methods=["GET"])
 def get_assessment(aid):
-    a = rdb.get_assessment(aid)
+    a = tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id)
     if not a:
         return jsonify({"error": "Not found"}), 404
     return jsonify(a)
@@ -152,7 +155,7 @@ def get_assessment(aid):
 
 @bp.route("/assessments/<int:aid>", methods=["PUT"])
 def update_assessment(aid):
-    if not rdb.get_assessment(aid):
+    if not tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     updated = rdb.update_assessment(aid, data)
@@ -161,8 +164,9 @@ def update_assessment(aid):
 
 
 @bp.route("/assessments/<int:aid>", methods=["DELETE"])
+@require_role("company_admin")
 def delete_assessment(aid):
-    existing = rdb.get_assessment(aid)
+    existing = tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id)
     if not existing:
         return jsonify({"error": "Not found"}), 404
     rdb.delete_assessment(aid)
@@ -174,14 +178,14 @@ def delete_assessment(aid):
 
 @bp.route("/assessments/<int:aid>/items", methods=["GET"])
 def get_items(aid):
-    if not rdb.get_assessment(aid):
+    if not tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(rdb.get_items(aid))
 
 
 @bp.route("/assessments/<int:aid>/items", methods=["POST"])
 def save_items(aid):
-    if not rdb.get_assessment(aid):
+    if not tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     items = request.get_json() or []
     if not isinstance(items, list):
@@ -200,7 +204,7 @@ def save_items(aid):
 def generate_items(aid):
     """Stream AI-generated risk items as SSE events."""
     body = request.get_json() or {}
-    a = rdb.get_assessment(aid)
+    a = tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id)
     if not a:
         return jsonify({"error": "Not found"}), 404
 
@@ -210,7 +214,7 @@ def generate_items(aid):
 
     # Build library context
     category = rdb._type_to_category(info.get("assessment_type", ""))
-    library_entries = rdb.get_library(category=category, keyword=info.get("equipment", ""))
+    library_entries = rdb.get_library(g.tenant.company_id, category=category, keyword=info.get("equipment", ""))
     lib_context = _fmt_lib(library_entries[:5])
 
     prompt = get_generation_prompt(methodology, info, lib_context)
@@ -259,7 +263,7 @@ def generate_items(aid):
 @bp.route("/assessments/<int:aid>/review", methods=["POST"])
 def review_assessment(aid):
     """Run AI review on an assessment. Returns review data."""
-    if not rdb.get_assessment(aid):
+    if not tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     review = svc.ai_review_assessment(aid)
     return jsonify(review)
@@ -269,7 +273,7 @@ def review_assessment(aid):
 
 @bp.route("/assessments/<int:aid>/mitigate", methods=["POST"])
 def suggest_mitigations(aid):
-    a = rdb.get_assessment(aid)
+    a = tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id)
     if not a:
         return jsonify({"error": "Not found"}), 404
     item_data = request.get_json() or {}
@@ -281,14 +285,14 @@ def suggest_mitigations(aid):
 
 @bp.route("/assessments/<int:aid>/actions", methods=["GET"])
 def get_actions(aid):
-    if not rdb.get_assessment(aid):
+    if not tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(rdb.get_actions(aid))
 
 
 @bp.route("/assessments/<int:aid>/actions", methods=["POST"])
 def upsert_action(aid):
-    if not rdb.get_assessment(aid):
+    if not tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     action = rdb.upsert_action(aid, data)
@@ -299,14 +303,15 @@ def upsert_action(aid):
 
 @bp.route("/assessments/<int:aid>/approval", methods=["GET"])
 def get_approval(aid):
-    if not rdb.get_assessment(aid):
+    if not tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(rdb.get_approval_trail(aid))
 
 
 @bp.route("/assessments/<int:aid>/approval", methods=["POST"])
+@require_role("company_admin", "reviewer_qa")
 def add_approval(aid):
-    a = rdb.get_assessment(aid)
+    a = tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id)
     if not a:
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
@@ -328,10 +333,11 @@ def add_approval(aid):
         count = rdb.publish_assessment_to_library(aid)
         data["_library_count"] = count
 
+    sig = tenancy.signing_identity(g.tenant)
     entry = rdb.add_approval_entry(
         aid, action_name,
-        data.get("performed_by", ""),
-        data.get("role", ""),
+        sig["performed_by"],
+        sig["role"],
         data.get("comments", ""),
     )
     return jsonify(entry), 201
@@ -341,7 +347,7 @@ def add_approval(aid):
 
 @bp.route("/assessments/<int:aid>/publish", methods=["POST"])
 def publish_to_library(aid):
-    if not rdb.get_assessment(aid):
+    if not tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     count = rdb.publish_assessment_to_library(aid)
     return jsonify({"published": count})
@@ -353,13 +359,15 @@ def publish_to_library(aid):
 def get_library():
     category = request.args.get("category")
     keyword = request.args.get("q")
-    return jsonify(rdb.get_library(category=category, keyword=keyword))
+    return jsonify(rdb.get_library(g.tenant.company_id, category=category, keyword=keyword))
 
 
 @bp.route("/library", methods=["POST"])
 def add_library():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     data = request.get_json() or {}
-    entry = rdb.add_library_entry(data)
+    entry = rdb.add_library_entry(data, company_id=g.tenant.company_id)
     return jsonify(entry), 201
 
 
@@ -367,7 +375,7 @@ def add_library():
 
 @bp.route("/assessments/<int:aid>/report", methods=["GET"])
 def get_report(aid):
-    a = rdb.get_assessment(aid)
+    a = tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id)
     if not a:
         return jsonify({"error": "Not found"}), 404
     report_type = request.args.get("type", "full")
@@ -379,7 +387,7 @@ def get_report(aid):
 
 @bp.route("/assessments/<int:aid>/export/docx", methods=["POST"])
 def export_docx(aid):
-    a = rdb.get_assessment(aid)
+    a = tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id)
     if not a:
         return jsonify({"error": "Not found"}), 404
     from pharmagpt.services.doc_exporter import markdown_to_docx
