@@ -53,7 +53,7 @@ from docx.shared import Cm, Inches, Pt, RGBColor
 logger = logging.getLogger(__name__)
 
 # ── Output directory ──────────────────────────────────────────────────────────
-_GENERATED_DIR = Path(__file__).resolve().parents[3] / "generated_documents"
+_GENERATED_DIR = Path(__file__).resolve().parents[2] / "generated_documents"
 _GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 
 
