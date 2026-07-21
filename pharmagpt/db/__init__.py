@@ -7,7 +7,9 @@ can read/write either SQLite (pharmagpt/database.py and siblings, today's
 source of truth) or Postgres (Supabase, once a domain's tables are populated
 and parity-verified), selected via config.DATABASE_BACKEND.
 
-Nothing in pharmagpt/database.py or pharmagpt/routes/ imports this package
-yet — it has zero effect on running behavior until a domain's cutover lands.
-See docs/PHASE3_EXECUTION_PLAN.md.
+As of Phase 3.2-3.5, pharmagpt/routes/projects.py, knowledge_base.py,
+equipment.py, risk.py, qms_capa.py, qms_deviations.py, and
+qms_change_control.py import repos from this package for their dual-write
+paths, gated behind each domain's *_BACKEND flag (default "sqlite", so this
+remains a no-op until a flag is set to "dual"). See docs/PHASE3_EXECUTION_PLAN.md.
 """
