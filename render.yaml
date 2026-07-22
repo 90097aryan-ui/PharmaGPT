@@ -4,17 +4,51 @@ services:
     runtime: python
     plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn pharmagpt.app:app --workers=2 --threads=4 --timeout=60 --worker-tmp-dir /dev/shm --keep-alive=5
+    # worker-class gthread is required for --threads to have any effect —
+    # gunicorn's default "sync" worker class ignores --threads entirely and
+    # serves one request at a time per worker, which silently defeats the
+    # concurrency database.py's SQLite WAL/busy_timeout setup is tuned for.
+    # --bind 0.0.0.0:$PORT is required — gunicorn defaults to 127.0.0.1:8000,
+    # which Render's routing layer cannot reach; $PORT is injected by Render.
+    startCommand: gunicorn pharmagpt.app:app --bind 0.0.0.0:$PORT --worker-class=gthread --workers=2 --threads=4 --timeout=60 --worker-tmp-dir /dev/shm --keep-alive=5
+    healthCheckPath: /health
     disk:
       name: pharmagpt-data
       mountPath: /var/data
-      sizeGB: 1
+      # Holds the SQLite DB plus generated documents and uploads (both
+      # previously defaulted to the ephemeral app filesystem and were wiped
+      # on every redeploy — see DB_PATH/UPLOAD_FOLDER/GENERATED_DOCS_PATH
+      # below). Sized for document-heavy usage; raise if disk usage alerts.
+      sizeGB: 5
     envVars:
       - key: DB_PATH
         value: /var/data/pharmagpt.db
+      - key: UPLOAD_FOLDER
+        value: /var/data/uploads
+      - key: GENERATED_DOCS_PATH
+        value: /var/data/generated_documents
       - key: GEMINI_API_KEY
         sync: false
       - key: FLASK_SECRET_KEY
         generateValue: true
       - key: FLASK_DEBUG
         value: "false"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      # ── Phase 3 Postgres migration flags — DO NOT set to "dual"/"postgres"
+      # in this environment yet. Cutover is gated on an extended Staging
+      # soak of each flag in "dual" plus a 2-company RLS isolation
+      # spot-check per domain (docs/PHASE3_EXECUTION_PLAN.md §3.6,
+      # docs/PHASE3_FLAGS.md) — neither has been performed. Once both are
+      # done and PHASE3_FLAGS.md is updated accordingly, flip these here:
+      #   - key: PROJECTS_BACKEND
+      #     value: dual
+      #   - key: KB_BACKEND
+      #     value: dual
+      #   - key: EQUIPMENT_BACKEND
+      #     value: dual
+      #   - key: QMS_BACKEND
+      #     value: dual
+      # Leaving them unset keeps every domain on its "sqlite" default.

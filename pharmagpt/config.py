@@ -14,8 +14,13 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # In production, replace this with a long random string stored in .env
 FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY", "pharmagpt-dev-secret-key")
 
-# Flask debug mode — set to False in production
-FLASK_DEBUG = os.getenv("FLASK_DEBUG", "true").lower() == "true"
+# Flask debug mode — set to False in production.
+# Defaults to False (fail-safe): an accidentally-unset env var in production
+# must never silently enable the Werkzeug interactive debugger (arbitrary
+# code execution) or disable the secure session cookie flag (see app.py's
+# SESSION_COOKIE_SECURE = not FLASK_DEBUG). Local dev sets FLASK_DEBUG=true
+# explicitly in .env.
+FLASK_DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true"
 
 # Port the Flask app will run on
 FLASK_PORT = int(os.getenv("FLASK_PORT", 5000))
@@ -93,7 +98,13 @@ QMS_BACKEND = os.getenv("QMS_BACKEND", "sqlite")
 # ── Document upload settings ──────────────────────────────────────────────────
 
 # Folder where uploaded files are stored, organised as uploads/{project_id}/
-UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "uploads")
+#
+# IMPORTANT — deployment note: same ephemeral-filesystem hazard as DB_PATH
+# above. The default below sits inside the pharmagpt/ package folder, which
+# is wiped on every Render redeploy/restart unless overridden. Set
+# UPLOAD_FOLDER to a directory on the mounted persistent disk in production
+# (see render.yaml); it defaults to the in-package path for local dev.
+UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER") or os.path.join(os.path.dirname(__file__), "uploads")
 
 # Maximum upload size in bytes (50 MB)
 MAX_FILE_SIZE = 50 * 1024 * 1024

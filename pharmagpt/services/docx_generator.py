@@ -53,7 +53,14 @@ from docx.shared import Cm, Inches, Pt, RGBColor
 logger = logging.getLogger(__name__)
 
 # ── Output directory ──────────────────────────────────────────────────────────
-_GENERATED_DIR = Path(__file__).resolve().parents[2] / "generated_documents"
+#
+# IMPORTANT — deployment note: same ephemeral-filesystem hazard as DB_PATH /
+# UPLOAD_FOLDER (see config.py). The default below sits inside the repo
+# checkout, which is wiped on every Render redeploy/restart unless
+# overridden. Set GENERATED_DOCS_PATH to a directory on the mounted
+# persistent disk in production (see render.yaml); it defaults to the
+# repo-relative path for local dev.
+_GENERATED_DIR = Path(os.getenv("GENERATED_DOCS_PATH") or (Path(__file__).resolve().parents[2] / "generated_documents"))
 _GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 
 
