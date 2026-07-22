@@ -11,7 +11,6 @@ Responsibilities
 """
 
 from __future__ import annotations
-import json
 
 
 # ── Data Aggregation ──────────────────────────────────────────────────────────
@@ -159,6 +158,7 @@ def build_section_prompt(section_key: str, ctx: dict) -> str:
     pass_rate = ctx.get("pass_rate", 0)
     total_devs = ctx.get("total_deviations", 0)
     open_devs = len(ctx.get("open_deviations", []))
+    closed_devs = len(ctx.get("closed_deviations", []))
     critical_devs = len(ctx.get("critical_deviations", []))
 
     total_reqs = ctx.get("total_reqs", 0)
@@ -500,7 +500,7 @@ Generate the DEVIATION SUMMARY section.
 
 {base_context}
 
-Total Deviations: {total_devs} | Open: {open_devs} | Closed: {closed_devs if 'closed_devs' not in ctx else len(ctx.get('closed_deviations',[]))} | Critical: {critical_devs}
+Total Deviations: {total_devs} | Open: {open_devs} | Closed: {closed_devs} | Critical: {critical_devs}
 
 Detailed Deviations:
 {dev_sample}
