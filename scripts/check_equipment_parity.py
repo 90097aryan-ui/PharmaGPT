@@ -25,7 +25,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from pharmagpt import equipment_database as equipdb  # noqa: E402
 from scripts.check_projects_parity import (  # noqa: E402
-    REQUIRED_ENV_VARS,
     ParityCheckError,
     build_service_role_client,
     load_config,

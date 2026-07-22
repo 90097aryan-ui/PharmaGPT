@@ -10,7 +10,6 @@ urs_versions      : Snapshot of requirements at each version point
 """
 
 import json
-import sqlite3
 from datetime import datetime
 from pharmagpt.database import get_connection
 

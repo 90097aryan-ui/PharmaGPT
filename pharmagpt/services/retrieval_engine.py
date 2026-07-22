@@ -40,7 +40,7 @@ from __future__ import annotations
 import logging
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from pharmagpt import database as db
 

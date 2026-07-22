@@ -31,7 +31,6 @@ catalog entry (see services/equipment_service.py::get_equipment_type_catalog
 for autocomplete); no FK or enum constraint ties them together.
 """
 
-import sqlite3
 from pharmagpt.database import get_connection
 
 DOCUMENT_ROLES = (

@@ -15,7 +15,6 @@ qual_ai_reviews      : AI review results per protocol
 """
 
 import json
-import sqlite3
 from pharmagpt.database import get_connection
 
 

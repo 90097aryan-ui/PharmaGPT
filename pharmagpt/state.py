@@ -14,7 +14,7 @@ Why a separate module?
 from pharmagpt import database as db
 from google import genai
 from google.genai import types
-from pharmagpt.config import GEMINI_API_KEY, GEMINI_MODEL
+from pharmagpt.config import GEMINI_API_KEY
 
 
 # ── Gemini client ─────────────────────────────────────────────────────────────

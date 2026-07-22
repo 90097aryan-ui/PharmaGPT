@@ -29,7 +29,6 @@ from pharmagpt import qms_change_control_database as ccdb  # noqa: E402
 from pharmagpt import qms_deviation_database as ddb  # noqa: E402
 from pharmagpt import risk_database as rdb  # noqa: E402
 from scripts.check_projects_parity import (  # noqa: E402
-    REQUIRED_ENV_VARS,
     ParityCheckError,
     build_service_role_client,
     load_config,

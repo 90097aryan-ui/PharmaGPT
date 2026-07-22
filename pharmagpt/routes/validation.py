@@ -21,7 +21,7 @@ from pharmagpt.auth.decorators import require_role
 from flask import Blueprint, g, jsonify, request, Response, send_file, stream_with_context
 from google.genai import errors, types
 from pharmagpt.prompts import PHARMA_SYSTEM_PROMPT
-from pharmagpt.review import run_review, get_avg_score
+from pharmagpt.review import run_review
 from pharmagpt.services.doc_generator import build_generation_prompt
 from pharmagpt.services.doc_exporter import markdown_to_docx
 from pharmagpt.services.retrieval_engine import retrieve_context

@@ -12,11 +12,6 @@ Responsibilities
 from __future__ import annotations
 
 import json
-from pharmagpt.services.urs_requirement_library import (
-    build_numbered_requirements,
-    get_library_requirements,
-    SECTION_PREFIX,
-)
 
 
 # ── AI Prompt for requirement generation ──────────────────────────────────────

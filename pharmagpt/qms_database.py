@@ -28,7 +28,6 @@ for free — just add a new record_type string.
 record_type values in use: 'document' | 'deviation' | 'capa' | 'change_control'
 """
 
-import sqlite3
 from datetime import datetime
 from pharmagpt.database import get_connection
 
