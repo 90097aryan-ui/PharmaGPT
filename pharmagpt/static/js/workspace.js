@@ -8,9 +8,9 @@
  * .modal / .btn-primary / .btn-secondary / .btn-danger tokens from
  * style.css instead of a native browser confirm()).
  *
- * Generate Document (gen_document.js) is the first consumer. Future modules
- * (Risk, URS, Qualification, Validation Report, QMS Change Control/CAPA/
- * Deviation/NCR/OOS-OOT) should wrap their view in `<main class="ent-workspace">`
+ * Equipment Profile and Project Workspace are the current consumers. Future
+ * modules (Risk, URS, Qualification, Validation Report, QMS Change Control/
+ * CAPA/Deviation/NCR/OOS-OOT) should wrap their view in `<main class="ent-workspace">`
  * with `.ent-ws-header` / `.ent-ws-toolbar` / `.ent-ws-progress` rows (see
  * workspace.css) and call into this same module rather than duplicating it.
  */

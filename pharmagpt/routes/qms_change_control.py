@@ -152,8 +152,9 @@ def create_change_control():
     if not data.get("title", "").strip():
         return jsonify({"error": "Change control title is required"}), 400
     cc = ccdb.create_change_control(data, company_id=g.tenant.company_id)
-    qmsdb.add_audit_entry("change_control", cc["id"], "Change control drafted", data.get("requested_by", ""))
-    _dual_write_create(cc, "Change control drafted", data.get("requested_by", ""))
+    performed_by = tenancy.signing_identity(g.tenant)["performed_by"]
+    qmsdb.add_audit_entry("change_control", cc["id"], "Change control drafted", performed_by)
+    _dual_write_create(cc, "Change control drafted", performed_by)
     return jsonify(cc), 201
 
 

@@ -110,9 +110,6 @@
         <div class="sidebar-item" id="nav-chat" data-view="view-chat">
           <span class='icon' data-lucide='sparkles'></span> AI Assistant
         </div>
-        <div class="sidebar-item" id="nav-gen-doc" data-view="view-gen-doc">
-          <span class='icon' data-lucide='file-plus-2'></span> Generate Document
-        </div>
       </div>
 
       <div class="sidebar-divider"></div>
@@ -216,7 +213,19 @@
         </div>
       </div>
 
-      <div id="val-nav-items" style="display:none"></div>
+      <!-- Generate Document — AI generator for document types without a
+           dedicated suite yet (DQ/FAT/SAT/FMEA/SOP/Validation Plan/
+           Validation Report/IQ-OQ Combined). URS/IQ/OQ/PQ/CAPA/Deviation/
+           Change Control are generated from their own suite above instead
+           (REPOSITORY_AUDIT.md Critical finding: retired duplicate wizard
+           entry points per Blueprint ADR-P02). -->
+      <div class="sidebar-section">
+        <div class="sidebar-label-row">
+          <span class="sidebar-label">Generate Document</span>
+          <button class="val-collapse-btn" id="val-collapse-btn" onclick="toggleValSection()"><span class='icon' data-lucide='chevron-up'></span></button>
+        </div>
+        <div id="val-nav-items"></div>
+      </div>
 
       <div class="sidebar-divider"></div>
 
@@ -725,49 +734,6 @@
 
       <!-- Review Score Badge (injected by validation.js after generation) -->
       <div id="val-review-banner" style="display:none;"></div>
-
-    </main>
-
-    <!-- ── Generate Document view (v0.9) — Enterprise Workspace ─────────────── -->
-    <main class="ent-workspace" id="view-gen-doc" style="display:none">
-
-      <!-- Header -->
-      <div class="ent-ws-header">
-        <div class="ent-ws-header-left">
-          <span class="ent-ws-icon" data-lucide="sparkles"></span>
-          <div>
-            <h2 class="ent-ws-title">Generate Document</h2>
-            <p class="ent-ws-sub">AI-powered GMP document generator &mdash; v0.9</p>
-          </div>
-        </div>
-        <div class="ent-ws-tags">
-          <span class="ent-ws-tag is-empty" id="gd-project-tag">No project selected</span>
-          <span class="ent-ws-tag is-empty" id="gd-doctype-tag">No document type selected</span>
-        </div>
-      </div>
-
-      <!-- Breadcrumb + wizard-level navigation (Back to Project / Save Draft / Cancel) -->
-      <div class="ent-ws-toolbar">
-        <div class="ent-ws-breadcrumb" id="gd-breadcrumb"></div>
-        <div class="ent-ws-actions">
-          <button class="ent-ws-btn" id="gd-btn-back-to-project" onclick="gdBackToProject()"><span class='icon' data-lucide='arrow-left'></span> Back to Project</button>
-          <button class="ent-ws-btn" onclick="gdSaveDraft()"><span class='icon' data-lucide='save'></span> Save Draft</button>
-          <button class="ent-ws-btn ent-ws-btn-danger" onclick="gdCancel()"><span class='icon' data-lucide='x'></span> Cancel</button>
-        </div>
-      </div>
-
-      <!-- 6-step progress bar -->
-      <div class="ent-ws-progress" id="gd-progress"></div>
-
-      <!-- Wizard panels -->
-      <div id="gd-wizard" style="display:flex; flex:1; overflow:hidden;">
-        <div id="gd-panel-1" class="gd-panel" style="display:flex"></div>
-        <div id="gd-panel-2" class="gd-panel" style="display:none"></div>
-        <div id="gd-panel-3" class="gd-panel" style="display:none"></div>
-        <div id="gd-panel-4" class="gd-panel" style="display:none"></div>
-        <div id="gd-panel-5" class="gd-panel" style="display:none"></div>
-        <div id="gd-panel-6" class="gd-panel" style="display:none"></div>
-      </div>
 
     </main>
 
@@ -1705,7 +1671,6 @@
   <script src="{{ url_for('static', filename='js/project_workspace.js') }}"></script>
   <script src="{{ url_for('static', filename='js/validation_config.js') }}"></script>
   <script src="{{ url_for('static', filename='js/validation.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/gen_document.js') }}"></script>
   <script src="{{ url_for('static', filename='js/knowledge_base.js') }}"></script>
   <script src="{{ url_for('static', filename='js/risk.js') }}"></script>
   <script src="{{ url_for('static', filename='js/urs.js') }}"></script>
@@ -1725,9 +1690,9 @@
       if (!container || !window.VALIDATION_DOC_ORDER) return;
 
       const icons = {
-        URS: "<span class='icon' data-lucide='clipboard-list'></span>", DQ: "<span class='icon' data-lucide='ruler'></span>", FAT: "<span class='icon' data-lucide='factory'></span>", SAT: "<span class='icon' data-lucide='wrench'></span>",
-        IQ: "<span class='icon' data-lucide='wrench'></span>", OQ: "<span class='icon' data-lucide='microscope'></span>", PQ: "<span class='icon' data-lucide='bar-chart-3'></span>",
-        FMEA: "<span class='icon' data-lucide='alert-triangle'></span>", CAPA: "<span class='icon' data-lucide='repeat'></span>", Deviation: "<span class='icon' data-lucide='zap'></span>", "Change Control": "<span class='icon' data-lucide='shuffle'></span>",
+        DQ: "<span class='icon' data-lucide='ruler'></span>", FAT: "<span class='icon' data-lucide='factory'></span>", SAT: "<span class='icon' data-lucide='wrench'></span>",
+        "IQ/OQ Combined": "<span class='icon' data-lucide='wrench'></span>",
+        FMEA: "<span class='icon' data-lucide='alert-triangle'></span>",
       };
 
       window.VALIDATION_DOC_ORDER.forEach(type => {
@@ -1791,7 +1756,7 @@
     // react correctly regardless of whether navigation happens via the
     // sidebar or a workspace's own "Back to Project"/"Cancel" buttons.
     let __activeViewId = "view-dashboard";
-    const __WORKSPACE_VIEW_IDS = new Set(["view-gen-doc", "view-equipment-profile", "view-project-workspace"]);
+    const __WORKSPACE_VIEW_IDS = new Set(["view-equipment-profile", "view-project-workspace"]);
     window.__ws_setActiveView = function (targetId) {
       if (__WORKSPACE_VIEW_IDS.has(__activeViewId) && !__WORKSPACE_VIEW_IDS.has(targetId) && window.Workspace) {
         window.Workspace.exit();
@@ -1805,21 +1770,6 @@
     navItems.forEach(nav => {
       nav.addEventListener("click", async () => {
         const targetId = nav.dataset.view;
-
-        // Enterprise Workspace guard: confirm before leaving a workspace with
-        // unsaved changes (e.g. mid-wizard in Generate Document) via a direct
-        // sidebar click, rather than the workspace's own Back/Cancel buttons.
-        if (__activeViewId === "view-gen-doc" && targetId !== "view-gen-doc" &&
-            window.gdHasUnsavedChanges && window.gdHasUnsavedChanges()) {
-          const ok = window.Workspace
-            ? await window.Workspace.confirmDialog({
-                title: "Leave Generate Document?",
-                message: "Unsaved progress will be lost unless you Save Draft first.",
-                confirmLabel: "Leave", cancelLabel: "Stay", danger: true,
-              })
-            : confirm("Leave Generate Document? Unsaved progress will be lost unless you Save Draft first.");
-          if (!ok) return;
-        }
 
         window.__ws_setActiveView(targetId);
 
@@ -1837,10 +1787,6 @@
 
         if (targetId === "view-dashboard") {
           if (window.loadDashboard) window.loadDashboard();
-        }
-
-        if (targetId === "view-gen-doc") {
-          if (window.openGenDocument) window.openGenDocument();
         }
 
         if (targetId === "view-qms-dashboard") {

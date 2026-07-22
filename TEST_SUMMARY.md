@@ -3,6 +3,13 @@
 **Run date:** 2026-07-21
 **Command:** `pytest tests/` (full suite, `venv` active)
 
+> **Superseded count:** the 352-passed figure below is this specific 2026-07-21 session's
+> before/after record — left as-is since it's an accurate historical snapshot, not an error. The
+> suite has grown since (`test_risk_generate_endpoint.py`, the QMS record-creation e-signature
+> regression tests, and the Generate Document duplication regression tests — see
+> `PHASE_1_IMPLEMENTATION_REPORT.md`). **390 passed, 0 failed, 1 deselected** is the current,
+> authoritative count as of 2026-07-23; `README.md` reflects it.
+
 ## Results
 
 | | Before this session | After this session |

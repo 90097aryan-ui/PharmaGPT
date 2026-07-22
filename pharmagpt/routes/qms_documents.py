@@ -74,7 +74,8 @@ def create_document():
     if not data.get("title", "").strip():
         return jsonify({"error": "Document title is required"}), 400
     document = qdb.create_document(data, company_id=g.tenant.company_id)
-    qmsdb.add_audit_entry("document", document["id"], "Document created", data.get("owner", ""))
+    performed_by = tenancy.signing_identity(g.tenant)["performed_by"]
+    qmsdb.add_audit_entry("document", document["id"], "Document created", performed_by)
     return jsonify(document), 201
 
 

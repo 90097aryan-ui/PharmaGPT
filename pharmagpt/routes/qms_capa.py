@@ -139,8 +139,9 @@ def create_capa():
     if not data.get("title", "").strip():
         return jsonify({"error": "CAPA title is required"}), 400
     capa = cdb.create_capa(data, company_id=g.tenant.company_id)
-    qmsdb.add_audit_entry("capa", capa["id"], "CAPA created", data.get("initiated_by", ""))
-    _dual_write_create(capa, "CAPA created", data.get("initiated_by", ""))
+    performed_by = tenancy.signing_identity(g.tenant)["performed_by"]
+    qmsdb.add_audit_entry("capa", capa["id"], "CAPA created", performed_by)
+    _dual_write_create(capa, "CAPA created", performed_by)
     return jsonify(capa), 201
 
 

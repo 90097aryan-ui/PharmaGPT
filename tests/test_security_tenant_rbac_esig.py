@@ -302,3 +302,84 @@ def test_risk_assessment_approval_performed_by_cannot_be_spoofed(client):
     entry = resp.get_json()
     assert entry["performed_by"] == "Rita Reviewer"
     assert entry["role"] == "reviewer_qa"
+
+
+# ── 3b. E-signature spoofing at record-CREATION time (REPOSITORY_AUDIT.md
+# Critical finding; FUNCTIONAL_VALIDATION_REPORT.md C3) ─────────────────────
+# The 2026-07-21 fix above only covered approval actions. Record creation
+# (Deviation/CAPA/Change Control/Document) took the audit trail's
+# performed_by straight from a client-supplied field (initiated_by /
+# requested_by / owner) instead of the authenticated identity. Fixed by
+# using tenancy.signing_identity(g.tenant)["performed_by"] at creation time
+# too, exactly mirroring the approval-time pattern above.
+
+def test_deviation_creation_audit_performed_by_cannot_be_spoofed(client):
+    with _as(ADMIN_A):
+        resp = client.post(
+            "/qms/deviations",
+            json={"title": "Deviation", "initiated_by": "Fake CEO Spoofed Identity"},
+            headers=AUTH_HEADERS,
+        )
+
+    assert resp.status_code == 201
+    deviation = resp.get_json()
+
+    audit = qmsdb.get_audit_trail("deviation", deviation["id"])
+    creation_entries = [a for a in audit if a["action"] == "Deviation initiated"]
+    assert creation_entries
+    assert all(a["performed_by"] == "Alice Admin" for a in creation_entries)
+    assert not any(a["performed_by"] == "Fake CEO Spoofed Identity" for a in creation_entries)
+
+
+def test_capa_creation_audit_performed_by_cannot_be_spoofed(client):
+    with _as(ADMIN_A):
+        resp = client.post(
+            "/qms/capa",
+            json={"title": "CAPA", "initiated_by": "Fake CEO Spoofed Identity"},
+            headers=AUTH_HEADERS,
+        )
+
+    assert resp.status_code == 201
+    capa = resp.get_json()
+
+    audit = qmsdb.get_audit_trail("capa", capa["id"])
+    creation_entries = [a for a in audit if a["action"] == "CAPA created"]
+    assert creation_entries
+    assert all(a["performed_by"] == "Alice Admin" for a in creation_entries)
+    assert not any(a["performed_by"] == "Fake CEO Spoofed Identity" for a in creation_entries)
+
+
+def test_change_control_creation_audit_performed_by_cannot_be_spoofed(client):
+    with _as(ADMIN_A):
+        resp = client.post(
+            "/qms/change-control",
+            json={"title": "Change Control", "requested_by": "Fake CEO Spoofed Identity"},
+            headers=AUTH_HEADERS,
+        )
+
+    assert resp.status_code == 201
+    cc = resp.get_json()
+
+    audit = qmsdb.get_audit_trail("change_control", cc["id"])
+    creation_entries = [a for a in audit if a["action"] == "Change control drafted"]
+    assert creation_entries
+    assert all(a["performed_by"] == "Alice Admin" for a in creation_entries)
+    assert not any(a["performed_by"] == "Fake CEO Spoofed Identity" for a in creation_entries)
+
+
+def test_document_creation_audit_performed_by_cannot_be_spoofed(client):
+    with _as(ADMIN_A):
+        resp = client.post(
+            "/qms/documents",
+            json={"title": "Document", "owner": "Fake CEO Spoofed Identity"},
+            headers=AUTH_HEADERS,
+        )
+
+    assert resp.status_code == 201
+    document = resp.get_json()
+
+    audit = qmsdb.get_audit_trail("document", document["id"])
+    creation_entries = [a for a in audit if a["action"] == "Document created"]
+    assert creation_entries
+    assert all(a["performed_by"] == "Alice Admin" for a in creation_entries)
+    assert not any(a["performed_by"] == "Fake CEO Spoofed Identity" for a in creation_entries)

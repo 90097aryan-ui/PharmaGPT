@@ -13,7 +13,7 @@
  */
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let valDocType       = "OQ";      // active document type
+let valDocType       = "DQ";      // active document type — always overwritten by openValidationWizard() before the view is shown
 let valStep          = 1;         // current wizard step (1–4)
 let valFormData      = {};        // accumulated Step-1 and Step-2 fields
 let valSelectedDocs  = [];        // doc IDs selected in Step 3

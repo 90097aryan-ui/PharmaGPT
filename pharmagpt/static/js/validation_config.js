@@ -10,22 +10,18 @@
  *
  * To add a new document type: add an entry to VALIDATION_DOCS and add
  * the corresponding prompt builder in services/doc_generator.py.
+ *
+ * URS, IQ, OQ, PQ, CAPA, Deviation, and Change Control are deliberately NOT
+ * listed here: each now has its own dedicated, more capable suite (URS
+ * Management, Qualification, QMS CAPA/Deviation/Change Control) with its own
+ * "Generate with AI" entry point, lifecycle, and approval trail. Offering a
+ * second, thinner generation path for the same document type here was a
+ * Critical finding (REPOSITORY_AUDIT.md, DUPLICATE_FUNCTION_ANALYSIS.md §1) —
+ * retired per Blueprint ADR-P02, enforced server-side too (see
+ * routes/validation.py::_RETIRED_DOC_TYPES). Do not re-add them here.
  */
 
 const VALIDATION_DOCS = {
-
-  URS: {
-    label: "User Requirement Specification",
-    short: "URS",
-    icon: "<span class=\'icon\' data-lucide=\'clipboard-list\'></span>",
-    color: "#8A6B52",
-    step2: [
-      { id: "doc_number",    label: "Document Number",   placeholder: "URS-001",         required: true  },
-      { id: "version",       label: "Version",           placeholder: "1.0",             required: true  },
-      { id: "system_name",   label: "System / Equipment Name", placeholder: "e.g. HPLC System" },
-      { id: "intended_use",  label: "Intended Use",      placeholder: "Describe the intended use of the system...", type: "textarea" },
-    ],
-  },
 
   DQ: {
     label: "Design Qualification",
@@ -65,48 +61,6 @@ const VALIDATION_DOCS = {
     ],
   },
 
-  IQ: {
-    label: "Installation Qualification",
-    short: "IQ",
-    icon: "<span class=\'icon\' data-lucide=\'wrench\'></span>",
-    color: "#4C7A4E",
-    step2: [
-      { id: "protocol_number", label: "Protocol Number",        placeholder: "IQ-001",  required: true },
-      { id: "version",         label: "Version",                placeholder: "1.0",     required: true },
-      { id: "po_number",       label: "Purchase Order Number",  placeholder: "PO-2026-001" },
-      { id: "urs_reference",   label: "URS Reference",          placeholder: "URS-001" },
-    ],
-  },
-
-  OQ: {
-    label: "Operational Qualification",
-    short: "OQ",
-    icon: "<span class=\'icon\' data-lucide=\'microscope\'></span>",
-    color: "#5B4C43",
-    step2: [
-      { id: "protocol_number", label: "Protocol Number",         placeholder: "OQ-001",  required: true },
-      { id: "version",         label: "Version",                 placeholder: "1.0",     required: true },
-      { id: "product",         label: "Product",                 placeholder: "e.g. Paracetamol 500 mg" },
-      { id: "batch_size",      label: "Batch Size",              placeholder: "e.g. 100,000 tablets" },
-      { id: "urs_reference",   label: "User Requirement Reference", placeholder: "URS-001" },
-    ],
-  },
-
-  PQ: {
-    label: "Performance Qualification",
-    short: "PQ",
-    icon: "<span class=\'icon\' data-lucide=\'bar-chart-3\'></span>",
-    color: "#3D6140",
-    step2: [
-      { id: "protocol_number", label: "Protocol Number",    placeholder: "PQ-001",  required: true },
-      { id: "version",         label: "Version",            placeholder: "1.0",     required: true },
-      { id: "product",         label: "Product",            placeholder: "e.g. Amoxicillin 250 mg" },
-      { id: "batch_size",      label: "Batch Size",         placeholder: "e.g. 50,000 capsules" },
-      { id: "number_of_runs",  label: "Number of PQ Runs",  placeholder: "3" },
-      { id: "urs_reference",   label: "OQ Reference",       placeholder: "OQ-001" },
-    ],
-  },
-
   FMEA: {
     label: "Failure Mode and Effects Analysis",
     short: "FMEA",
@@ -116,45 +70,6 @@ const VALIDATION_DOCS = {
       { id: "doc_number",   label: "FMEA Document Number", placeholder: "FMEA-001", required: true },
       { id: "version",      label: "Version",              placeholder: "1.0",      required: true },
       { id: "fmea_scope",   label: "FMEA Scope",           placeholder: "e.g. Full HPLC system — all critical components", type: "textarea" },
-    ],
-  },
-
-  CAPA: {
-    label: "Corrective and Preventive Action",
-    short: "CAPA",
-    icon: "<span class=\'icon\' data-lucide=\'repeat\'></span>",
-    color: "#5B4C43",
-    step2: [
-      { id: "capa_number",  label: "CAPA Number",   placeholder: "CAPA-001",              required: true },
-      { id: "version",      label: "Version",        placeholder: "1.0",                   required: true },
-      { id: "capa_source",  label: "CAPA Source",    placeholder: "e.g. Internal Audit, Deviation, Customer Complaint" },
-      { id: "description",  label: "Issue Description", placeholder: "Describe the problem / non-conformance...", type: "textarea" },
-    ],
-  },
-
-  Deviation: {
-    label: "Deviation Report",
-    short: "DEV",
-    icon: "<span class=\'icon\' data-lucide=\'zap\'></span>",
-    color: "#A97D2E",
-    step2: [
-      { id: "deviation_number", label: "Deviation Number", placeholder: "DEV-001",                      required: true },
-      { id: "version",          label: "Version",          placeholder: "1.0",                          required: true },
-      { id: "category",         label: "Deviation Category", placeholder: "e.g. Planned / Unplanned / Critical" },
-      { id: "description",      label: "Deviation Description", placeholder: "What happened, when, where, how discovered...", type: "textarea" },
-    ],
-  },
-
-  "Change Control": {
-    label: "Change Control",
-    short: "CC",
-    icon: "<span class=\'icon\' data-lucide=\'shuffle\'></span>",
-    color: "#66615B",
-    step2: [
-      { id: "cc_number",           label: "Change Control Number", placeholder: "CC-001",            required: true },
-      { id: "version",             label: "Version",               placeholder: "1.0",               required: true },
-      { id: "change_description",  label: "Description of Change", placeholder: "What is changing...", type: "textarea" },
-      { id: "reason_for_change",   label: "Reason / Justification", placeholder: "Why is this change needed...", type: "textarea" },
     ],
   },
 
@@ -214,9 +129,9 @@ const VALIDATION_DOCS = {
 
 // Ordered list for the sidebar (controls display order)
 const VALIDATION_DOC_ORDER = [
-  "URS", "DQ", "FAT", "SAT", "IQ", "OQ", "IQ/OQ Combined", "PQ",
+  "DQ", "FAT", "SAT", "IQ/OQ Combined",
   "SOP", "Validation Plan", "Validation Report",
-  "FMEA", "CAPA", "Deviation", "Change Control",
+  "FMEA",
 ];
 
 // Expose globally for validation.js and index.html

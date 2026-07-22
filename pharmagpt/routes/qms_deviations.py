@@ -141,8 +141,9 @@ def create_deviation():
     if not data.get("title", "").strip():
         return jsonify({"error": "Deviation title is required"}), 400
     deviation = ddb.create_deviation(data, company_id=g.tenant.company_id)
-    qmsdb.add_audit_entry("deviation", deviation["id"], "Deviation initiated", data.get("initiated_by", ""))
-    _dual_write_create(deviation, "Deviation initiated", data.get("initiated_by", ""))
+    performed_by = tenancy.signing_identity(g.tenant)["performed_by"]
+    qmsdb.add_audit_entry("deviation", deviation["id"], "Deviation initiated", performed_by)
+    _dual_write_create(deviation, "Deviation initiated", performed_by)
     return jsonify(deviation), 201
 
 

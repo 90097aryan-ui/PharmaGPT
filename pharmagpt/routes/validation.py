@@ -32,6 +32,24 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint("validation", __name__)
 
+# URS/IQ/OQ/PQ/CAPA/Deviation/Change Control each now have their own
+# dedicated, more capable suite (URS Management, Qualification, QMS
+# CAPA/Deviation/Change Control) with its own AI generation, lifecycle, and
+# approval trail. Generating them here too was a Critical finding
+# (REPOSITORY_AUDIT.md, DUPLICATE_FUNCTION_ANALYSIS.md §1) — a duplicate,
+# review-gate-free path to the same document type — retired per Blueprint
+# ADR-P02. Rejected server-side, not just hidden client-side, so the
+# duplicate path can't be reached by a direct API call either.
+_RETIRED_DOC_TYPES = {
+    "URS": "URS Management",
+    "IQ": "Qualification",
+    "OQ": "Qualification",
+    "PQ": "Qualification",
+    "CAPA": "Quality Management → CAPA",
+    "Deviation": "Quality Management → Deviations",
+    "Change Control": "Quality Management → Change Control",
+}
+
 
 @bp.route("/validation/generate", methods=["POST"])
 def validation_generate():
@@ -39,8 +57,8 @@ def validation_generate():
     SSE endpoint: generate a validation document with Gemini.
 
     Body: {
-        "doc_type":    "OQ" | "IQ" | "PQ" | "URS" | "DQ" | "FAT" | "SAT" |
-                       "FMEA" | "CAPA" | "Deviation" | "Change Control",
+        "doc_type":    "DQ" | "FAT" | "SAT" | "FMEA" | "IQ/OQ Combined" |
+                       "SOP" | "Validation Plan" | "Validation Report",
         "project_id":  3,
         "form_data":   { equipment Step-1 fields, "details": { Step-2 fields } },
         "doc_ids":     [1, 2]   -- optional; IDs of uploaded docs to use as context
@@ -54,6 +72,12 @@ def validation_generate():
     project_id = data.get("project_id")
     form_data  = data.get("form_data", {})
     doc_ids    = data.get("doc_ids", [])
+
+    if doc_type in _RETIRED_DOC_TYPES:
+        return jsonify({
+            "error": f"{doc_type} is no longer generated here. Use the {_RETIRED_DOC_TYPES[doc_type]} "
+                     f"suite instead, which has its own AI generation, lifecycle, and approval trail."
+        }), 410
 
     if not project_id:
         return jsonify({"error": "project_id is required"}), 400

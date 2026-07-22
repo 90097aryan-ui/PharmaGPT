@@ -38,8 +38,9 @@ required vs optional, and what each gates.
 ./venv/Scripts/python -m pytest
 ```
 
-352 tests, all passing as of the last full run. Tests use a throwaway SQLite file per test
-(`tests/conftest.py`'s `db_path` fixture) — no external services required.
+390 tests, all passing as of the last full run (2026-07-23; see `PHASE_1_IMPLEMENTATION_REPORT.md`
+for the full run log). Tests use a throwaway SQLite file per test (`tests/conftest.py`'s `db_path`
+fixture) — no external services required.
 
 ## Deployment
 

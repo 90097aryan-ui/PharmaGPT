@@ -2,12 +2,64 @@
 
 > Part of the permanent [PROJECT_MEMORY](CLAUDE.md) set. A new developer or a new Claude session
 > should be able to understand what PharmaGPT actually does today from this file alone, without
-> reading source code. Last synchronized against the repository: **2026-07-10** (last commit
-> `c995049`, plus the Foundation Refactoring — Modules 1–3 — about to be committed and tagged
-> `Foundation v1.0`, described below). See [DECISIONS.md](DECISIONS.md) DEC-022 and DEC-026 — this
-> file has now drifted from `git log` three times (QMS Phase 1/Executive Office redesign; then QMS
-> Phase 2 Change Control/RC1; reconciled each time) — see DEC-026's Future Review for the proposed
-> fix (a machine-readable version source).
+> reading source code. Last synchronized against the repository: **2026-07-23** (45 commits past
+> `c995049`, HEAD `62106e3` plus the uncommitted Phase 1 architecture-recovery fixes described in
+> "Update — 2026-07-23" immediately below). This is the file's **fourth** drift-and-resync — see
+> [DECISIONS.md](DECISIONS.md) DEC-014/DEC-022/DEC-026 for the first three and
+> `PharmaGPT_Implementation_Roadmap/REPOSITORY_AUDIT.md`'s Currency Note for this one. DEC-014's
+> long-standing recommendation (a single machine-readable version/test-count source instead of
+> hand-maintained prose) remains unimplemented and is the real fix for this recurring class of
+> drift — flag it again if a fifth occurrence happens.
+
+---
+
+## Update — 2026-07-23 (Phase 1 Implementation)
+
+Everything below this box was last true on **2026-07-10**. Rather than rewrite the entire file
+(disproportionate to a Low-priority documentation-drift finding — see
+`PharmaGPT_Implementation_Roadmap/REPOSITORY_AUDIT.md`), this box summarizes what changed across
+the 45 commits and the uncommitted working-tree state since, grouped by theme. Treat the sections
+below as historical background, **except** where a specific correction is noted inline.
+
+- **Supabase Auth + RBAC + multi-tenancy shipped** (`6031296`, `ec249d1`, `aa15c66`) — real login/
+  logout/session, a four-role model (`super_admin`/`company_admin`/`reviewer_qa`/`user`),
+  `require_role()` enforcement on destructive/approval routes, and `company_id`-scoped tenant
+  isolation across every domain table. **This supersedes "Known Limitations" below's "No
+  authentication or authorization system (planned v0.9)"** — that system is now live.
+- **Risk/URS/Qualification/Validation Report sidebar navigation is live and wired** — direct
+  inspection of the current `templates/index.html` shows real, visible-by-default sidebar
+  sections with working click handlers. **This supersedes every "Sidebar navigation not wired" /
+  "no live entry point" claim below** (Completed Modules, Known Issues). The real, still-open gap
+  is narrower: these suites open their global, unfiltered dashboard rather than a project-scoped
+  view when reached via a Project Workspace tab (`DECISIONS.md` DEC-025 Future Review, unchanged).
+- **Postgres dual-write migration scaffolding** (Phase 3.1–3.5, `4da4913` → `7d5b6ce`) — Projects,
+  Knowledge Base, Equipment, and QMS (Deviations/CAPA/Change Control/Risk Assessments) all now
+  dual-write to Postgres behind per-domain feature flags (`PROJECTS_BACKEND`, `KB_BACKEND`,
+  `EQUIPMENT_BACKEND`, `QMS_BACKEND`), all still defaulting to `sqlite` as the live read path — no
+  domain has cut over yet. See `docs/PHASE3_FLAGS.md` and `TENANCY_VALIDATION.md`.
+- **Critical security fixes** (`aa15c66`, 2026-07-21): cross-tenant data access on the SQLite path
+  (every domain now tenant-scoped), missing RBAC on destructive/approval routes, and e-signature
+  spoofing at *approval* time. **A fourth fix, e-signature spoofing at record-*creation* time**
+  (QMS `performed_by` on Deviation/CAPA/Change Control/Document creation), was found by
+  `FUNCTIONAL_VALIDATION_REPORT.md` (2026-07-22) and fixed as part of this Phase 1 pass — see
+  `PHASE_1_IMPLEMENTATION_REPORT.md`.
+- **Generate Document duplication retired** (this Phase 1 pass) — the non-functional v0.9 stub
+  (`gen_document.js`, "Generate Document" main-menu item) is removed entirely; the real AI
+  generator remains, now reachable from a proper "Generate Document" sidebar section, restricted
+  to the document types that don't yet have a dedicated suite (DQ/FAT/SAT/FMEA/IQ-OQ Combined/SOP/
+  Validation Plan/Validation Report). URS/IQ/OQ/PQ/CAPA/Deviation/Change Control are generated
+  from their own suite instead (server-side enforced too). See
+  `PharmaGPT_Implementation_Roadmap/REPOSITORY_AUDIT.md` and `PHASE_1_IMPLEMENTATION_REPORT.md`.
+- **Production deployment hardening** (`e578b1a`, 2026-07-22) — persistent-disk storage, gunicorn
+  bound to `$PORT`, threaded workers, fail-safe debug default.
+- **URS Management Suite materially improved** — a real Draft→Under Review→Approved→Effective→
+  Obsolete lifecycle state machine (`urs_lifecycle.py`) now gates status changes; AI generation
+  (`urs_generation_job.py`) moved off the request thread onto a background job runner, fixing
+  request-cycle timeout crashes — the reference pattern the other 6 AI-generation endpoints should
+  still be migrated to (unchanged, still open).
+- **Test count**: this file's own "148 tests" claim (below) predates all of the above. See
+  `PHASE_1_IMPLEMENTATION_REPORT.md` for the current, authoritative count — `README.md` and
+  `TEST_SUMMARY.md` are resynchronized to the same number as part of this pass.
 
 ---
 
