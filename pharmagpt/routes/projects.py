@@ -23,6 +23,7 @@ from flask import Blueprint, g, jsonify, request
 
 from pharmagpt import config
 from pharmagpt import database as db
+from pharmagpt import equipment_database as equipdb
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
@@ -136,9 +137,28 @@ def create_project():
         protocol_number=data.get("protocol_number", "").strip(),
         report_number=data.get("report_number", "").strip(),
     )
-    qmsdb.add_audit_entry("project", project["id"], "Project created")
+    performed_by = tenancy.signing_identity(g.tenant)["performed_by"]
+    qmsdb.add_audit_entry("project", project["id"], "Project created", performed_by)
     _dual_write_create(project)
+    _link_equipment_to_new_project(project)
     return jsonify(project), 201
+
+
+def _link_equipment_to_new_project(project: dict) -> None:
+    """Phase 2: every Validation Project must be linked to a real Equipment
+    record, not just the free-text equipment_name/manufacturer/model fields
+    collected at creation — those fields exist for exactly this purpose (see
+    equipment_database.import_legacy_equipment()'s docstring). Reuses the
+    same one-click "import from project info" path POST /projects/<id>/
+    equipment/import-legacy already offers manually; this just runs it
+    automatically so no project is ever left without an Equipment record
+    when equipment info was actually provided. No-ops (returns None) for a
+    project with no equipment info, exactly like the manual endpoint does.
+    """
+    equipment = equipdb.import_legacy_equipment(project["id"])
+    if equipment:
+        from pharmagpt.routes.equipment import _dual_write_create as _equipment_dual_write_create
+        _equipment_dual_write_create(equipment)
 
 
 @bp.route("/projects/<int:project_id>", methods=["GET"])

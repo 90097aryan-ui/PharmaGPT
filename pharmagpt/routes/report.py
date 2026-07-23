@@ -31,6 +31,7 @@ GET    /report/linked/<qual_id>               Get or create report for qualifica
 
 import json
 import io
+import logging
 from flask import Blueprint, g, jsonify, request, Response, stream_with_context, send_file
 
 from pharmagpt import report_database as rdb
@@ -39,8 +40,11 @@ from pharmagpt import urs_database as udb
 from pharmagpt import risk_database as risdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
+from pharmagpt.services import kb_sync
 from pharmagpt.services import report_service as svc
 from pharmagpt.services.doc_exporter import markdown_to_docx
+
+logger = logging.getLogger(__name__)
 from pharmagpt.state import gemini_client
 from pharmagpt.config import GEMINI_MODEL
 from pharmagpt.prompts import PHARMA_SYSTEM_PROMPT
@@ -379,6 +383,8 @@ def get_traceability(rid):
 
 @bp.route("/<int:rid>/approval", methods=["GET"])
 def get_approval(rid):
+    if not tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id):
+        return jsonify({"error": "Report not found"}), 404
     return jsonify(rdb.get_approval_trail(rid))
 
 
@@ -409,7 +415,9 @@ def add_approval(rid):
     }
     new_status = status_map.get(action)
     if new_status:
-        rdb.update_report(rid, {"status": new_status})
+        report = rdb.update_report(rid, {"status": new_status})
+        if new_status == "released":
+            _publish_released_report_to_kb(report)
 
     sig = tenancy.signing_identity(g.tenant)
     entry = rdb.add_approval_entry(
@@ -418,15 +426,41 @@ def add_approval(rid):
     return jsonify(entry), 201
 
 
+def _publish_released_report_to_kb(report: dict) -> None:
+    """Phase 2: a Released Validation Report becomes the current version in
+    the Knowledge Base automatically — no manual upload. Failures are
+    logged, never raised: a KB-sync problem must not block the approval."""
+    try:
+        sections = rdb.get_sections(report["id"])
+        markdown_content = svc.build_docx_markdown(report, sections)
+        doc_type = report.get("report_type", "Validation Report")
+        kb_sync.publish_to_kb(
+            source_type="report", source_id=report["id"], company_id=g.tenant.company_id,
+            title=report.get("title", doc_type), doc_type=doc_type,
+            doc_number=report.get("report_number", ""), version=report.get("revision", "A"),
+            content_markdown=markdown_content, effective_date=report.get("effective_date"),
+            form_data={
+                "title": report.get("title", ""), "equipment_name": report.get("equipment_name", ""),
+                "department": report.get("department", ""),
+            },
+        )
+    except Exception:
+        logger.exception("kb_sync: failed to publish Validation Report %s to Knowledge Base", report["id"])
+
+
 # ── Versions ──────────────────────────────────────────────────────────────────
 
 @bp.route("/<int:rid>/versions", methods=["GET"])
 def get_versions(rid):
+    if not tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id):
+        return jsonify({"error": "Report not found"}), 404
     return jsonify(rdb.get_versions(rid))
 
 
 @bp.route("/<int:rid>/versions", methods=["POST"])
 def create_version(rid):
+    if not tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id):
+        return jsonify({"error": "Report not found"}), 404
     data = request.get_json() or {}
     snapshot = rdb.create_version_snapshot(
         rid,

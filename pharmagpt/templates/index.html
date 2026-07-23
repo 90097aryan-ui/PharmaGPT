@@ -98,17 +98,19 @@
     <!-- ── Sidebar ───────────────────────────────────────────────────────────── -->
     <aside class="sidebar">
 
-      <!-- Primary Navigation -->
+      <!-- Primary Navigation (PHARMAGPT_PLATFORM_BLUEPRINT.md / Product
+           Recovery Package PRODUCT_INFORMATION_ARCHITECTURE.md §0 approved
+           order: Dashboard · Projects · Equipment Library · Knowledge Base ·
+           Validation Suite · Quality Management · AI Assistant.
+           Administration and a persistent Global Search bar are also part
+           of the approved IA but are not added here — the screens/index
+           they would point to don't exist yet (Company/Users/Roles admin,
+           Postgres full-text search) and Phase 2 does not add new features;
+           see PHASE_2_IMPLEMENTATION_REPORT.md. -->
       <div class="sidebar-section">
         <div class="sidebar-label">Main Menu</div>
         <div class="sidebar-item active" id="nav-dashboard" data-view="view-dashboard">
           <span class='icon' data-lucide='layout-dashboard'></span> Dashboard
-        </div>
-        <div class="sidebar-item" id="nav-kb" data-view="view-kb">
-          <span class='icon' data-lucide='library'></span> Knowledge Base
-        </div>
-        <div class="sidebar-item" id="nav-chat" data-view="view-chat">
-          <span class='icon' data-lucide='sparkles'></span> AI Assistant
         </div>
       </div>
 
@@ -125,106 +127,131 @@
 
       <div class="sidebar-divider"></div>
 
-      <!-- Risk Management Suite -->
+      <!-- Equipment Library (Phase 2 — first-class, top-level module) -->
       <div class="sidebar-section">
-        <div class="sidebar-label-row">
-          <span class="sidebar-label">Risk Management</span>
-          <button class="val-collapse-btn" id="risk-collapse-btn" onclick="toggleRiskSection()"><span class='icon' data-lucide='chevron-up'></span></button>
-        </div>
-        <div id="risk-nav-items">
-          <div class="sidebar-item risk-sub-item" id="risk-nav-dashboard" onclick="window.initRisk && window.initRisk()">
-            <span class='icon' data-lucide='layout-dashboard'></span> Risk Dashboard
-          </div>
-          <div class="sidebar-item risk-sub-item" id="risk-nav-new" onclick="loadAssessmentList && loadAssessmentList()">
-            <span class='icon' data-lucide='shield-alert'></span> Assessments
-          </div>
-          <div class="sidebar-item risk-sub-item" id="risk-nav-new-btn" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-new'); startNewWizard && startNewWizard()">
-            <span class='icon' data-lucide='plus-circle'></span> New Assessment
-          </div>
-          <div class="sidebar-item risk-sub-item" id="risk-nav-library" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-library'); loadLibrary && loadLibrary()">
-            <span class='icon' data-lucide='library'></span> Risk Library
-          </div>
-          <div class="sidebar-item risk-sub-item" id="risk-nav-templates" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-templates'); loadTemplates && loadTemplates()">
-            <span class='icon' data-lucide='layout-template'></span> Templates
-          </div>
-          <div class="sidebar-item risk-sub-item" id="risk-nav-reports" onclick="showRiskReports()">
-            <span class='icon' data-lucide='file-text'></span> Reports
-          </div>
-          <div class="sidebar-item risk-sub-item" id="risk-nav-approval" onclick="showRiskApproval()">
-            <span class='icon' data-lucide='check-circle'></span> Approval Queue
-          </div>
-          <div class="sidebar-item risk-sub-item" id="risk-nav-assistant" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-assistant'); loadAIAssistant && loadAIAssistant()">
-            <span class='icon' data-lucide='bot'></span> AI Assistant
-          </div>
+        <div class="sidebar-label">Equipment Library</div>
+        <div class="sidebar-item" id="nav-equipment-library" data-view="view-equipment-library">
+          <span class='icon' data-lucide='cog'></span> All Equipment
         </div>
       </div>
 
       <div class="sidebar-divider"></div>
 
-      <!-- URS Management Suite -->
+      <!-- Knowledge Base -->
       <div class="sidebar-section">
-        <div class="sidebar-label-row">
-          <span class="sidebar-label">URS Management</span>
-          <button class="val-collapse-btn" id="urs-collapse-btn" onclick="toggleURSSection()"><span class='icon' data-lucide='chevron-up'></span></button>
-        </div>
-        <div id="urs-nav-items">
-          <div class="sidebar-item urs-sub-item" data-view="view-urs-dashboard">
-            <span class='icon' data-lucide='clipboard-list'></span> URS Dashboard
-          </div>
-          <div class="sidebar-item urs-sub-item" data-view="view-urs-new">
-            <span class='icon' data-lucide='plus-circle'></span> New URS
-          </div>
+        <div class="sidebar-label">Knowledge Base</div>
+        <div class="sidebar-item" id="nav-kb" data-view="view-kb">
+          <span class='icon' data-lucide='library'></span> Knowledge Base
         </div>
       </div>
 
       <div class="sidebar-divider"></div>
 
-      <!-- Qualification Suite (IQ/OQ/PQ) -->
+      <!-- Validation Suite (Phase 2 — Risk/URS/Qualification/Validation
+           Reports/Generate Document grouped under one entry point per the
+           approved IA, instead of five separate top-level sidebar
+           sections; each sub-suite keeps its own collapse control
+           unchanged). -->
       <div class="sidebar-section">
         <div class="sidebar-label-row">
-          <span class="sidebar-label">Qualification</span>
-          <button class="val-collapse-btn" id="qual-collapse-btn" onclick="toggleQualSection()"><span class='icon' data-lucide='chevron-up'></span></button>
+          <span class="sidebar-label">Validation Suite</span>
         </div>
-        <div id="qual-nav-items">
-          <div class="sidebar-item qual-sub-item" onclick="window.initQual && window.initQual()">
-            <span class='icon' data-lucide='flask-conical'></span> IQ / OQ / PQ
-          </div>
-          <div class="sidebar-item qual-sub-item" onclick="window.showView && window.showView('view-qual'); window.qualShowNew && window.qualShowNew()">
-            <span class='icon' data-lucide='plus-circle'></span> New Qualification
-          </div>
-        </div>
-      </div>
 
-      <div class="sidebar-divider"></div>
-
-      <!-- Validation Report Suite -->
-      <div class="sidebar-section">
-        <div class="sidebar-label-row">
-          <span class="sidebar-label">Validation Reports</span>
-          <button class="val-collapse-btn" id="report-collapse-btn" onclick="toggleReportSection()"><span class='icon' data-lucide='chevron-up'></span></button>
-        </div>
-        <div id="report-nav-items">
-          <div class="sidebar-item report-sub-item" onclick="window.initReport && window.initReport()">
-            <span class='icon' data-lucide='file-check'></span> Validation Reports
+        <!-- Risk Management -->
+        <div class="qms-nav-group">
+          <div class="qms-nav-group-label">
+            <span>Risk Management</span>
+            <button class="val-collapse-btn" id="risk-collapse-btn" onclick="toggleRiskSection()"><span class='icon' data-lucide='chevron-up'></span></button>
           </div>
-          <div class="sidebar-item report-sub-item" onclick="window.showView && window.showView('view-report'); window.reportShowNew && window.reportShowNew()">
-            <span class='icon' data-lucide='plus-circle'></span> New Report
+          <div id="risk-nav-items">
+            <div class="sidebar-item risk-sub-item" id="risk-nav-dashboard" onclick="window.initRisk && window.initRisk()">
+              <span class='icon' data-lucide='layout-dashboard'></span> Risk Dashboard
+            </div>
+            <div class="sidebar-item risk-sub-item" id="risk-nav-new" onclick="loadAssessmentList && loadAssessmentList()">
+              <span class='icon' data-lucide='shield-alert'></span> Assessments
+            </div>
+            <div class="sidebar-item risk-sub-item" id="risk-nav-new-btn" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-new'); startNewWizard && startNewWizard()">
+              <span class='icon' data-lucide='plus-circle'></span> New Assessment
+            </div>
+            <div class="sidebar-item risk-sub-item" id="risk-nav-library" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-library'); loadLibrary && loadLibrary()">
+              <span class='icon' data-lucide='library'></span> Risk Library
+            </div>
+            <div class="sidebar-item risk-sub-item" id="risk-nav-templates" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-templates'); loadTemplates && loadTemplates()">
+              <span class='icon' data-lucide='layout-template'></span> Templates
+            </div>
+            <div class="sidebar-item risk-sub-item" id="risk-nav-reports" onclick="showRiskReports()">
+              <span class='icon' data-lucide='file-text'></span> Reports
+            </div>
+            <div class="sidebar-item risk-sub-item" id="risk-nav-approval" onclick="showRiskApproval()">
+              <span class='icon' data-lucide='check-circle'></span> Approval Queue
+            </div>
+            <div class="sidebar-item risk-sub-item" id="risk-nav-assistant" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-assistant'); loadAIAssistant && loadAIAssistant()">
+              <span class='icon' data-lucide='bot'></span> AI Assistant
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- Generate Document — AI generator for document types without a
-           dedicated suite yet (DQ/FAT/SAT/FMEA/SOP/Validation Plan/
-           Validation Report/IQ-OQ Combined). URS/IQ/OQ/PQ/CAPA/Deviation/
-           Change Control are generated from their own suite above instead
-           (REPOSITORY_AUDIT.md Critical finding: retired duplicate wizard
-           entry points per Blueprint ADR-P02). -->
-      <div class="sidebar-section">
-        <div class="sidebar-label-row">
-          <span class="sidebar-label">Generate Document</span>
-          <button class="val-collapse-btn" id="val-collapse-btn" onclick="toggleValSection()"><span class='icon' data-lucide='chevron-up'></span></button>
+        <!-- URS Management -->
+        <div class="qms-nav-group">
+          <div class="qms-nav-group-label">
+            <span>URS Management</span>
+            <button class="val-collapse-btn" id="urs-collapse-btn" onclick="toggleURSSection()"><span class='icon' data-lucide='chevron-up'></span></button>
+          </div>
+          <div id="urs-nav-items">
+            <div class="sidebar-item urs-sub-item" data-view="view-urs-dashboard">
+              <span class='icon' data-lucide='clipboard-list'></span> URS Dashboard
+            </div>
+            <div class="sidebar-item urs-sub-item" data-view="view-urs-new">
+              <span class='icon' data-lucide='plus-circle'></span> New URS
+            </div>
+          </div>
         </div>
-        <div id="val-nav-items"></div>
+
+        <!-- Qualification (IQ/OQ/PQ) -->
+        <div class="qms-nav-group">
+          <div class="qms-nav-group-label">
+            <span>Qualification</span>
+            <button class="val-collapse-btn" id="qual-collapse-btn" onclick="toggleQualSection()"><span class='icon' data-lucide='chevron-up'></span></button>
+          </div>
+          <div id="qual-nav-items">
+            <div class="sidebar-item qual-sub-item" onclick="window.initQual && window.initQual()">
+              <span class='icon' data-lucide='flask-conical'></span> IQ / OQ / PQ
+            </div>
+            <div class="sidebar-item qual-sub-item" onclick="window.showView && window.showView('view-qual'); window.qualShowNew && window.qualShowNew()">
+              <span class='icon' data-lucide='plus-circle'></span> New Qualification
+            </div>
+          </div>
+        </div>
+
+        <!-- Validation Reports -->
+        <div class="qms-nav-group">
+          <div class="qms-nav-group-label">
+            <span>Validation Reports</span>
+            <button class="val-collapse-btn" id="report-collapse-btn" onclick="toggleReportSection()"><span class='icon' data-lucide='chevron-up'></span></button>
+          </div>
+          <div id="report-nav-items">
+            <div class="sidebar-item report-sub-item" onclick="window.initReport && window.initReport()">
+              <span class='icon' data-lucide='file-check'></span> Validation Reports
+            </div>
+            <div class="sidebar-item report-sub-item" onclick="window.showView && window.showView('view-report'); window.reportShowNew && window.reportShowNew()">
+              <span class='icon' data-lucide='plus-circle'></span> New Report
+            </div>
+          </div>
+        </div>
+
+        <!-- Generate Document — AI generator for document types without a
+             dedicated suite yet (DQ/FAT/SAT/FMEA/SOP/Validation Plan/
+             Validation Report/IQ-OQ Combined). URS/IQ/OQ/PQ/CAPA/Deviation/
+             Change Control are generated from their own suite above instead
+             (REPOSITORY_AUDIT.md Critical finding: retired duplicate wizard
+             entry points per Blueprint ADR-P02). -->
+        <div class="qms-nav-group">
+          <div class="qms-nav-group-label">
+            <span>Generate Document</span>
+            <button class="val-collapse-btn" id="val-collapse-btn" onclick="toggleValSection()"><span class='icon' data-lucide='chevron-up'></span></button>
+          </div>
+          <div id="val-nav-items"></div>
+        </div>
       </div>
 
       <div class="sidebar-divider"></div>
@@ -267,6 +294,16 @@
               <span class='icon' data-lucide='git-pull-request'></span> Change Control
             </div>
           </div>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- AI Assistant -->
+      <div class="sidebar-section">
+        <div class="sidebar-label">AI Assistant</div>
+        <div class="sidebar-item" id="nav-chat" data-view="view-chat">
+          <span class='icon' data-lucide='sparkles'></span> AI Assistant
         </div>
       </div>
 
@@ -687,6 +724,36 @@
         <div class="kb-detail-panel" id="kb-detail-panel" style="display:none"></div>
 
       </div>
+    </main>
+
+    <!-- ── Equipment Library (Phase 2 — first-class, top-level, company-wide
+         list; reuses equipment.js's eqRenderList()/eqOpenProfile() rather
+         than duplicating the Project Workspace equipment tab's rendering.
+         Equipment remains project-owned at the schema level — company-owned
+         re-parenting is Blueprint ADR-P01/PA-013, Phase 3, out of scope
+         here — so records are shown with their owning project, and "Add
+         Equipment" stays inside a Project's own Equipment tab where a
+         project_id is available. ─────────────────────────────────────── -->
+    <main class="kb-container" id="view-equipment-library" style="display:none">
+      <div class="kb-header">
+        <div class="kb-header-left">
+          <span class="kb-header-icon" data-lucide="cog"></span>
+          <div>
+            <h2 class="kb-header-title">Equipment Library</h2>
+            <p class="kb-header-sub">Every Equipment record across every project — company-wide</p>
+          </div>
+        </div>
+      </div>
+      <div class="eq-list-header">
+        <span>Equipment Records</span>
+        <span id="eqlib-count" class="eq-count"></span>
+      </div>
+      <div class="eq-empty" id="eqlib-empty">
+        <span class='icon' data-lucide='cog' style="width:40px;height:40px;opacity:0.5"></span>
+        <p>No equipment recorded yet.</p>
+        <p style="font-size:12px">Equipment is added from inside a project's own Equipment tab.</p>
+      </div>
+      <div id="eqlib-list"></div>
     </main>
 
     <!-- ── Validation Document Generator view ───────────────────────────────── -->
@@ -1744,6 +1811,20 @@
       if (window.openValidationWizard) window.openValidationWizard(docType);
     }
     window.switchToValidation = switchToValidation;
+
+    // Return to the Equipment Library (Phase 2) — used by equipment.js's
+    // eqBackToList() when a Profile was opened from here rather than from
+    // a Project Workspace's equipment tab.
+    function eqShowLibraryView() {
+      document.querySelectorAll(".sidebar-item[data-view]").forEach(n => n.classList.remove("active"));
+      const navItem = document.getElementById("nav-equipment-library");
+      if (navItem) navItem.classList.add("active");
+      document.querySelectorAll("main[id^='view-']").forEach(v => v.style.display = "none");
+      document.getElementById("view-equipment-library").style.display = "flex";
+      if (window.__ws_setActiveView) window.__ws_setActiveView("view-equipment-library");
+      if (window.eqLoadCompanyList) window.eqLoadCompanyList();
+    }
+    window.eqShowLibraryView = eqShowLibraryView;
   </script>
 
   <!-- ── View navigation (Chat / Documents / Insights) ─────────────────────── -->
@@ -1783,6 +1864,10 @@
 
         if (targetId === "view-kb") {
           if (window.initKB) window.initKB();
+        }
+
+        if (targetId === "view-equipment-library") {
+          if (window.eqLoadCompanyList) window.eqLoadCompanyList();
         }
 
         if (targetId === "view-dashboard") {

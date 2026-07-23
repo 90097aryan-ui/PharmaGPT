@@ -215,6 +215,9 @@ def upsert_action(cid):
 
 @bp.route("/actions/<int:aid>/escalate", methods=["POST"])
 def escalate_action(aid):
+    existing = cdb.get_action(aid)
+    if not existing or not tenancy.scoped_or_none(cdb.get_capa(existing["capa_id"]), g.tenant.company_id):
+        return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     action = cdb.escalate_action(aid, data.get("escalated_to", ""), data.get("escalated_date", ""))
     if not action:

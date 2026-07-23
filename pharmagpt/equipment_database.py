@@ -125,10 +125,14 @@ def get_all_equipment(company_id: str | None = None) -> list[dict]:
     """
     conn = get_connection()
     if company_id is None:
-        rows = conn.execute("SELECT * FROM equipment ORDER BY created_at DESC").fetchall()
+        rows = conn.execute(
+            """SELECT e.*, p.name AS project_name FROM equipment e
+               JOIN projects p ON p.id = e.project_id
+               ORDER BY e.created_at DESC"""
+        ).fetchall()
     else:
         rows = conn.execute(
-            """SELECT e.* FROM equipment e
+            """SELECT e.*, p.name AS project_name FROM equipment e
                JOIN projects p ON p.id = e.project_id
                WHERE p.company_id = ? ORDER BY e.created_at DESC""",
             (company_id,),

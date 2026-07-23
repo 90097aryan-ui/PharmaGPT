@@ -48,19 +48,39 @@ GET    /qual/<id>/traceability/export/docx           Export traceability matrix 
 
 import json
 import io
+import logging
 from flask import Blueprint, g, jsonify, request, Response, stream_with_context, send_file
 
 from pharmagpt import qual_database as qdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
+from pharmagpt.services import kb_sync
 from pharmagpt.services import qual_service as svc
 from pharmagpt.state import gemini_client
 from pharmagpt.config import GEMINI_MODEL
 from pharmagpt.prompts import PHARMA_SYSTEM_PROMPT
 from pharmagpt.services.doc_exporter import markdown_to_docx
+
+logger = logging.getLogger(__name__)
 from google.genai import types
 
 bp = Blueprint("qual", __name__, url_prefix="/qual")
+
+
+def _scoped_protocol(qid, pid):
+    """Return the protocol only if the qualification belongs to the
+    caller's company AND the protocol belongs to that qualification — every
+    protocol-scoped route needs both checks. Returns None (caller returns
+    404) if either fails. (Phase 2 RBAC/multi-tenancy audit finding: several
+    protocol/test-case routes previously checked only protocol.qual_id ==
+    qid, never that qid itself belonged to the caller's company — a
+    cross-tenant read/write gap.)"""
+    if not tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id):
+        return None
+    protocol = qdb.get_protocol(pid)
+    if not protocol or protocol.get("qual_id") != qid:
+        return None
+    return protocol
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -153,16 +173,15 @@ def create_protocol(qid):
 
 @bp.route("/<int:qid>/protocols/<int:pid>", methods=["GET"])
 def get_protocol(qid, pid):
-    protocol = qdb.get_protocol(pid)
-    if not protocol or protocol.get("qual_id") != qid:
+    protocol = _scoped_protocol(qid, pid)
+    if not protocol:
         return jsonify({"error": "Protocol not found"}), 404
     return jsonify(protocol)
 
 
 @bp.route("/<int:qid>/protocols/<int:pid>", methods=["PUT"])
 def update_protocol(qid, pid):
-    protocol = qdb.get_protocol(pid)
-    if not protocol or protocol.get("qual_id") != qid:
+    if not _scoped_protocol(qid, pid):
         return jsonify({"error": "Protocol not found"}), 404
     data = request.get_json() or {}
     updated = qdb.update_protocol(pid, data)
@@ -172,8 +191,7 @@ def update_protocol(qid, pid):
 @bp.route("/<int:qid>/protocols/<int:pid>", methods=["DELETE"])
 @require_role("company_admin")
 def delete_protocol(qid, pid):
-    protocol = qdb.get_protocol(pid)
-    if not protocol or protocol.get("qual_id") != qid:
+    if not _scoped_protocol(qid, pid):
         return jsonify({"error": "Protocol not found"}), 404
     qdb.delete_protocol(pid)
     return jsonify({"deleted": True})
@@ -183,16 +201,14 @@ def delete_protocol(qid, pid):
 
 @bp.route("/<int:qid>/protocols/<int:pid>/test-cases", methods=["GET"])
 def get_test_cases(qid, pid):
-    protocol = qdb.get_protocol(pid)
-    if not protocol or protocol.get("qual_id") != qid:
+    if not _scoped_protocol(qid, pid):
         return jsonify({"error": "Protocol not found"}), 404
     return jsonify(qdb.get_test_cases(pid))
 
 
 @bp.route("/<int:qid>/protocols/<int:pid>/test-cases", methods=["POST"])
 def save_test_cases(qid, pid):
-    protocol = qdb.get_protocol(pid)
-    if not protocol or protocol.get("qual_id") != qid:
+    if not _scoped_protocol(qid, pid):
         return jsonify({"error": "Protocol not found"}), 404
     tcs = request.get_json() or []
     saved = qdb.save_test_cases(pid, qid, tcs)
@@ -201,8 +217,7 @@ def save_test_cases(qid, pid):
 
 @bp.route("/<int:qid>/protocols/<int:pid>/test-cases/add", methods=["POST"])
 def add_test_case(qid, pid):
-    protocol = qdb.get_protocol(pid)
-    if not protocol or protocol.get("qual_id") != qid:
+    if not _scoped_protocol(qid, pid):
         return jsonify({"error": "Protocol not found"}), 404
     tc = request.get_json() or {}
     new_tc = qdb.add_test_case(pid, qid, tc)
@@ -211,6 +226,11 @@ def add_test_case(qid, pid):
 
 @bp.route("/<int:qid>/protocols/<int:pid>/test-cases/<int:tcid>", methods=["PUT"])
 def update_test_case(qid, pid, tcid):
+    if not _scoped_protocol(qid, pid):
+        return jsonify({"error": "Protocol not found"}), 404
+    existing_tc = qdb.get_test_case(tcid)
+    if not existing_tc or existing_tc.get("protocol_id") != pid:
+        return jsonify({"error": "Test case not found"}), 404
     data = request.get_json() or {}
     updated = qdb.update_test_case(tcid, data)
     if not updated:
@@ -221,6 +241,11 @@ def update_test_case(qid, pid, tcid):
 @bp.route("/<int:qid>/protocols/<int:pid>/test-cases/<int:tcid>", methods=["DELETE"])
 @require_role("company_admin")
 def delete_test_case(qid, pid, tcid):
+    if not _scoped_protocol(qid, pid):
+        return jsonify({"error": "Protocol not found"}), 404
+    existing_tc = qdb.get_test_case(tcid)
+    if not existing_tc or existing_tc.get("protocol_id") != pid:
+        return jsonify({"error": "Test case not found"}), 404
     qdb.delete_test_case(tcid)
     return jsonify({"deleted": True})
 
@@ -370,8 +395,7 @@ def review_protocol(qid, pid):
 
 @bp.route("/<int:qid>/protocols/<int:pid>/executions", methods=["GET"])
 def get_executions(qid, pid):
-    protocol = qdb.get_protocol(pid)
-    if not protocol or protocol.get("qual_id") != qid:
+    if not _scoped_protocol(qid, pid):
         return jsonify({"error": "Protocol not found"}), 404
     executions = qdb.get_executions(pid)
     # Build execution map keyed by test_case_id for efficient frontend access
@@ -381,14 +405,14 @@ def get_executions(qid, pid):
 
 @bp.route("/<int:qid>/protocols/<int:pid>/execute/<int:tcid>", methods=["POST"])
 def execute_test_case(qid, pid, tcid):
-    protocol = qdb.get_protocol(pid)
-    if not protocol or protocol.get("qual_id") != qid:
+    protocol = _scoped_protocol(qid, pid)
+    if not protocol:
         return jsonify({"error": "Protocol not found"}), 404
     data = request.get_json() or {}
     result = qdb.save_execution(tcid, pid, qid, data)
 
     # Auto-update protocol status to in_progress
-    qual = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
+    qual = qdb.get_qualification(qid)   # already tenant-verified by _scoped_protocol() above
     if qual:
         ptype = protocol.get("protocol_type", "IQ").lower()
         status_field = f"{ptype}_status"
@@ -413,8 +437,8 @@ def execute_test_case(qid, pid, tcid):
 @bp.route("/<int:qid>/protocols/<int:pid>/complete", methods=["POST"])
 def complete_protocol(qid, pid):
     """Mark protocol as completed and update qualification status."""
-    protocol = qdb.get_protocol(pid)
-    if not protocol or protocol.get("qual_id") != qid:
+    protocol = _scoped_protocol(qid, pid)
+    if not protocol:
         return jsonify({"error": "Protocol not found"}), 404
     data = request.get_json() or {}
 
@@ -472,6 +496,11 @@ def create_deviation(qid):
 
 @bp.route("/<int:qid>/deviations/<int:did>", methods=["PUT"])
 def update_deviation(qid, did):
+    if not tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id):
+        return jsonify({"error": "Qualification not found"}), 404
+    existing_dev = qdb.get_deviation(did)
+    if not existing_dev or existing_dev.get("qual_id") != qid:
+        return jsonify({"error": "Deviation not found"}), 404
     data = request.get_json() or {}
     updated = qdb.update_deviation(did, data)
     if not updated:
@@ -510,7 +539,10 @@ def add_approval(qid):
         "Obsolete": "obsolete",
     }
     if action in status_map:
-        qdb.update_qualification(qid, {"status": status_map[action]})
+        new_status = status_map[action]
+        qdb.update_qualification(qid, {"status": new_status})
+        if new_status == "approved":
+            _publish_effective_protocols_to_kb(qdb.get_qualification(qid))
 
     sig = tenancy.signing_identity(g.tenant)
     entry = qdb.add_approval_entry(
@@ -524,6 +556,41 @@ def add_approval(qid):
     return jsonify(entry), 201
 
 
+def _publish_effective_protocols_to_kb(qual: dict) -> None:
+    """Phase 2: when a Qualification is Approved, each of its IQ/OQ/PQ/DQ
+    protocols — the actual documents a QA reviewer looks for, not the
+    Qualification container itself — becomes the current version in the
+    Knowledge Base automatically. Failures are logged, never raised: a
+    KB-sync problem must not block the approval itself."""
+    try:
+        protocols = qdb.get_protocols_for_qual(qual["id"])
+    except Exception:
+        logger.exception("kb_sync: could not load protocols for qualification %s", qual["id"])
+        return
+    for protocol in protocols:
+        try:
+            test_cases = qdb.get_test_cases(protocol["id"])
+            executions = qdb.get_executions(protocol["id"])
+            markdown_content = svc.build_protocol_markdown(qual, protocol, test_cases, executions)
+            ptype = protocol.get("protocol_type", "IQ")
+            kb_sync.publish_to_kb(
+                source_type="qualification_protocol", source_id=protocol["id"],
+                company_id=g.tenant.company_id,
+                title=protocol.get("title", f"{ptype} Protocol"), doc_type=ptype,
+                doc_number=protocol.get("protocol_number", ""), version=protocol.get("revision", "A"),
+                content_markdown=markdown_content, effective_date=qual.get("effective_date"),
+                form_data={
+                    "title": protocol.get("title", ""), "equipment_name": qual.get("equipment_name", ""),
+                    "department": qual.get("department", ""),
+                },
+            )
+        except Exception:
+            logger.exception(
+                "kb_sync: failed to publish protocol %s (qualification %s) to Knowledge Base",
+                protocol.get("id"), qual["id"],
+            )
+
+
 # ── Version History ───────────────────────────────────────────────────────────
 
 @bp.route("/<int:qid>/versions", methods=["GET"])
@@ -535,8 +602,7 @@ def get_versions(qid):
 
 @bp.route("/<int:qid>/protocols/<int:pid>/versions", methods=["POST"])
 def create_version(qid, pid):
-    protocol = qdb.get_protocol(pid)
-    if not protocol or protocol.get("qual_id") != qid:
+    if not _scoped_protocol(qid, pid):
         return jsonify({"error": "Protocol not found"}), 404
     data = request.get_json() or {}
     snapshot = qdb.create_version_snapshot(qid, pid, data.get("change_summary", "Version snapshot"), data.get("created_by", "System"))

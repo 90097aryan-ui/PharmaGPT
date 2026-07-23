@@ -245,6 +245,17 @@ def get_actions(capa_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_action(action_id: int) -> dict | None:
+    """Single CAPA action, including its owning capa_id — used by
+    routes/qms_capa.py to verify tenancy before escalating (Phase 2 RBAC/
+    multi-tenancy audit: this route has no cid in its URL to check
+    directly)."""
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM qms_capa_actions WHERE id = ?", (action_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def escalate_action(action_id: int, escalated_to: str, escalated_date: str) -> dict | None:
     conn = get_connection()
     conn.execute(

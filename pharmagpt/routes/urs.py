@@ -46,6 +46,7 @@ from flask import Blueprint, g, jsonify, request
 from pharmagpt import urs_database as udb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
+from pharmagpt.services import kb_sync
 from pharmagpt.services import urs_service as svc
 from pharmagpt.services import urs_lifecycle as lifecycle
 from pharmagpt.services.urs_generation_job import submit_generation_job
@@ -199,6 +200,11 @@ def add_requirement(uid):
 
 @bp.route("/<int:uid>/requirements/<int:rid>", methods=["PUT"])
 def update_requirement(uid, rid):
+    if not tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id):
+        return jsonify({"error": "URS not found"}), 404
+    existing_req = udb.get_requirement(rid)
+    if not existing_req or existing_req.get("urs_id") != uid:
+        return jsonify({"error": "Requirement not found"}), 404
     data = request.get_json() or {}
     updated = udb.update_requirement(rid, data)
     if not updated:
@@ -209,6 +215,11 @@ def update_requirement(uid, rid):
 @bp.route("/<int:uid>/requirements/<int:rid>", methods=["DELETE"])
 @require_role("company_admin")
 def delete_requirement(uid, rid):
+    if not tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id):
+        return jsonify({"error": "URS not found"}), 404
+    existing_req = udb.get_requirement(rid)
+    if not existing_req or existing_req.get("urs_id") != uid:
+        return jsonify({"error": "Requirement not found"}), 404
     udb.delete_requirement(rid)
     return jsonify({"deleted": True})
 
@@ -442,9 +453,33 @@ def add_approval(uid):
 
     if updates:
         udb.update_urs(uid, updates)
+        if updates.get("status") == lifecycle.EFFECTIVE:
+            _publish_effective_urs_to_kb(udb.get_urs(uid))
 
     entry = udb.add_approval_entry(uid, action, performed_by, role, comments, revision)
     return jsonify(entry), 201
+
+
+def _publish_effective_urs_to_kb(urs: dict) -> None:
+    """Phase 2: an Effective URS becomes the current version in the
+    Knowledge Base automatically — no manual upload. Failures are logged,
+    never raised: a KB-sync problem must not block the approval itself."""
+    try:
+        requirements = udb.get_requirements(urs["id"])
+        markdown_content = svc.build_urs_markdown(urs, requirements)
+        kb_sync.publish_to_kb(
+            source_type="urs", source_id=urs["id"], company_id=g.tenant.company_id,
+            title=urs.get("title", "URS Document"), doc_type="URS",
+            doc_number=urs.get("doc_number") or urs.get("urs_number", ""),
+            version=urs.get("revision", "A"),
+            content_markdown=markdown_content, effective_date=urs.get("effective_date"),
+            form_data={
+                "title": urs.get("title", ""), "equipment_name": urs.get("equipment_name", ""),
+                "department": urs.get("department", ""),
+            },
+        )
+    except Exception:
+        logger.exception("kb_sync: failed to publish URS %s to Knowledge Base", urs["id"])
 
 
 # ── Version History ───────────────────────────────────────────────────────────
@@ -470,6 +505,11 @@ def create_version(uid):
 
 @bp.route("/<int:uid>/versions/<int:vid>/requirements", methods=["GET"])
 def get_version_requirements(uid, vid):
+    if not tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id):
+        return jsonify({"error": "URS not found"}), 404
+    version = udb.get_version(vid)
+    if not version or version.get("urs_id") != uid:
+        return jsonify({"error": "Version not found"}), 404
     return jsonify(udb.get_version_requirements(vid))
 
 

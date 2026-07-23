@@ -43,6 +43,10 @@ USER_A = TenantContext(
     user_id="user-a", email="user-a@example.com", display_name="Uma User",
     role="user", company_id=COMPANY_A,
 )
+SUPER_ADMIN = TenantContext(
+    user_id="super-1", email="super@example.com", display_name="Super Admin",
+    role="super_admin", company_id=None,
+)
 
 AUTH_HEADERS = {"Authorization": "Bearer good-token"}
 MIDDLEWARE_PATH = "pharmagpt.auth.middleware.resolve_tenant_context"
@@ -174,6 +178,123 @@ def test_cross_tenant_cannot_link_another_companys_capa_to_own_deviation(client)
         )
 
     assert resp.status_code == 400
+
+
+def test_cross_tenant_cannot_reach_another_companys_qualification_protocol(client):
+    """Phase 2 RBAC/multi-tenancy audit finding: routes/qual.py's protocol/
+    test-case/execution/deviation routes checked only that a child id
+    belonged to the qid in the URL, never that qid itself belonged to the
+    caller's company — Company B could read/write Company A's qualification
+    protocols, test cases, executions, and deviations by guessing ids.
+    Fixed via a shared _scoped_protocol() helper (mirrors the file's own
+    already-correct pattern in generate_test_cases/review_protocol/
+    export_protocol_docx)."""
+    with _as(ADMIN_A):
+        qual = client.post("/qual/", json={"title": "Company A Qualification", "equipment_name": "HPLC"},
+                           headers=AUTH_HEADERS).get_json()
+        protocol = client.post(f"/qual/{qual['id']}/protocols", json={"protocol_type": "IQ"},
+                               headers=AUTH_HEADERS).get_json()
+        tc = client.post(f"/qual/{qual['id']}/protocols/{protocol['id']}/test-cases/add",
+                         json={"test_name": "Power-up check"}, headers=AUTH_HEADERS).get_json()
+
+    with _as(ADMIN_B):
+        assert client.get(f"/qual/{qual['id']}/protocols/{protocol['id']}", headers=AUTH_HEADERS).status_code == 404
+        assert client.put(f"/qual/{qual['id']}/protocols/{protocol['id']}", json={"status": "hijacked"},
+                          headers=AUTH_HEADERS).status_code == 404
+        assert client.get(f"/qual/{qual['id']}/protocols/{protocol['id']}/test-cases",
+                          headers=AUTH_HEADERS).status_code == 404
+        assert client.put(f"/qual/{qual['id']}/protocols/{protocol['id']}/test-cases/{tc['id']}",
+                          json={"status": "pass"}, headers=AUTH_HEADERS).status_code == 404
+        assert client.post(f"/qual/{qual['id']}/protocols/{protocol['id']}/execute/{tc['id']}",
+                           json={"result": "pass"}, headers=AUTH_HEADERS).status_code == 404
+        assert client.post(f"/qual/{qual['id']}/protocols/{protocol['id']}/complete",
+                           json={}, headers=AUTH_HEADERS).status_code == 404
+
+
+def test_cross_tenant_cannot_reach_another_companys_urs_requirement_or_version(client):
+    """Phase 2 RBAC/multi-tenancy audit finding: routes/urs.py's requirement
+    update/delete and version-requirements routes had no tenancy check at
+    all (not even a same-company id-ownership check)."""
+    with _as(ADMIN_A):
+        urs = client.post("/urs/", json={"title": "Company A URS", "equipment_name": "HPLC"},
+                          headers=AUTH_HEADERS).get_json()
+        req = client.post(f"/urs/{urs['id']}/requirements/add", json={"requirement": "Shall log data"},
+                          headers=AUTH_HEADERS).get_json()
+        version = client.post(f"/urs/{urs['id']}/versions", json={"change_summary": "v1"},
+                              headers=AUTH_HEADERS).get_json()
+
+    with _as(ADMIN_B):
+        assert client.put(f"/urs/{urs['id']}/requirements/{req['id']}", json={"requirement": "hijacked"},
+                          headers=AUTH_HEADERS).status_code == 404
+        assert client.delete(f"/urs/{urs['id']}/requirements/{req['id']}",
+                             headers=AUTH_HEADERS).status_code == 404
+        assert client.get(f"/urs/{urs['id']}/versions/{version['id']}/requirements",
+                          headers=AUTH_HEADERS).status_code == 404
+
+
+def test_cross_tenant_cannot_reach_another_companys_report_approval_or_versions(client):
+    """Phase 2 RBAC/multi-tenancy audit finding: routes/report.py's GET
+    approval-trail and versions routes had no tenancy check at all."""
+    with _as(ADMIN_A):
+        report = client.post("/report/", json={"title": "Company A Report"}, headers=AUTH_HEADERS).get_json()
+
+    with _as(ADMIN_B):
+        assert client.get(f"/report/{report['id']}/approval", headers=AUTH_HEADERS).status_code == 404
+        assert client.get(f"/report/{report['id']}/versions", headers=AUTH_HEADERS).status_code == 404
+        assert client.post(f"/report/{report['id']}/versions", json={"change_summary": "hijacked"},
+                           headers=AUTH_HEADERS).status_code == 404
+
+
+def test_cross_tenant_cannot_acknowledge_or_train_on_another_companys_document(client):
+    """Phase 2 RBAC/multi-tenancy audit finding: routes/qms_documents.py's
+    distribution-acknowledge and training-status routes are keyed only by
+    their own id (no did in the URL) and had no tenancy check at all."""
+    with _as(ADMIN_A):
+        doc = client.post("/qms/documents", json={"title": "Company A SOP"}, headers=AUTH_HEADERS).get_json()
+        dist = client.post(f"/qms/documents/{doc['id']}/distribution", json={"distributed_to": "QA Team"},
+                           headers=AUTH_HEADERS).get_json()
+        training = client.post(f"/qms/documents/{doc['id']}/training", json={"trainee_name": "Uma User"},
+                               headers=AUTH_HEADERS).get_json()
+
+    with _as(ADMIN_B):
+        assert client.post(f"/qms/documents/distribution/{dist['id']}/acknowledge",
+                           json={"acknowledged_date": "2026-07-23"}, headers=AUTH_HEADERS).status_code == 404
+        assert client.put(f"/qms/documents/training/{training['id']}",
+                          json={"training_status": "Completed"}, headers=AUTH_HEADERS).status_code == 404
+
+
+def test_cross_tenant_cannot_escalate_another_companys_capa_action(client):
+    """Phase 2 RBAC/multi-tenancy audit finding: routes/qms_capa.py's
+    escalate-action route is keyed only by action id (no cid in the URL)
+    and had no tenancy check at all."""
+    with _as(ADMIN_A):
+        capa = client.post("/qms/capa", json={"title": "Company A CAPA"}, headers=AUTH_HEADERS).get_json()
+        action = client.post(f"/qms/capa/{capa['id']}/actions", json={"description": "Fix the thing"},
+                             headers=AUTH_HEADERS).get_json()
+
+    with _as(ADMIN_B):
+        resp = client.post(f"/qms/capa/actions/{action['id']}/escalate",
+                           json={"escalated_to": "Someone"}, headers=AUTH_HEADERS)
+        assert resp.status_code == 404
+
+
+def test_cross_tenant_cannot_reach_change_control_ai_narrative_endpoints(client):
+    """Phase 2 RBAC/multi-tenancy audit finding: the 7 dynamically-generated
+    AI-narrative endpoints (risk-summary, rollback-plan, regulatory-impact,
+    justification, executive-summary, verification-summary,
+    effectiveness-review — routes/qms_change_control.py's add_url_rule loop)
+    checked existence via a raw, unscoped ccdb.get_change_control(cc_id)
+    instead of tenancy.scoped_or_none(), unlike every other route in the
+    same file. Company B could read Company A's change-control AI narrative
+    content. Fixed to match the file's own established pattern."""
+    with _as(ADMIN_A):
+        cc = client.post("/qms/change-control", json={"title": "Company A Change"}, headers=AUTH_HEADERS).get_json()
+
+    with _as(ADMIN_B):
+        for path in ("risk-summary", "rollback-plan", "regulatory-impact", "justification",
+                     "executive-summary", "verification-summary", "effectiveness-review"):
+            resp = client.post(f"/qms/change-control/{cc['id']}/{path}", headers=AUTH_HEADERS)
+            assert resp.status_code == 404, f"{path} leaked Company A's change control to Company B"
 
 
 # ── 2. Unauthorized role access (RBAC) ───────────────────────────────────────
@@ -383,3 +504,59 @@ def test_document_creation_audit_performed_by_cannot_be_spoofed(client):
     assert creation_entries
     assert all(a["performed_by"] == "Alice Admin" for a in creation_entries)
     assert not any(a["performed_by"] == "Fake CEO Spoofed Identity" for a in creation_entries)
+
+
+# ── 4. POST /projects role matrix (PLATFORM_ARCHITECTURE.md §7) ─────────────
+# Any authenticated identity scoped to a company (company_admin, reviewer_qa,
+# user) may create a project inside that company. Super Admin has no
+# standing company_id and is denied — "no standing access to tenant
+# content" is the platform's documented posture, not a bug
+# (routes/projects.py::create_project).
+
+def _post_project(client, tenant, name="RBAC matrix project"):
+    with _as(tenant):
+        return client.post(
+            "/projects",
+            json={"name": name, "equipment_name": "HPLC", "manufacturer": "Agilent",
+                  "department": "QC", "validation_type": "IQ/OQ/PQ"},
+            headers=AUTH_HEADERS,
+        )
+
+
+def test_company_admin_can_create_project(client):
+    resp = _post_project(client, ADMIN_A)
+
+    assert resp.status_code == 201
+    assert resp.get_json()["company_id"] == COMPANY_A
+
+
+def test_reviewer_qa_can_create_project(client):
+    resp = _post_project(client, REVIEWER_A)
+
+    assert resp.status_code == 201
+    assert resp.get_json()["company_id"] == COMPANY_A
+
+
+def test_user_role_can_create_project(client):
+    resp = _post_project(client, USER_A)
+
+    assert resp.status_code == 201
+    assert resp.get_json()["company_id"] == COMPANY_A
+
+
+def test_super_admin_cannot_create_project_without_standing_access(client):
+    resp = _post_project(client, SUPER_ADMIN)
+
+    assert resp.status_code == 403
+    assert resp.get_json()["error"] == "Super Admin has no standing access to tenant content"
+
+
+def test_super_admin_creation_attempt_persists_no_project(client):
+    """A rejected Super Admin create must leave no row behind — nothing for
+    a subsequent request to find or leak across tenants."""
+    before = len(db.get_all_projects(COMPANY_A))
+
+    resp = _post_project(client, SUPER_ADMIN)
+
+    assert resp.status_code == 403
+    assert len(db.get_all_projects(COMPANY_A)) == before

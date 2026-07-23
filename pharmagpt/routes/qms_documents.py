@@ -38,6 +38,7 @@ POST   /qms/documents/<id>/export/docx       DOCX export
 
 import io
 import json
+import logging
 import re
 from flask import Blueprint, g, jsonify, request, Response, stream_with_context, send_file
 
@@ -45,9 +46,12 @@ from pharmagpt import qms_document_database as qdb
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
+from pharmagpt.services import kb_sync
 from pharmagpt.services import qms_document_service as svc
 from pharmagpt.services.qms_shared import stream_gemini
 from pharmagpt.prompts import qms_document_prompt as qp
+
+logger = logging.getLogger(__name__)
 
 bp = Blueprint("qms_documents", __name__, url_prefix="/qms/documents")
 
@@ -193,6 +197,9 @@ def add_distribution(did):
 
 @bp.route("/distribution/<int:dist_id>/acknowledge", methods=["POST"])
 def acknowledge_distribution(dist_id):
+    existing = qdb.get_distribution_entry(dist_id)
+    if not existing or not tenancy.scoped_or_none(qdb.get_document(existing["document_id"]), g.tenant.company_id):
+        return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     entry = qdb.acknowledge_distribution(dist_id, data.get("acknowledged_date", ""))
     if not entry:
@@ -220,6 +227,9 @@ def add_training(did):
 
 @bp.route("/training/<int:tid>", methods=["PUT"])
 def update_training(tid):
+    existing = qdb.get_training_entry(tid)
+    if not existing or not tenancy.scoped_or_none(qdb.get_document(existing["document_id"]), g.tenant.company_id):
+        return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     entry = qdb.update_training_status(tid, data.get("training_status", "Pending"), data.get("training_date", ""))
     if not entry:
@@ -252,7 +262,14 @@ def submit_approval(did):
         return jsonify({"error": "Action is required"}), 400
 
     if action_name in _STATUS_MAP:
-        qdb.update_document(did, {"status": _STATUS_MAP[action_name]})
+        new_status = _STATUS_MAP[action_name]
+        updates = {"status": new_status}
+        if new_status == "Effective" and not document.get("effective_date"):
+            from datetime import date
+            updates["effective_date"] = date.today().isoformat()
+        document = qdb.update_document(did, updates)
+        if new_status == "Effective" and (document.get("content") or "").strip():
+            _publish_effective_document_to_kb(document)
 
     sig = tenancy.signing_identity(g.tenant)
     entry = qmsdb.add_approval_entry(
@@ -262,6 +279,25 @@ def submit_approval(did):
     )
     qmsdb.add_audit_entry("document", did, action_name, sig["performed_by"])
     return jsonify(entry), 201
+
+
+def _publish_effective_document_to_kb(document: dict) -> None:
+    """Phase 2: an Effective Document Control record becomes the current
+    version in the Knowledge Base automatically — no manual upload. Failures
+    are logged, never raised: a KB-sync problem must not block the approval
+    itself (the approval and its audit trail are already committed)."""
+    try:
+        kb_sync.publish_to_kb(
+            source_type="document", source_id=document["id"], company_id=g.tenant.company_id,
+            title=document.get("title", "Untitled Document"), doc_type=document.get("doc_type", "SOP"),
+            doc_number=document.get("doc_number", ""), version=document.get("version", "1.0"),
+            content_markdown=document["content"], effective_date=document.get("effective_date"),
+            form_data={"title": document.get("title", ""), "department": document.get("department", "")},
+        )
+    except Exception:
+        logger.exception(
+            "kb_sync: failed to publish Document Control record %s to Knowledge Base", document["id"]
+        )
 
 
 # ── Report / Export ────────────────────────────────────────────────────────────

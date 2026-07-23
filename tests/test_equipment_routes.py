@@ -26,7 +26,12 @@ def test_create_and_list_project_equipment(client):
 
     r = client.get(f"/projects/{project['id']}/equipment")
     assert r.status_code == 200
-    assert len(r.get_json()) == 1
+    # 2, not 1: Phase 2 auto-creates one Equipment record from the project's
+    # own equipment_name ("Agilent HPLC 1260", set by _create_project()
+    # above) at creation time — see routes/projects.py::
+    # _link_equipment_to_new_project(). This test then adds a second,
+    # distinct record ("HPLC System 1") explicitly.
+    assert len(r.get_json()) == 2
 
 
 def test_create_equipment_requires_name(client):
@@ -95,7 +100,11 @@ def test_search_equipment(client):
 
     r = client.get("/equipment/search?q=Agilent")
     assert r.status_code == 200
-    assert len(r.get_json()) == 1
+    # 2, not 1: Phase 2 auto-creates one Equipment record ("Agilent HPLC
+    # 1260", manufacturer "Agilent") from the project's own fields at
+    # creation time — see routes/projects.py::_link_equipment_to_new_project().
+    # Both it and the explicitly-created "HPLC System 1" match "Agilent".
+    assert len(r.get_json()) == 2
 
     r = client.get("/equipment/search")
     assert r.get_json() == []

@@ -622,6 +622,21 @@ def add_test_case(protocol_id: int, qual_id: int, tc: dict) -> dict:
     return d
 
 
+def get_test_case(tc_id: int) -> dict | None:
+    """Single test case, including its owning protocol_id/qual_id — used by
+    routes/qual.py to verify a test case belongs to the qid/pid in the URL
+    before allowing an update/delete (Phase 2 RBAC/multi-tenancy audit)."""
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM qual_test_cases WHERE id = ?", (tc_id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    d = dict(row)
+    d["urs_req_ids"]   = json.loads(d.get("urs_req_ids")   or "[]")
+    d["risk_item_ids"] = json.loads(d.get("risk_item_ids") or "[]")
+    return d
+
+
 def update_test_case(tc_id: int, data: dict) -> dict | None:
     allowed = [
         "test_id", "section", "test_name", "objective", "prerequisites",
@@ -806,6 +821,16 @@ def get_deviations(qual_id: int) -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_deviation(dev_id: int) -> dict | None:
+    """Single qualification-linked deviation, including its owning qual_id —
+    used by routes/qual.py to verify a deviation belongs to the qid in the
+    URL before allowing an update (Phase 2 RBAC/multi-tenancy audit)."""
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM qual_deviations WHERE id = ?", (dev_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 def update_deviation(dev_id: int, data: dict) -> dict | None:

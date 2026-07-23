@@ -251,6 +251,17 @@ def init_db() -> None:
     _add_column_if_missing(conn, "kb_documents", "postgres_id", "TEXT DEFAULT NULL")
     conn.commit()
 
+    # ── Phase 2 (PharmaGPT Architecture Program): auto-publish-to-KB ─────────
+    # Identifies the governed record (Document Control / URS / Qualification
+    # protocol / Validation Report) a KB entry was auto-published from, so
+    # services/kb_sync.py can upsert in place on every re-approval instead of
+    # accumulating a new row per version — the KB always shows exactly one
+    # row per governed record, always the current effective version. NULL for
+    # every manually-uploaded document (unchanged behaviour).
+    _add_column_if_missing(conn, "kb_documents", "source_type", "TEXT DEFAULT NULL")
+    _add_column_if_missing(conn, "kb_documents", "source_id",   "INTEGER DEFAULT NULL")
+    conn.commit()
+
     # ── Risk Management Suite tables ──────────────────────────────────────────
     from pharmagpt.risk_database import RISK_SCHEMA
     conn.executescript(RISK_SCHEMA)
@@ -933,6 +944,56 @@ def create_kb_document(title: str, folder: str, tags: str, doc_version: str,
     row = dict(conn.execute(
         "SELECT * FROM kb_documents WHERE id = ?", (cur.lastrowid,)
     ).fetchone())
+    conn.close()
+    return row
+
+
+def set_kb_document_source(kb_id: int, source_type: str, source_id: int) -> None:
+    """Tag a KB document as auto-published from a governed record (Phase 2
+    services/kb_sync.py), so the next approval of that same record updates
+    this row in place instead of creating a duplicate."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE kb_documents SET source_type = ?, source_id = ? WHERE id = ?",
+        (source_type, source_id, kb_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_kb_document_by_source(source_type: str, source_id: int, company_id: str) -> dict | None:
+    """Return the KB document auto-published from this governed record, if
+    any — used by services/kb_sync.py to upsert rather than duplicate on
+    every re-approval. Tenant-scoped: company_id must come from the
+    authenticated TenantContext, never client input."""
+    conn = get_connection()
+    row = conn.execute(
+        """SELECT * FROM kb_documents
+           WHERE source_type = ? AND source_id = ? AND company_id = ?""",
+        (source_type, source_id, company_id),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def update_kb_document_file(kb_id: int, *, title: str, doc_version: str,
+                            effective_date: str | None, original_name: str,
+                            stored_filename: str, file_type: str, file_size: int) -> dict:
+    """Point an existing KB document at a newly re-published file (a new
+    effective version of the same governed record) — services/kb_sync.py's
+    upsert path. Does not touch folder/tags/company_id/source_type/
+    source_id, which stay as originally set."""
+    conn = get_connection()
+    conn.execute(
+        """UPDATE kb_documents
+           SET title = ?, doc_version = ?, effective_date = ?, original_name = ?,
+               stored_filename = ?, file_type = ?, file_size = ?
+           WHERE id = ?""",
+        (title, doc_version, effective_date or None, original_name,
+         stored_filename, file_type, file_size, kb_id),
+    )
+    conn.commit()
+    row = dict(conn.execute("SELECT * FROM kb_documents WHERE id = ?", (kb_id,)).fetchone())
     conn.close()
     return row
 

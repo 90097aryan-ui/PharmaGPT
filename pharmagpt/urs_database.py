@@ -548,6 +548,16 @@ def add_requirement(urs_id: int, req: dict) -> dict:
     return dict(row) if row else {}
 
 
+def get_requirement(req_id: int) -> dict | None:
+    """Single requirement, including its owning urs_id — used by
+    routes/urs.py to verify a requirement belongs to the uid in the URL
+    before allowing an update/delete (Phase 2 RBAC/multi-tenancy audit)."""
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM urs_requirements WHERE id = ?", (req_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def update_requirement(req_id: int, data: dict) -> dict | None:
     allowed = [
         "req_id", "section", "requirement", "rationale", "priority", "gmp_criticality",
@@ -655,6 +665,16 @@ def get_versions(urs_id: int) -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_version(version_id: int) -> dict | None:
+    """Single version row, including its owning urs_id — used by
+    routes/urs.py to verify a version belongs to the uid in the URL before
+    returning its requirements snapshot (Phase 2 RBAC/multi-tenancy audit)."""
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM urs_versions WHERE id = ?", (version_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 def get_version_requirements(version_id: int) -> list[dict]:

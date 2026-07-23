@@ -85,10 +85,18 @@ async function eqImportLegacy() {
   }
 }
 
-function eqRenderList(equipmentList) {
-  const listEl  = document.getElementById("eq-list");
-  const emptyEl = document.getElementById("eq-empty");
-  const countEl = document.getElementById("eq-count");
+function eqRenderList(equipmentList, opts) {
+  // opts lets the Equipment Library (Phase 2 — company-wide, top-level view)
+  // reuse this exact renderer instead of duplicating it: different target
+  // container ids, and rows opened from here return to the Library instead
+  // of the Project Workspace's equipment tab (see eqBackToList()). Every
+  // existing call site (the Project Workspace's equipment tab) passes no
+  // opts and keeps its original ids/behaviour unchanged.
+  const { listId = "eq-list", emptyId = "eq-empty", countId = "eq-count",
+          origin = "project-workspace", showProjectColumn = false } = opts || {};
+  const listEl  = document.getElementById(listId);
+  const emptyEl = document.getElementById(emptyId);
+  const countEl = document.getElementById(countId);
   listEl.innerHTML = "";
   countEl.textContent = equipmentList.length ? `${equipmentList.length} record${equipmentList.length === 1 ? "" : "s"}` : "";
 
@@ -106,6 +114,7 @@ function eqRenderList(equipmentList) {
       <div class="eq-info">
         <div class="eq-name">${eqEsc(eq.name)}</div>
         <div class="eq-meta">
+          ${showProjectColumn && eq.project_name ? `<span>${eqEsc(eq.project_name)}</span>` : ""}
           ${eq.equipment_code ? `<span>${eqEsc(eq.equipment_code)}</span>` : ""}
           ${eq.equipment_type ? `<span>${eqEsc(eq.equipment_type)}</span>` : ""}
           ${eq.manufacturer ? `<span>${eqEsc(eq.manufacturer)}</span>` : ""}
@@ -124,9 +133,9 @@ function eqRenderList(equipmentList) {
     `;
     row.addEventListener("click", (e) => {
       if (e.target.closest("button")) return;
-      eqOpenProfile(eq.id);
+      eqOpenProfile(eq.id, origin);
     });
-    row.querySelector(".eq-btn-profile").addEventListener("click", (e) => { e.stopPropagation(); eqOpenProfile(eq.id); });
+    row.querySelector(".eq-btn-profile").addEventListener("click", (e) => { e.stopPropagation(); eqOpenProfile(eq.id, origin); });
     row.querySelector(".eq-btn-edit").addEventListener("click", (e) => { e.stopPropagation(); eqOpenModal(eq.id); });
     row.querySelector(".eq-btn-delete").addEventListener("click", (e) => {
       e.stopPropagation();
@@ -137,6 +146,25 @@ function eqRenderList(equipmentList) {
 
   if (window.refreshIcons) window.refreshIcons();
 }
+
+// ── Equipment Library (Phase 2 — first-class, top-level, company-wide) ────────
+
+async function eqLoadCompanyList() {
+  const countEl = document.getElementById("eqlib-count");
+  try {
+    const res = await fetch("/equipment");
+    const equipment = await res.json();
+    eqRenderList(equipment, {
+      listId: "eqlib-list", emptyId: "eqlib-empty", countId: "eqlib-count",
+      origin: "library", showProjectColumn: true,
+    });
+  } catch {
+    if (countEl) countEl.textContent = "";
+    document.getElementById("eqlib-list").innerHTML =
+      '<p style="color:var(--text-muted);font-size:13px">Could not load the Equipment Library.</p>';
+  }
+}
+window.eqLoadCompanyList = eqLoadCompanyList;
 
 function eqCriticalityBadgeClass(criticality) {
   const map = { "Critical": "badge-critical", "Major": "badge-medium", "Minor": "badge-low" };
@@ -253,9 +281,12 @@ async function eqConfirmDelete(equipmentId, name) {
 
 // ── Equipment Profile (Enterprise Workspace) ──────────────────────────────────
 
-function eqOpenProfile(equipmentId) {
+let eqProfileOrigin = "project-workspace";   // "project-workspace" | "library" — where Back returns to
+
+function eqOpenProfile(equipmentId, origin) {
   eqActiveProfileId = equipmentId;
   eqActiveTab = "overview";
+  eqProfileOrigin = origin || "project-workspace";
 
   document.querySelectorAll(".sidebar-item[data-view]").forEach(n => n.classList.remove("active"));
   document.querySelectorAll("main[id^='view-']").forEach(v => v.style.display = "none");
@@ -266,10 +297,18 @@ function eqOpenProfile(equipmentId) {
 }
 
 function eqBackToList() {
+  eqActiveProfileId = null;
+
+  // Phase 2 — Equipment Library (company-wide, top-level): return to the
+  // Library, not into whichever project happens to be active.
+  if (eqProfileOrigin === "library") {
+    if (window.eqShowLibraryView) window.eqShowLibraryView();
+    return;
+  }
+
   // PharmaGPT v1.0 Module 3 — the standalone Equipment list view was retired;
   // Equipment is now the "equipment" tab inside the unified Project Workspace
   // (see project_workspace.js::pwShowTab()).
-  eqActiveProfileId = null;
   if (window.pwShowTab) {
     window.pwShowTab("equipment");
   } else {
@@ -302,8 +341,11 @@ async function eqRenderProfile() {
   `;
 
   if (window.Workspace) {
+    const parentCrumb = eqProfileOrigin === "library"
+      ? { label: "Equipment Library" }
+      : { label: window.activeProject ? window.activeProject.name : "Project" };
     window.Workspace.renderBreadcrumb("eq-profile-breadcrumb", [
-      { label: "Dashboard" }, { label: window.activeProject ? window.activeProject.name : "Project" },
+      { label: "Dashboard" }, parentCrumb,
       { label: "Equipment" }, { label: equipment.name || "Profile", current: true },
     ]);
   }

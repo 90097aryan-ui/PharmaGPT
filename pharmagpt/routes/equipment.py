@@ -124,6 +124,23 @@ def _dual_write_unlink(link: dict) -> None:
         logger.exception("Phase 3.4 dual-write: failed to unlink equipment link %s in Postgres", link["id"])
 
 
+# ── Company-wide list (Phase 2: Equipment Library, first-class top-level
+#    module) ──────────────────────────────────────────────────────────────────
+
+@bp.route("/equipment", methods=["GET"])
+def list_company_equipment():
+    """Every Equipment record across every Project in the caller's company —
+    the Equipment Library's list view. Equipment itself is still
+    project-owned at the schema level (re-parenting to a company-owned,
+    many-to-many model is Blueprint ADR-P01/PA-013, Phase 3 — out of scope
+    here); this route only elevates the *navigation* entry point, reusing
+    the existing tenant-scoped get_all_equipment() Phase 3.4 already relies
+    on for its cross-project backfill/parity view."""
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
+    return jsonify(equipdb.get_all_equipment(g.tenant.company_id))
+
+
 # ── Project-scoped list / create ──────────────────────────────────────────────
 
 @bp.route("/projects/<int:project_id>/equipment", methods=["GET"])

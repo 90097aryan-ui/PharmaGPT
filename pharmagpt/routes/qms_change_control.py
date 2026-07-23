@@ -252,7 +252,7 @@ _NARRATIVE_ENDPOINTS = {
 for _path, _fn in _NARRATIVE_ENDPOINTS.items():
     def _make_view(fn=_fn):
         def _view(cc_id):
-            if not ccdb.get_change_control(cc_id):
+            if not tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id):
                 return jsonify({"error": "Not found"}), 404
             text = fn(cc_id)
             return jsonify({"text": text})

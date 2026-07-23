@@ -232,6 +232,17 @@ def get_distribution(document_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_distribution_entry(dist_id: int) -> dict | None:
+    """Single distribution entry, including its owning document_id — used by
+    routes/qms_documents.py to verify tenancy before acknowledging (Phase 2
+    RBAC/multi-tenancy audit: this route has no did in its URL to check
+    directly)."""
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM qms_document_distribution WHERE id = ?", (dist_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def acknowledge_distribution(dist_id: int, acknowledged_date: str) -> dict | None:
     conn = get_connection()
     conn.execute(
@@ -271,6 +282,17 @@ def get_training(document_id: int) -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_training_entry(training_id: int) -> dict | None:
+    """Single training entry, including its owning document_id — used by
+    routes/qms_documents.py to verify tenancy before updating status
+    (Phase 2 RBAC/multi-tenancy audit: this route has no did in its URL to
+    check directly)."""
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM qms_document_training WHERE id = ?", (training_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 def update_training_status(training_id: int, training_status: str, training_date: str = "") -> dict | None:
