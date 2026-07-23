@@ -47,6 +47,7 @@ from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
 from pharmagpt.services import kb_sync
+from pharmagpt.services import lifecycle_engine
 from pharmagpt.services import qms_document_service as svc
 from pharmagpt.services.qms_shared import stream_gemini
 from pharmagpt.prompts import qms_document_prompt as qp
@@ -263,10 +264,18 @@ def submit_approval(did):
 
     if action_name in _STATUS_MAP:
         new_status = _STATUS_MAP[action_name]
+        try:
+            lifecycle_engine.validate_transition("QMS_DOCUMENT", document["status"], new_status)
+        except lifecycle_engine.InvalidTransitionError as exc:
+            return jsonify({"error": str(exc)}), 409
+
         updates = {"status": new_status}
         if new_status == "Effective" and not document.get("effective_date"):
             from datetime import date
             updates["effective_date"] = date.today().isoformat()
+        if new_status == "Obsolete" and not document.get("superseded_date"):
+            from datetime import date
+            updates["superseded_date"] = date.today().isoformat()
         document = qdb.update_document(did, updates)
         if new_status == "Effective" and (document.get("content") or "").strip():
             _publish_effective_document_to_kb(document)

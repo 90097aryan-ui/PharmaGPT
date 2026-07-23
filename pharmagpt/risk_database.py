@@ -467,13 +467,13 @@ def get_approval_trail(assessment_id: int) -> list[dict]:
 
 
 def add_approval_entry(assessment_id: int, action: str, performed_by: str = "",
-                       role: str = "", comments: str = "") -> dict:
+                       role: str = "", comments: str = "", electronic_sig: str = "") -> dict:
     conn = get_connection()
     with conn:
         cur = conn.execute(
-            """INSERT INTO risk_approval (assessment_id, action, performed_by, role, comments)
-               VALUES (?,?,?,?,?)""",
-            (assessment_id, action, performed_by, role, comments),
+            """INSERT INTO risk_approval (assessment_id, action, performed_by, role, comments, electronic_sig)
+               VALUES (?,?,?,?,?,?)""",
+            (assessment_id, action, performed_by, role, comments, electronic_sig),
         )
         new_id = cur.lastrowid
     row = get_connection().execute("SELECT * FROM risk_approval WHERE id = ?", (new_id,)).fetchone()

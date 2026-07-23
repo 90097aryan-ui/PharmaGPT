@@ -36,8 +36,18 @@ from pharmagpt.database import get_connection
 DOCUMENT_ROLES = (
     "user_manual", "vendor_manual", "sop", "drawing", "pnid",
     "electrical_drawing", "pneumatic_drawing", "fat", "sat", "urs", "other",
+    # Phase 3 (Enterprise Validation Platform): generic role for the four new
+    # QMS record source_types below — a deviation/CAPA/change control/risk
+    # assessment isn't a "document" in the same sense as the roles above, so
+    # it doesn't need one of the document-shaped role values.
+    "quality_record",
 )
-SOURCE_TYPES = ("kb", "project")
+# Phase 3 (Enterprise Validation Platform): widened from ("kb", "project") to
+# also cover the traceability chain's Equipment -> QMS Records link
+# (docs/DATABASE_ARCHITECTURE.md §6's equipment_links mechanism) — same
+# polymorphic table, same pattern, no rename, no schema change (source_type
+# is already free text).
+SOURCE_TYPES = ("kb", "project", "deviation", "capa", "change_control", "risk_assessment")
 
 
 # ── Equipment CRUD ────────────────────────────────────────────────────────────
@@ -272,6 +282,16 @@ def list_equipment_documents(equipment_id: int) -> list[dict]:
         (equipment_id,),
     ).fetchall()]
 
+    # Phase 3 (Enterprise Validation Platform): resolution for the QMS record
+    # source_types added to SOURCE_TYPES above — each queries its own table's
+    # title-bearing column(s) via qms_database, not a document table.
+    _qms_resolvers = {
+        "deviation": ("qms_deviations", "title"),
+        "capa": ("qms_capas", "title"),
+        "change_control": ("qms_change_controls", "title"),
+        "risk_assessment": ("risk_assessments", "title"),
+    }
+
     for link in links:
         link["resolved"] = False
         if link["source_type"] == "kb":
@@ -282,7 +302,7 @@ def list_equipment_documents(equipment_id: int) -> list[dict]:
                 link["resolved"] = True
                 link["display_title"] = doc["title"]
                 link["file_type"] = doc["file_type"]
-        else:  # 'project'
+        elif link["source_type"] == "project":
             doc = conn.execute(
                 "SELECT original_name, file_type FROM documents WHERE id = ?", (link["source_id"],)
             ).fetchone()
@@ -290,6 +310,14 @@ def list_equipment_documents(equipment_id: int) -> list[dict]:
                 link["resolved"] = True
                 link["display_title"] = doc["original_name"]
                 link["file_type"] = doc["file_type"]
+        elif link["source_type"] in _qms_resolvers:
+            table, title_col = _qms_resolvers[link["source_type"]]
+            record = conn.execute(
+                f"SELECT {title_col} FROM {table} WHERE id = ?", (link["source_id"],)
+            ).fetchone()
+            if record:
+                link["resolved"] = True
+                link["display_title"] = record[title_col]
         if not link["resolved"]:
             link["display_title"] = link["title_snapshot"] or "(document removed)"
 

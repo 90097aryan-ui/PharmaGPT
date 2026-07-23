@@ -350,6 +350,11 @@ _DOC_TYPE_CODES = {
     "SOP": "SOP", "Protocol": "PRO", "Specification": "SPC", "Test Method": "TM",
     "Format": "FMT", "Template": "TPL", "Logbook": "LOG", "Checklist": "CHK",
     "Policy": "POL", "Manual": "MAN", "Work Instruction": "WI",
+    # Phase 3 (Enterprise Validation Platform): DQ/FAT/SAT consolidated into
+    # Document Control from the lifecycle-less generic wizard — see
+    # routes/validation.py::_RETIRED_DOC_TYPES. Purely additive: doc_type is
+    # free text, so these three keys are the only schema-adjacent change.
+    "DQ": "DQ", "FAT": "FAT", "SAT": "SAT",
 }
 
 

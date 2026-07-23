@@ -91,14 +91,27 @@ def publish_to_kb(*, source_type: str, source_id: int, company_id: str,
     upload_dir = doc_utils.get_kb_upload_dir()
     base_name = secure_filename(f"{doc_number or title}.docx") or f"{source_type}-{source_id}.docx"
     if existing:
-        # Reuse the same stored filename where possible so re-publishing a
-        # document doesn't leave the previous version's file orphaned on disk.
-        old_path = doc_utils.get_kb_file_path(existing["stored_filename"])
+        # Phase 3 (Enterprise Validation Platform): snapshot the outgoing
+        # version before it's replaced — previously a re-publish silently
+        # discarded the prior file with no version history at all. Archive
+        # (rename, never delete) the old file so the version row's
+        # stored_filename still resolves to a real, retrievable file —
+        # "nothing regulator-relevant is ever truly deleted"
+        # (docs/DATABASE_ARCHITECTURE.md Design Principle 4).
+        old_stored_filename = existing["stored_filename"]
+        old_path = doc_utils.get_kb_file_path(old_stored_filename)
+        version_filename = old_stored_filename
         if os.path.exists(old_path):
+            archived_name = doc_utils._resolve_collision(upload_dir, f"archived_{old_stored_filename}")
             try:
-                os.remove(old_path)
+                os.rename(old_path, os.path.join(upload_dir, archived_name))
+                version_filename = archived_name
             except OSError:
-                logger.warning("kb_sync: could not remove superseded file %s", old_path)
+                logger.warning("kb_sync: could not archive superseded file %s", old_path)
+        db.create_kb_version(
+            existing["id"], existing.get("doc_version", ""),
+            "Superseded by re-publish", version_filename,
+        )
     stored_filename = doc_utils._resolve_collision(upload_dir, base_name)
     file_path = os.path.join(upload_dir, stored_filename)
     with open(file_path, "wb") as f:

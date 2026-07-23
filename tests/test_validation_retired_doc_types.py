@@ -10,15 +10,20 @@ them a second time via POST /validation/generate was flagged Critical
 per Blueprint ADR-P02. This is enforced server-side (routes/validation.py::
 _RETIRED_DOC_TYPES), not just hidden client-side, so the duplicate path
 can't be reached by a direct API call either.
+
+Phase 3 (Enterprise Validation Platform) retires DQ/FAT/SAT the same way —
+they now persist as qms_documents rows (doc_type='DQ'|'FAT'|'SAT') via
+POST /qms/documents instead of the lifecycle-less generic wizard table, so
+they move from STILL_ACTIVE_TYPES to RETIRED_TYPES below.
 """
 
 import pytest
 
 from pharmagpt.routes.validation import _RETIRED_DOC_TYPES
 
-RETIRED_TYPES = ["URS", "IQ", "OQ", "PQ", "CAPA", "Deviation", "Change Control"]
-STILL_ACTIVE_TYPES = ["DQ", "FAT", "SAT", "FMEA", "IQ/OQ Combined",
-                       "SOP", "Validation Plan", "Validation Report"]
+RETIRED_TYPES = ["URS", "IQ", "OQ", "PQ", "CAPA", "Deviation", "Change Control",
+                  "DQ", "FAT", "SAT"]
+STILL_ACTIVE_TYPES = ["FMEA", "IQ/OQ Combined", "SOP", "Validation Plan", "Validation Report"]
 
 
 @pytest.mark.parametrize("doc_type", RETIRED_TYPES)
@@ -45,11 +50,14 @@ def test_active_doc_type_not_rejected_by_retirement_guard(client, doc_type):
     assert resp.get_json()["error"] == "project_id is required"
 
 
-def test_retired_doc_types_cover_exactly_the_seven_duplicates():
+def test_retired_doc_types_cover_exactly_the_ten_consolidated_types():
     """Locks the retirement list to REPOSITORY_AUDIT.md / DUPLICATE_FUNCTION_
-    ANALYSIS.md §1's exact 7 duplicate types — FMEA and DQ/FAT/SAT are
-    explicitly NOT duplicates (no dedicated suite exists for them yet) and
-    must stay generated here."""
+    ANALYSIS.md §1's original 7 duplicate types plus Phase 3's DQ/FAT/SAT
+    consolidation into Document Control. FMEA/IQ-OQ Combined/SOP/Validation
+    Plan/Validation Report remain explicitly NOT consolidated (no dedicated
+    lifecycle-governed suite exists for them yet) and must stay generated
+    here."""
     assert set(_RETIRED_DOC_TYPES) == {
         "URS", "IQ", "OQ", "PQ", "CAPA", "Deviation", "Change Control",
+        "DQ", "FAT", "SAT",
     }

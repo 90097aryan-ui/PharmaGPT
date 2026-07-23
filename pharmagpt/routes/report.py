@@ -38,9 +38,11 @@ from pharmagpt import report_database as rdb
 from pharmagpt import qual_database as qdb
 from pharmagpt import urs_database as udb
 from pharmagpt import risk_database as risdb
+from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
 from pharmagpt.services import kb_sync
+from pharmagpt.services import lifecycle_engine
 from pharmagpt.services import report_service as svc
 from pharmagpt.services.doc_exporter import markdown_to_docx
 
@@ -415,6 +417,11 @@ def add_approval(rid):
     }
     new_status = status_map.get(action)
     if new_status:
+        try:
+            lifecycle_engine.validate_transition("VALIDATION_REPORT", report["status"], new_status)
+        except lifecycle_engine.InvalidTransitionError as exc:
+            return jsonify({"error": str(exc)}), 409
+
         report = rdb.update_report(rid, {"status": new_status})
         if new_status == "released":
             _publish_released_report_to_kb(report)
@@ -423,6 +430,7 @@ def add_approval(rid):
     entry = rdb.add_approval_entry(
         rid, action, sig["performed_by"], sig["role"], comments, version, sig["electronic_sig"],
     )
+    qmsdb.add_audit_entry("val_report", rid, action, sig["performed_by"])
     return jsonify(entry), 201
 
 

@@ -40,6 +40,15 @@ bp = Blueprint("validation", __name__)
 # review-gate-free path to the same document type — retired per Blueprint
 # ADR-P02. Rejected server-side, not just hidden client-side, so the
 # duplicate path can't be reached by a direct API call either.
+#
+# Phase 3 (Enterprise Validation Platform) retires DQ/FAT/SAT the same way:
+# they used to persist here into the lifecycle-less generic
+# `generated_documents` table with no versioning/approval/audit trail at all.
+# They are now qms_documents rows (doc_type='DQ'|'FAT'|'SAT') created via
+# POST /qms/documents, gaining the shared lifecycle engine, configurable
+# approval workflow, versioning, distribution/training tracking, and
+# automatic Knowledge Base sync that Document Control already provides —
+# no new persistence code, no new document type.
 _RETIRED_DOC_TYPES = {
     "URS": "URS Management",
     "IQ": "Qualification",
@@ -48,6 +57,9 @@ _RETIRED_DOC_TYPES = {
     "CAPA": "Quality Management → CAPA",
     "Deviation": "Quality Management → Deviations",
     "Change Control": "Quality Management → Change Control",
+    "DQ": "Quality Management → Document Control (qms/documents)",
+    "FAT": "Quality Management → Document Control (qms/documents)",
+    "SAT": "Quality Management → Document Control (qms/documents)",
 }
 
 

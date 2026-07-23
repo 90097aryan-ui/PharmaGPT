@@ -12,9 +12,11 @@ GET    /equipment/types                      equipment-type catalog (autocomplet
 GET    /equipment/<id>                       get one Equipment record
 PUT    /equipment/<id>                       update
 DELETE /equipment/<id>                       delete (cascades to document links)
-GET    /equipment/<id>/documents             list linked documents
-POST   /equipment/<id>/documents             link a document (kb or project)
-DELETE /equipment/<id>/documents/<link_id>   unlink a document
+GET    /equipment/<id>/documents             list linked documents/QMS records
+POST   /equipment/<id>/documents             link a document (kb/project) or QMS record
+                                              (deviation/capa/change_control/risk_assessment —
+                                              Phase 3 traceability, equipment_documents widened)
+DELETE /equipment/<id>/documents/<link_id>   unlink a document/QMS record
 GET    /equipment/<id>/ai-context            assembled AI-context bundle (architecture only)
 """
 
@@ -25,6 +27,10 @@ from flask import Blueprint, g, jsonify, request
 from pharmagpt import config
 from pharmagpt import database as db
 from pharmagpt import equipment_database as equipdb
+from pharmagpt import qms_deviation_database as qdevdb
+from pharmagpt import qms_capa_database as qcapadb
+from pharmagpt import qms_change_control_database as qccdb
+from pharmagpt import risk_database as riskdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import equipment_repo
@@ -32,6 +38,19 @@ from pharmagpt.services import equipment_service
 
 bp = Blueprint("equipment", __name__)
 logger = logging.getLogger(__name__)
+
+# Phase 3 (Enterprise Validation Platform): tenant-scoped getters for the four
+# QMS record source_types equipment_documents was widened to accept
+# (equipment_database.py::SOURCE_TYPES) — mirrors routes/qms_common.py's
+# _GETTERS dispatch pattern, used here for the two-sided tenant check below
+# (both the equipment row AND the linked record must belong to the caller's
+# company).
+_QMS_SOURCE_GETTERS = {
+    "deviation": qdevdb.get_deviation,
+    "capa": qcapadb.get_capa,
+    "change_control": qccdb.get_change_control,
+    "risk_assessment": riskdb.get_assessment,
+}
 
 
 # ── Phase 3.4 dual-write (docs/PHASE3_EXECUTION_PLAN.md) ───────────────────────
@@ -251,21 +270,26 @@ def link_equipment_document(equipment_id):
     if document_role not in equipdb.DOCUMENT_ROLES:
         return jsonify({"error": f"Invalid document_role. Must be one of: {', '.join(equipdb.DOCUMENT_ROLES)}"}), 400
     if source_type not in equipdb.SOURCE_TYPES:
-        return jsonify({"error": "source_type must be 'kb' or 'project'"}), 400
+        return jsonify({"error": f"source_type must be one of: {', '.join(equipdb.SOURCE_TYPES)}"}), 400
     if not source_id:
         return jsonify({"error": "source_id is required"}), 400
 
-    # Verify the referenced document actually exists AND belongs to this
+    # Verify the referenced record actually exists AND belongs to this
     # tenant before linking — otherwise a caller could link another
-    # company's kb/project document into their own equipment record.
+    # company's document or QMS record into their own equipment record.
+    # Two-sided check: the equipment row was already tenant-scoped above,
+    # this scopes the *linked* record too.
     if source_type == "kb":
         source_doc = tenancy.scoped_or_none(db.get_kb_document(source_id), g.tenant.company_id)
-    else:
+    elif source_type == "project":
         doc = db.get_document(source_id)
         owning_project = tenancy.scoped_or_none(db.get_project(doc["project_id"]), g.tenant.company_id) if doc else None
         source_doc = doc if owning_project else None
+    else:  # deviation | capa | change_control | risk_assessment — Phase 3
+        getter = _QMS_SOURCE_GETTERS[source_type]
+        source_doc = tenancy.scoped_or_none(getter(source_id), g.tenant.company_id)
     if not source_doc:
-        return jsonify({"error": "Referenced document not found"}), 404
+        return jsonify({"error": "Referenced record not found"}), 404
 
     title_snapshot = source_doc.get("title") or source_doc.get("original_name") or ""
     link = equipdb.link_equipment_document(equipment_id, document_role, source_type, source_id, title_snapshot)

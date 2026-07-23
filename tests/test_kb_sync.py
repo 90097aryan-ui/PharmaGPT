@@ -13,6 +13,8 @@ And the idempotent-upsert behaviour: re-approving the same record updates
 the existing kb_documents row rather than creating a duplicate.
 """
 
+import pytest
+
 from pharmagpt import database as db
 from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID
 
@@ -28,6 +30,7 @@ def test_effective_document_control_record_is_published_to_kb(client):
     doc = client.post("/qms/documents", json={"title": "Autoclave Operation SOP", "doc_type": "SOP"}).get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP\n\nOperate the autoclave safely."})
 
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     resp = client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
     assert resp.status_code == 201
 
@@ -40,6 +43,7 @@ def test_effective_document_control_record_is_published_to_kb(client):
 def test_document_control_republish_updates_the_same_kb_row(client):
     doc = client.post("/qms/documents", json={"title": "Recalibration SOP", "doc_type": "SOP"}).get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v1"})
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
     first_rows = _kb_rows_for("document", doc["id"])
     assert len(first_rows) == 1
@@ -48,6 +52,7 @@ def test_document_control_republish_updates_the_same_kb_row(client):
     # Send it back to Draft, revise, and re-approve — Effective a second time.
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Rejected"})
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v2 — revised"})
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
 
     rows = _kb_rows_for("document", doc["id"])
@@ -59,6 +64,7 @@ def test_document_without_content_is_not_published_to_kb(client):
     """An Effective document with no drafted content yet has nothing
     meaningful to publish — must not create an empty KB entry."""
     doc = client.post("/qms/documents", json={"title": "Empty Draft SOP", "doc_type": "SOP"}).get_json()
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
 
     assert _kb_rows_for("document", doc["id"]) == []
@@ -94,6 +100,7 @@ def test_approved_qualification_publishes_each_protocol_to_kb(client):
     iq = client.post(f"/qual/{qual['id']}/protocols", json={"protocol_type": "IQ"}).get_json()
     oq = client.post(f"/qual/{qual['id']}/protocols", json={"protocol_type": "OQ"}).get_json()
 
+    client.post(f"/qual/{qual['id']}/approval", json={"action": "Submitted for Review"})
     resp = client.post(f"/qual/{qual['id']}/approval", json={"action": "Approved"})
     assert resp.status_code == 201
 
@@ -107,6 +114,7 @@ def test_qualification_republish_updates_the_same_protocol_kb_rows(client):
     qual = client.post("/qual/", json={"title": "GC Qualification", "equipment_name": "GC System"}).get_json()
     iq = client.post(f"/qual/{qual['id']}/protocols", json={"protocol_type": "IQ"}).get_json()
 
+    client.post(f"/qual/{qual['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qual/{qual['id']}/approval", json={"action": "Approved"})
     kb_id = _kb_rows_for("qualification_protocol", iq["id"])[0]["id"]
 
@@ -121,6 +129,8 @@ def test_qualification_republish_updates_the_same_protocol_kb_rows(client):
 def test_released_validation_report_is_published_to_kb(client):
     report = client.post("/report/", json={"title": "HPLC Validation Summary Report"}).get_json()
 
+    client.post(f"/report/{report['id']}/approval", json={"action": "Submit for Review"})
+    client.post(f"/report/{report['id']}/approval", json={"action": "QA Approved"})
     resp = client.post(f"/report/{report['id']}/approval", json={"action": "Released"})
     assert resp.status_code == 201
 
@@ -131,6 +141,47 @@ def test_released_validation_report_is_published_to_kb(client):
 
 def test_approved_but_not_released_report_is_not_published_to_kb(client):
     report = client.post("/report/", json={"title": "Pending Release Report"}).get_json()
+    client.post(f"/report/{report['id']}/approval", json={"action": "Submit for Review"})
     client.post(f"/report/{report['id']}/approval", json={"action": "QA Approved"})
 
     assert _kb_rows_for("report", report["id"]) == []
+
+
+# ── Phase 3: DQ/FAT/SAT consolidated into Document Control ──────────────────
+# (routes/validation.py::_RETIRED_DOC_TYPES, qms_database.py::_DOC_TYPE_CODES)
+# — they now get KB auto-sync "for free" via the same Document Control
+# Effective-transition call every other doc_type already uses; no code in
+# kb_sync.py itself needed changing.
+
+@pytest.mark.parametrize("doc_type,expected_folder", [
+    ("DQ", "Qualification"), ("FAT", "Protocols"), ("SAT", "Protocols"),
+])
+def test_consolidated_dq_fat_sat_are_published_to_kb(client, doc_type, expected_folder):
+    doc = client.post("/qms/documents", json={"title": f"{doc_type} Protocol", "doc_type": doc_type}).get_json()
+    client.put(f"/qms/documents/{doc['id']}", json={"content": f"# {doc_type} Protocol\n\nTest content."})
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
+    resp = client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    assert resp.status_code == 201
+
+    rows = _kb_rows_for("document", doc["id"])
+    assert len(rows) == 1
+    assert rows[0]["folder"] == expected_folder
+
+
+# ── Phase 3: version snapshot on re-publish (kb_document_versions) ──────────
+
+def test_republish_snapshots_the_outgoing_version_instead_of_discarding_it(client):
+    doc = client.post("/qms/documents", json={"title": "Versioned SOP", "doc_type": "SOP"}).get_json()
+    client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v1"})
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    kb_row = _kb_rows_for("document", doc["id"])[0]
+
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Rejected"})
+    client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v2 — revised"})
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+
+    versions = db.get_kb_versions(kb_row["id"])
+    assert len(versions) == 1
+    assert versions[0]["stored_filename"]

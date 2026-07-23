@@ -39,6 +39,9 @@ from pharmagpt import qms_document_database as qdocdb
 from pharmagpt import qms_deviation_database as qdevdb
 from pharmagpt import qms_capa_database as qcapadb
 from pharmagpt import qms_change_control_database as qccdb
+from pharmagpt import qual_database as qualdb
+from pharmagpt import report_database as reportdb
+from pharmagpt import risk_database as riskdb
 from pharmagpt import database as db
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
@@ -51,7 +54,17 @@ bp = Blueprint("qms_common", __name__, url_prefix="/qms")
 # tab — routes/projects.py now calls qmsdb.add_audit_entry("project", ...) on
 # create/update/delete, reusing the shared polymorphic audit trail (DEC-010)
 # instead of a project-specific table.
-VALID_RECORD_TYPES = {"document", "deviation", "capa", "change_control", "project"}
+#
+# "qualification"/"val_report"/"risk_assessment" were added in Phase 3
+# (Enterprise Validation Platform) so the generic attachments/comments/
+# audit-trail endpoints below work for these suites too — each still keeps
+# its own dedicated approval-trail table (qual_approvals/val_report_approvals/
+# risk_approval); only the shared, already-polymorphic attachments/comments/
+# audit-trail tables are widened here, not approval storage itself.
+VALID_RECORD_TYPES = {
+    "document", "deviation", "capa", "change_control", "project",
+    "qualification", "val_report", "risk_assessment",
+}
 
 _GETTERS = {
     "document": qdocdb.get_document,
@@ -59,6 +72,9 @@ _GETTERS = {
     "capa": qcapadb.get_capa,
     "change_control": qccdb.get_change_control,
     "project": db.get_project,
+    "qualification": qualdb.get_qualification,
+    "val_report": reportdb.get_report,
+    "risk_assessment": riskdb.get_assessment,
 }
 
 

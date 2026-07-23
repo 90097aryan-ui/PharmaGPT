@@ -39,9 +39,11 @@ from flask import Blueprint, g, jsonify, request, Response, stream_with_context
 
 from pharmagpt import config
 from pharmagpt import risk_database as rdb
+from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import qms_repo
+from pharmagpt.services import lifecycle_engine
 from pharmagpt.services import risk_service as svc
 from pharmagpt.state import gemini_client
 from pharmagpt.config import GEMINI_MODEL
@@ -326,7 +328,12 @@ def add_approval(aid):
         "Closed": "Closed",
     }
     if action_name in status_map:
-        rdb.update_assessment(aid, {"status": status_map[action_name]})
+        new_status = status_map[action_name]
+        try:
+            lifecycle_engine.validate_transition("RISK_ASSESSMENT", a["status"], new_status)
+        except lifecycle_engine.InvalidTransitionError as exc:
+            return jsonify({"error": str(exc)}), 409
+        rdb.update_assessment(aid, {"status": new_status})
 
     # If approved, publish to library
     if action_name == "Approved":
@@ -339,7 +346,9 @@ def add_approval(aid):
         sig["performed_by"],
         sig["role"],
         data.get("comments", ""),
+        sig["electronic_sig"],
     )
+    qmsdb.add_audit_entry("risk_assessment", aid, action_name, sig["performed_by"])
     return jsonify(entry), 201
 
 

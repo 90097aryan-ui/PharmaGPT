@@ -506,6 +506,85 @@ def test_document_creation_audit_performed_by_cannot_be_spoofed(client):
     assert not any(a["performed_by"] == "Fake CEO Spoofed Identity" for a in creation_entries)
 
 
+# ── 3c. Phase 3 (Enterprise Validation Platform): equipment_documents was
+# widened to accept deviation/capa/change_control/risk_assessment as
+# source_types (equipment_database.py::SOURCE_TYPES) for the Project ->
+# Equipment -> Validation Documents -> QMS Records -> Knowledge Base
+# traceability chain. This is a two-sided tenant check: the equipment row
+# was already scoped, but the *linked* record must be scoped too — otherwise
+# a caller could discover another company's deviation/capa/change-control/
+# risk-assessment id by linking it into their own equipment record. ────────
+
+def _create_equipment(client, tenant, name="HPLC System"):
+    with _as(tenant):
+        project = client.post(
+            "/projects", json={"name": "Equipment Project", "equipment_name": "HPLC",
+                                "manufacturer": "Agilent", "department": "QC",
+                                "validation_type": "IQ/OQ/PQ"},
+            headers=AUTH_HEADERS,
+        ).get_json()
+        return client.post(
+            f"/projects/{project['id']}/equipment", json={"name": name}, headers=AUTH_HEADERS,
+        ).get_json()
+
+
+def test_cross_tenant_cannot_link_equipment_to_another_companys_deviation(client):
+    equipment = _create_equipment(client, ADMIN_A)
+    with _as(ADMIN_B):
+        deviation_b = client.post(
+            "/qms/deviations", json={"title": "Company B Deviation"}, headers=AUTH_HEADERS,
+        ).get_json()
+
+    with _as(ADMIN_A):
+        resp = client.post(
+            f"/equipment/{equipment['id']}/documents",
+            json={"document_role": "quality_record", "source_type": "deviation", "source_id": deviation_b["id"]},
+            headers=AUTH_HEADERS,
+        )
+
+    assert resp.status_code == 404
+
+
+def test_cross_tenant_cannot_link_own_equipment_from_another_company(client):
+    equipment_a = _create_equipment(client, ADMIN_A)
+    with _as(ADMIN_A):
+        deviation_a = client.post(
+            "/qms/deviations", json={"title": "Company A Deviation"}, headers=AUTH_HEADERS,
+        ).get_json()
+
+    with _as(ADMIN_B):
+        resp = client.post(
+            f"/equipment/{equipment_a['id']}/documents",
+            json={"document_role": "quality_record", "source_type": "deviation", "source_id": deviation_a["id"]},
+            headers=AUTH_HEADERS,
+        )
+
+    assert resp.status_code == 404
+
+
+# ── 3d. Risk Assessment e-signature parity fix (Phase 3) ────────────────────
+# risk_approval was missing electronic_sig entirely, unlike every other
+# suite's approval-trail table — routes/risk.py now passes
+# sig["electronic_sig"] the same way qms_documents.py/urs.py/qual.py do.
+
+def test_risk_assessment_approval_now_records_electronic_sig(client):
+    with _as(ADMIN_A):
+        assessment = client.post(
+            "/risk/assessments", json={"title": "Risk 1"}, headers=AUTH_HEADERS,
+        ).get_json()
+
+    with _as(REVIEWER_A):
+        resp = client.post(
+            f"/risk/assessments/{assessment['id']}/approval",
+            json={"action": "Submitted for Review", "electronic_sig": "Fake Sig"},
+            headers=AUTH_HEADERS,
+        )
+
+    assert resp.status_code == 201
+    entry = resp.get_json()
+    assert entry["electronic_sig"] == "Rita Reviewer"
+
+
 # ── 4. POST /projects role matrix (PLATFORM_ARCHITECTURE.md §7) ─────────────
 # Any authenticated identity scoped to a company (company_admin, reviewer_qa,
 # user) may create a project inside that company. Super Admin has no

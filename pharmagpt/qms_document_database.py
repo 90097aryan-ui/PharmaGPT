@@ -103,7 +103,7 @@ def update_document(document_id: int, data: dict) -> dict | None:
     conn = get_connection()
     fields = [
         "doc_type", "title", "department", "category", "version", "status",
-        "effective_date", "review_date", "expiry_date", "owner", "reviewer", "approver",
+        "effective_date", "review_date", "expiry_date", "superseded_date", "owner", "reviewer", "approver",
         "content", "project_id",
     ]
     updates, params = [], []

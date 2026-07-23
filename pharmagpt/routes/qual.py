@@ -52,9 +52,11 @@ import logging
 from flask import Blueprint, g, jsonify, request, Response, stream_with_context, send_file
 
 from pharmagpt import qual_database as qdb
+from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
 from pharmagpt.services import kb_sync
+from pharmagpt.services import lifecycle_engine
 from pharmagpt.services import qual_service as svc
 from pharmagpt.state import gemini_client
 from pharmagpt.config import GEMINI_MODEL
@@ -540,6 +542,11 @@ def add_approval(qid):
     }
     if action in status_map:
         new_status = status_map[action]
+        try:
+            lifecycle_engine.validate_transition("QUALIFICATION", qual["status"], new_status)
+        except lifecycle_engine.InvalidTransitionError as exc:
+            return jsonify({"error": str(exc)}), 409
+
         qdb.update_qualification(qid, {"status": new_status})
         if new_status == "approved":
             _publish_effective_protocols_to_kb(qdb.get_qualification(qid))
@@ -553,6 +560,7 @@ def add_approval(qid):
         qual.get("revision", "A"),
         sig["electronic_sig"],
     )
+    qmsdb.add_audit_entry("qualification", qid, action, sig["performed_by"])
     return jsonify(entry), 201
 
 

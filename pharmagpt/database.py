@@ -227,6 +227,24 @@ def init_db() -> None:
             extraction_status TEXT   NOT NULL DEFAULT 'ok',
             upload_date      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        -- ── kb_document_versions ───────────────────────────────────────────
+        -- Phase 3 (Enterprise Validation Platform): Knowledge Base had no
+        -- version history at all — re-upload/re-publish silently overwrote
+        -- the stored file in place. Mirrors qms_document_versions's shape
+        -- (see qms_document_database.py::create_version/get_versions);
+        -- stored_filename replaces content_snapshot because KB documents are
+        -- files (DOCX/PDF), not markdown snapshots.
+        CREATE TABLE IF NOT EXISTS kb_document_versions (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            kb_document_id    INTEGER NOT NULL,
+            version           TEXT    NOT NULL DEFAULT '',
+            change_summary    TEXT    DEFAULT '',
+            stored_filename   TEXT    DEFAULT '',
+            changed_by        TEXT    DEFAULT '',
+            created_at        TEXT    DEFAULT (datetime('now')),
+            FOREIGN KEY (kb_document_id) REFERENCES kb_documents(id) ON DELETE CASCADE
+        );
     """)
     conn.commit()
 
@@ -265,6 +283,14 @@ def init_db() -> None:
     # ── Risk Management Suite tables ──────────────────────────────────────────
     from pharmagpt.risk_database import RISK_SCHEMA
     conn.executescript(RISK_SCHEMA)
+    conn.commit()
+
+    # ── Phase 3 (Enterprise Validation Platform) e-signature parity fix ──────
+    # risk_approval was missing electronic_sig entirely (unlike qms_approvals/
+    # urs_approvals/qual_approvals/val_report_approvals), so routes/risk.py's
+    # approval endpoint could not record a non-spoofable e-signature the same
+    # way every other suite's approval endpoint already does.
+    _add_column_if_missing(conn, "risk_approval", "electronic_sig", "TEXT DEFAULT ''")
     conn.commit()
 
     # ── Phase 3.5 dual-write bookkeeping (docs/PHASE3_EXECUTION_PLAN.md) ──────
@@ -359,6 +385,17 @@ def init_db() -> None:
     conn.commit()
     for _qms_table in ("qms_deviations", "qms_capas", "qms_change_controls", "qms_documents"):
         conn.execute(f"UPDATE {_qms_table} SET company_id = ? WHERE company_id IS NULL", (BOOTSTRAP_COMPANY_ID,))
+    conn.commit()
+
+    # ── Phase 3 (Enterprise Validation Platform) versioning-triad gap fix ─────
+    # qms_documents already had effective_date/review_date/superseded_by, but
+    # no superseded_date to say *when* a document was superseded — the last
+    # field needed for the full Document Number/Version/Revision/Status/
+    # Effective Date/Review Date/Superseded Date/Audit Trail/E-signature set.
+    # Stamped by routes/qms_documents.py::submit_approval() when a document
+    # transitions to Obsolete, the same way effective_date is already stamped
+    # on the transition to Effective.
+    _add_column_if_missing(conn, "qms_documents", "superseded_date", "TEXT DEFAULT ''")
     conn.commit()
 
     # ── Equipment entity (PharmaGPT v1.0 Module 2) ─────────────────────────────
@@ -996,6 +1033,33 @@ def update_kb_document_file(kb_id: int, *, title: str, doc_version: str,
     row = dict(conn.execute("SELECT * FROM kb_documents WHERE id = ?", (kb_id,)).fetchone())
     conn.close()
     return row
+
+
+def create_kb_version(kb_document_id: int, version: str, change_summary: str,
+                      stored_filename: str, changed_by: str = "") -> dict:
+    """Snapshot a KB document's outgoing version before it's overwritten by a
+    re-publish/re-upload — see services/kb_sync.py::publish_to_kb(). Mirrors
+    qms_document_database.py::create_version()'s shape."""
+    conn = get_connection()
+    cur = conn.execute(
+        """INSERT INTO kb_document_versions (kb_document_id, version, change_summary, stored_filename, changed_by)
+           VALUES (?,?,?,?,?)""",
+        (kb_document_id, version, change_summary, stored_filename, changed_by),
+    )
+    conn.commit()
+    row = dict(conn.execute("SELECT * FROM kb_document_versions WHERE id = ?", (cur.lastrowid,)).fetchone())
+    conn.close()
+    return row
+
+
+def get_kb_versions(kb_document_id: int) -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM kb_document_versions WHERE kb_document_id = ? ORDER BY created_at DESC",
+        (kb_document_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def get_kb_documents(company_id: str | None = None, folder: str | None = None, tag: str | None = None,
