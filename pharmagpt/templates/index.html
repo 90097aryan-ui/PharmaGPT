@@ -15,6 +15,10 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/report.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/qms.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/equipment.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace_selector.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/ui_states.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/header.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/error_pages.css') }}" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 </head>
@@ -75,22 +79,85 @@
       </div>
       <div class="header-divider"></div>
       <span class="header-context" id="header-breadcrumb">Overview</span>
+      <div class="hdr-chips" id="hdr-chips">
+        <span class="hdr-chip" id="hdr-chip-workspace" style="display:none">
+          <span class="icon" data-lucide="layout-grid"></span><span class="hdr-chip-text"></span>
+        </span>
+        <span class="hdr-chip" id="hdr-chip-company" style="display:none">
+          <span class="icon" data-lucide="building-2"></span><span class="hdr-chip-text"></span>
+        </span>
+        <span class="hdr-chip hdr-chip-clickable" id="hdr-chip-project" style="display:none" title="Return to this project's workspace">
+          <span class="icon" data-lucide="folder"></span><span class="hdr-chip-text"></span>
+        </span>
+      </div>
     </div>
     <div class="header-right">
+      <div class="hdr-search" id="hdr-search">
+        <span class="icon" data-lucide="search"></span>
+        <input type="text" id="hdr-search-input" class="hdr-search-input" placeholder="Search projects, equipment, documents…" autocomplete="off" aria-label="Global search" />
+        <div class="hdr-search-results" id="hdr-search-results" style="display:none"></div>
+      </div>
+      <div class="hdr-notif-wrap">
+        <button class="hdr-icon-btn" id="hdr-notif-btn" title="Notifications" aria-label="Notifications" aria-haspopup="true" aria-expanded="false">
+          <span class="icon" data-lucide="bell"></span>
+          <span class="hdr-notif-badge" id="hdr-notif-badge" style="display:none">0</span>
+        </button>
+        <div class="hdr-notif-dropdown" id="hdr-notif-dropdown" style="display:none"></div>
+      </div>
+      <button class="btn-secondary" id="btn-switch-workspace" onclick="window.showView && window.showView('view-workspace-selector')" title="Return to the workspace selector">
+        <span class="icon" data-lucide="layout-grid"></span> Workspaces
+      </button>
       <div class="status-badge">
         <div class="status-dot"></div>
         Gemini 2.5 Flash &nbsp;·&nbsp; Online
       </div>
       <button class="btn-clear" id="btn-clear">Clear Chat</button>
       <div class="user-badge" id="user-badge" style="display:none">
+        <button class="btn-secondary" id="btn-assume-context" style="display:none;margin-right:8px">Assume Company Context</button>
         <span class="icon" data-lucide="user-circle"></span>
         <span id="user-badge-name"></span>
-        <button class="btn-logout" id="btn-logout" title="Log out">
+        <button class="btn-logout" id="btn-logout" title="Log out" aria-label="Log out">
           <span class="icon" data-lucide="log-out"></span>
         </button>
       </div>
     </div>
   </header>
+
+  <!-- ── Assume Company Context banner (Phase 3.5) — persistent across every
+       view while a Super Admin has an active break_glass_access grant.
+       static/js/admin_assume_context.js owns all of its behavior. ──────────── -->
+  <div id="assume-context-banner" style="display:none;background:#B45309;color:#fff;padding:8px 20px;
+       font-size:13px;align-items:center;justify-content:space-between">
+    <span id="assume-context-banner-text"></span>
+    <button class="btn-secondary" id="btn-end-assume-context" style="background:transparent;border-color:#fff;color:#fff">End Session</button>
+  </div>
+
+  <!-- ── Assume Company Context picker modal ──────────────────────────────── -->
+  <div class="modal-overlay" id="assume-context-modal-overlay"></div>
+  <div class="modal" id="assume-context-modal">
+    <div class="modal-header">
+      <h3>Assume Company Context</h3>
+      <button class="modal-close" id="assume-context-modal-close">&times;</button>
+    </div>
+    <form id="assume-context-form">
+      <div class="form-group">
+        <label for="ac-context-company">Company *</label>
+        <select id="ac-context-company" required></select>
+      </div>
+      <div class="form-group">
+        <label for="ac-context-reason">Reason *</label>
+        <input type="text" id="ac-context-reason" placeholder="e.g. Support ticket #4821 — investigating stuck qualification" required />
+      </div>
+      <div class="form-group">
+        <label for="ac-context-duration">Duration (minutes, max 240)</label>
+        <input type="number" id="ac-context-duration" value="60" min="1" max="240" />
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" id="assume-context-modal-cancel">Cancel</button>
+        <button type="submit" class="btn-primary" id="assume-context-modal-save">Start Session</button>
+      </div>
+    </form>
+  </div>
 
   <!-- ── App body ─────────────────────────────────────────────────────────────── -->
   <div class="app-body">
@@ -98,165 +165,97 @@
     <!-- ── Sidebar ───────────────────────────────────────────────────────────── -->
     <aside class="sidebar">
 
-      <!-- Primary Navigation (PHARMAGPT_PLATFORM_BLUEPRINT.md / Product
-           Recovery Package PRODUCT_INFORMATION_ARCHITECTURE.md §0 approved
-           order: Dashboard · Projects · Equipment Library · Knowledge Base ·
-           Validation Suite · Quality Management · AI Assistant.
-           Administration and a persistent Global Search bar are also part
-           of the approved IA but are not added here — the screens/index
-           they would point to don't exist yet (Company/Users/Roles admin,
-           Postgres full-text search) and Phase 2 does not add new features;
-           see PHASE_2_IMPLEMENTATION_REPORT.md. -->
+      <!-- Primary Navigation — ALD-001 Architecture Lock, Phase A (Sidebar
+           Restructuring only; see docs/ARCHITECTURE_LOCK.md). Locked
+           8-item top-level hierarchy: Dashboard · Validation Suite ·
+           Knowledge Base · Equipment Library · Risk Management ·
+           Document Generator · Administration · AI Assistant. Every leaf
+           item below keeps the exact id / data-view / onclick it had
+           before this restructuring — only the surrounding group
+           containers, labels, and nesting changed. No view, route, or
+           RBAC check is affected.
+
+           TEMPORARY ITEMS (explicitly approved for Phase A to produce
+           zero navigation regression, since their permanent homes don't
+           exist yet): URS Management, Qualification, Validation Report,
+           and Generate Document are parked under Validation Suite here —
+           per the lock they belong inside Project Workspace, built in
+           Phase C. Deviations, CAPA, and Change Control are also parked
+           under Validation Suite here — per the lock they belong in the
+           Quality & Compliance panel, built in Phase B. None of these six
+           are moved, rebuilt, or duplicated in Phase A; they are only
+           relocated as-is and labelled "(temporary)". They will be
+           REMOVED from this location (not rebuilt) once Phases B/C ship. -->
       <div class="sidebar-section">
         <div class="sidebar-label">Main Menu</div>
         <div class="sidebar-item active" id="nav-dashboard" data-view="view-dashboard">
-          <span class='icon' data-lucide='layout-dashboard'></span> Dashboard
+          <span class='icon' data-lucide='home'></span> Dashboard
         </div>
       </div>
 
       <div class="sidebar-divider"></div>
 
-      <!-- Projects -->
-      <div class="sidebar-section">
-        <div class="sidebar-label-row">
-          <span class="sidebar-label">Projects</span>
-          <button class="btn-new-project" id="btn-new-project">+ New</button>
-        </div>
-        <div id="project-list"></div>
-      </div>
-
-      <div class="sidebar-divider"></div>
-
-      <!-- Equipment Library (Phase 2 — first-class, top-level module) -->
-      <div class="sidebar-section">
-        <div class="sidebar-label">Equipment Library</div>
-        <div class="sidebar-item" id="nav-equipment-library" data-view="view-equipment-library">
-          <span class='icon' data-lucide='cog'></span> All Equipment
-        </div>
-      </div>
-
-      <div class="sidebar-divider"></div>
-
-      <!-- Knowledge Base -->
-      <div class="sidebar-section">
-        <div class="sidebar-label">Knowledge Base</div>
-        <div class="sidebar-item" id="nav-kb" data-view="view-kb">
-          <span class='icon' data-lucide='library'></span> Knowledge Base
-        </div>
-      </div>
-
-      <div class="sidebar-divider"></div>
-
-      <!-- Validation Suite (Phase 2 — Risk/URS/Qualification/Validation
-           Reports/Generate Document grouped under one entry point per the
-           approved IA, instead of five separate top-level sidebar
-           sections; each sub-suite keeps its own collapse control
-           unchanged). -->
+      <!-- ══ Validation Suite (ALD-001 §4/§5). Validation Dashboard below
+           is a Phase A placeholder view only — its real KPI / Quality &
+           Compliance / Approval Queue / Recent Activity content is built
+           in Phase B. Projects is unchanged. ══ -->
       <div class="sidebar-section">
         <div class="sidebar-label-row">
           <span class="sidebar-label">Validation Suite</span>
+          <button class="ws-group-collapse-btn" id="ws-validation-collapse-btn" onclick="toggleWSGroup('ws-validation-items','ws-validation-collapse-btn')"><span class='icon' data-lucide='chevron-up'></span></button>
         </div>
+        <div id="ws-validation-items">
 
-        <!-- Risk Management -->
-        <div class="qms-nav-group">
-          <div class="qms-nav-group-label">
-            <span>Risk Management</span>
-            <button class="val-collapse-btn" id="risk-collapse-btn" onclick="toggleRiskSection()"><span class='icon' data-lucide='chevron-up'></span></button>
+          <!-- Validation Dashboard (NEW nav item — placeholder view; real
+               content is Phase B) -->
+          <div class="sidebar-item" id="nav-validation-dashboard" data-view="view-validation-dashboard">
+            <span class='icon' data-lucide='layout-dashboard'></span> Validation Dashboard
           </div>
-          <div id="risk-nav-items">
-            <div class="sidebar-item risk-sub-item" id="risk-nav-dashboard" onclick="window.initRisk && window.initRisk()">
-              <span class='icon' data-lucide='layout-dashboard'></span> Risk Dashboard
-            </div>
-            <div class="sidebar-item risk-sub-item" id="risk-nav-new" onclick="loadAssessmentList && loadAssessmentList()">
-              <span class='icon' data-lucide='shield-alert'></span> Assessments
-            </div>
-            <div class="sidebar-item risk-sub-item" id="risk-nav-new-btn" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-new'); startNewWizard && startNewWizard()">
-              <span class='icon' data-lucide='plus-circle'></span> New Assessment
-            </div>
-            <div class="sidebar-item risk-sub-item" id="risk-nav-library" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-library'); loadLibrary && loadLibrary()">
-              <span class='icon' data-lucide='library'></span> Risk Library
-            </div>
-            <div class="sidebar-item risk-sub-item" id="risk-nav-templates" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-templates'); loadTemplates && loadTemplates()">
-              <span class='icon' data-lucide='layout-template'></span> Templates
-            </div>
-            <div class="sidebar-item risk-sub-item" id="risk-nav-reports" onclick="showRiskReports()">
-              <span class='icon' data-lucide='file-text'></span> Reports
-            </div>
-            <div class="sidebar-item risk-sub-item" id="risk-nav-approval" onclick="showRiskApproval()">
-              <span class='icon' data-lucide='check-circle'></span> Approval Queue
-            </div>
-            <div class="sidebar-item risk-sub-item" id="risk-nav-assistant" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-assistant'); loadAIAssistant && loadAIAssistant()">
-              <span class='icon' data-lucide='bot'></span> AI Assistant
-            </div>
-          </div>
-        </div>
 
-        <!-- URS Management -->
-        <div class="qms-nav-group">
-          <div class="qms-nav-group-label">
-            <span>URS Management</span>
-            <button class="val-collapse-btn" id="urs-collapse-btn" onclick="toggleURSSection()"><span class='icon' data-lucide='chevron-up'></span></button>
-          </div>
-          <div id="urs-nav-items">
-            <div class="sidebar-item urs-sub-item" data-view="view-urs-dashboard">
-              <span class='icon' data-lucide='clipboard-list'></span> URS Dashboard
+          <!-- Projects -->
+          <div class="qms-nav-group">
+            <div class="qms-nav-group-label">
+              <span>Projects</span>
+              <button class="btn-new-project" id="btn-new-project">+ New</button>
             </div>
-            <div class="sidebar-item urs-sub-item" data-view="view-urs-new">
-              <span class='icon' data-lucide='plus-circle'></span> New URS
-            </div>
+            <div id="project-list"></div>
           </div>
-        </div>
 
-        <!-- Qualification (IQ/OQ/PQ) -->
-        <div class="qms-nav-group">
-          <div class="qms-nav-group-label">
-            <span>Qualification</span>
-            <button class="val-collapse-btn" id="qual-collapse-btn" onclick="toggleQualSection()"><span class='icon' data-lucide='chevron-up'></span></button>
-          </div>
-          <div id="qual-nav-items">
-            <div class="sidebar-item qual-sub-item" onclick="window.initQual && window.initQual()">
-              <span class='icon' data-lucide='flask-conical'></span> IQ / OQ / PQ
-            </div>
-            <div class="sidebar-item qual-sub-item" onclick="window.showView && window.showView('view-qual'); window.qualShowNew && window.qualShowNew()">
-              <span class='icon' data-lucide='plus-circle'></span> New Qualification
-            </div>
-          </div>
-        </div>
+          <!-- URS Management, Qualification, Validation Report, and Generate
+               Document temporary sidebar entries removed (ALD-001 Phase D —
+               approved cleanup). Each suite remains fully reachable via
+               Project Workspace's own tabs (Phase C), Dashboard Quick
+               Actions, and the Validation Dashboard's Approval Queue
+               (Phase B) — verified before removal, not assumed. The old
+               generic "Generate Document" wizard (view-validation,
+               static/js/validation.js, static/js/validation_config.js) is
+               now unreachable from the UI as a result; per explicit
+               instruction those files are NOT deleted in this phase —
+               marked "Legacy Candidate for Removal", physical deletion
+               deferred to a future maintenance phase after full regression
+               testing. -->
 
-        <!-- Validation Reports -->
-        <div class="qms-nav-group">
-          <div class="qms-nav-group-label">
-            <span>Validation Reports</span>
-            <button class="val-collapse-btn" id="report-collapse-btn" onclick="toggleReportSection()"><span class='icon' data-lucide='chevron-up'></span></button>
-          </div>
-          <div id="report-nav-items">
-            <div class="sidebar-item report-sub-item" onclick="window.initReport && window.initReport()">
-              <span class='icon' data-lucide='file-check'></span> Validation Reports
-            </div>
-            <div class="sidebar-item report-sub-item" onclick="window.showView && window.showView('view-report'); window.reportShowNew && window.reportShowNew()">
-              <span class='icon' data-lucide='plus-circle'></span> New Report
-            </div>
-          </div>
-        </div>
-
-        <!-- Generate Document — AI generator for document types without a
-             dedicated suite yet (DQ/FAT/SAT/FMEA/SOP/Validation Plan/
-             Validation Report/IQ-OQ Combined). URS/IQ/OQ/PQ/CAPA/Deviation/
-             Change Control are generated from their own suite above instead
-             (REPOSITORY_AUDIT.md Critical finding: retired duplicate wizard
-             entry points per Blueprint ADR-P02). -->
-        <div class="qms-nav-group">
-          <div class="qms-nav-group-label">
-            <span>Generate Document</span>
-            <button class="val-collapse-btn" id="val-collapse-btn" onclick="toggleValSection()"><span class='icon' data-lucide='chevron-up'></span></button>
-          </div>
-          <div id="val-nav-items"></div>
         </div>
       </div>
 
       <div class="sidebar-divider"></div>
 
-      <!-- Quality Management Suite (Phase 1: Document Control, Deviations, CAPA) -->
+      <!-- ══ Quality Management (ALD-001-R1) — promoted to its own
+           top-level module: an independent enterprise QMS, not owned by
+           Validation. Dashboard/Deviations/CAPA/Change Control are
+           RELOCATED from Validation Suite's former "Quality & Compliance
+           (temporary)" group — same ids, same data-view, same onclick,
+           not rebuilt. "Dashboard" restores a sidebar entry to
+           view-qms-dashboard, which already existed fully built
+           (static/js/qms_common.js::initQMSDashboard) since before Phase A
+           — it only lost its nav entry when Quality Center was dissolved.
+           "Document Control" is a second entry point into the exact same
+           view-qms-documents Document Generator already uses (same
+           pattern as Knowledge Base's SOP Library/Validation Library/
+           Search shortcuts) — not a duplicate implementation. The last
+           five items are explicit "Coming Soon" placeholders with no
+           data-view/onclick, per instruction "no implementation
+           required". ══ -->
       <div class="sidebar-section">
         <div class="sidebar-label-row">
           <span class="sidebar-label">Quality Management</span>
@@ -264,44 +263,175 @@
         </div>
         <div id="qms-nav-items">
           <div class="sidebar-item" id="nav-qms-dashboard" data-view="view-qms-dashboard">
-            <span class='icon' data-lucide='layout-dashboard'></span> QMS Dashboard
+            <span class='icon' data-lucide='layout-dashboard'></span> Dashboard
           </div>
-
-          <div class="qms-nav-group">
-            <div class="qms-nav-group-label">Document Control</div>
-            <div class="sidebar-item qms-sub-item" id="nav-qms-documents" data-view="view-qms-documents">
-              <span class='icon' data-lucide='file-text'></span> Documents
-            </div>
-          </div>
-
           <div class="qms-nav-group">
             <div class="qms-nav-group-label">Deviation Management</div>
             <div class="sidebar-item qms-sub-item" id="nav-qms-deviations" data-view="view-qms-deviations">
               <span class='icon' data-lucide='alert-triangle'></span> Deviations
             </div>
           </div>
-
           <div class="qms-nav-group">
             <div class="qms-nav-group-label">CAPA</div>
             <div class="sidebar-item qms-sub-item" id="nav-qms-capa" data-view="view-qms-capa">
               <span class='icon' data-lucide='repeat'></span> CAPA
             </div>
           </div>
-
           <div class="qms-nav-group">
             <div class="qms-nav-group-label">Change Control</div>
             <div class="sidebar-item qms-sub-item" id="nav-qms-change-control" data-view="view-qms-change-control">
               <span class='icon' data-lucide='git-pull-request'></span> Change Control
             </div>
           </div>
+          <div class="sidebar-item qms-sub-item" id="nav-qm-documents" data-view="view-qms-documents">
+            <span class='icon' data-lucide='file-text'></span> Document Control
+          </div>
+          <div class="sidebar-item" style="opacity:0.45;cursor:default">
+            <span class='icon' data-lucide='graduation-cap'></span> Training <span style="font-size:11px;margin-left:6px">(Coming Soon)</span>
+          </div>
+          <div class="sidebar-item" style="opacity:0.45;cursor:default">
+            <span class='icon' data-lucide='message-square-warning'></span> Complaints <span style="font-size:11px;margin-left:6px">(Coming Soon)</span>
+          </div>
+          <div class="sidebar-item" style="opacity:0.45;cursor:default">
+            <span class='icon' data-lucide='clipboard-check'></span> Audit Management <span style="font-size:11px;margin-left:6px">(Coming Soon)</span>
+          </div>
+          <div class="sidebar-item" style="opacity:0.45;cursor:default">
+            <span class='icon' data-lucide='truck'></span> Supplier Quality <span style="font-size:11px;margin-left:6px">(Coming Soon)</span>
+          </div>
+          <div class="sidebar-item" style="opacity:0.45;cursor:default">
+            <span class='icon' data-lucide='users-round'></span> Management Review <span style="font-size:11px;margin-left:6px">(Coming Soon)</span>
+          </div>
         </div>
       </div>
 
       <div class="sidebar-divider"></div>
 
-      <!-- AI Assistant -->
+      <!-- ══ Knowledge Base (ALD-001 §4) — section renamed from
+           "Knowledge Center"; SOP Library / Validation Library / Search
+           quick filters unchanged (full KB retaxonomy is Phase E). ══ -->
       <div class="sidebar-section">
-        <div class="sidebar-label">AI Assistant</div>
+        <div class="sidebar-label-row">
+          <span class="sidebar-label">Knowledge Base</span>
+          <button class="ws-group-collapse-btn" id="ws-knowledge-collapse-btn" onclick="toggleWSGroup('ws-knowledge-items','ws-knowledge-collapse-btn')"><span class='icon' data-lucide='chevron-up'></span></button>
+        </div>
+        <div id="ws-knowledge-items">
+          <div class="sidebar-item" id="nav-kb" data-view="view-kb">
+            <span class='icon' data-lucide='library'></span> Knowledge Base
+          </div>
+          <div class="sidebar-item" onclick="window.showView('view-kb'); window.kbSetFolder && window.kbSetFolder('SOP'); document.querySelectorAll('.sidebar-item').forEach(function(n){n.classList.remove('active');}); this.classList.add('active');">
+            <span class='icon' data-lucide='clipboard-list'></span> SOP Library
+          </div>
+          <div class="sidebar-item" onclick="window.showView('view-kb'); window.kbSetFolder && window.kbSetFolder('Validation'); document.querySelectorAll('.sidebar-item').forEach(function(n){n.classList.remove('active');}); this.classList.add('active');">
+            <span class='icon' data-lucide='check-circle-2'></span> Validation Library
+          </div>
+          <div class="sidebar-item" onclick="window.showView('view-kb'); window.initKB && window.initKB(); document.querySelectorAll('.sidebar-item').forEach(function(n){n.classList.remove('active');}); this.classList.add('active'); var f=document.getElementById('kb-search-title'); if (f) f.focus();">
+            <span class='icon' data-lucide='search'></span> Search
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- ══ Equipment Library (ALD-001 §4) — promoted from a Validation
+           Suite sub-group to its own top-level module. Same element
+           (#nav-equipment-library), same behavior. ══ -->
+      <div class="sidebar-section">
+        <div class="sidebar-label">Equipment Library</div>
+        <div class="sidebar-item qms-sub-item" id="nav-equipment-library" data-view="view-equipment-library">
+          <span class='icon' data-lucide='cog'></span> All Equipment
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- ══ Risk Management (ALD-001 §4) — promoted from a Validation
+           Suite sub-group ("Risk Assessment") to its own top-level
+           module. Same elements/ids/onclick, unchanged. ══ -->
+      <div class="sidebar-section">
+        <div class="sidebar-label-row">
+          <span class="sidebar-label">Risk Management</span>
+          <button class="val-collapse-btn" id="risk-collapse-btn" onclick="toggleRiskSection()"><span class='icon' data-lucide='chevron-up'></span></button>
+        </div>
+        <div id="risk-nav-items">
+          <div class="sidebar-item risk-sub-item" id="risk-nav-dashboard" onclick="window.initRisk && window.initRisk()">
+            <span class='icon' data-lucide='layout-dashboard'></span> Risk Dashboard
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-new" onclick="loadAssessmentList && loadAssessmentList()">
+            <span class='icon' data-lucide='shield-alert'></span> Assessments
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-new-btn" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-new'); startNewWizard && startNewWizard()">
+            <span class='icon' data-lucide='plus-circle'></span> New Assessment
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-library" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-library'); loadLibrary && loadLibrary()">
+            <span class='icon' data-lucide='library'></span> Risk Library
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-templates" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-templates'); loadTemplates && loadTemplates()">
+            <span class='icon' data-lucide='layout-template'></span> Templates
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-reports" onclick="showRiskReports()">
+            <span class='icon' data-lucide='file-text'></span> Reports
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-approval" onclick="showRiskApproval()">
+            <span class='icon' data-lucide='check-circle'></span> Approval Queue
+          </div>
+          <div class="sidebar-item risk-sub-item" id="risk-nav-assistant" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-assistant'); loadAIAssistant && loadAIAssistant()">
+            <span class='icon' data-lucide='bot'></span> AI Assistant
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- ══ Document Generator (ALD-001 §4) — section renamed from
+           "Document Center"; scope narrowing to operational-GMP-only
+           documents is Phase D. Same elements (#nav-qms-documents), same
+           behavior. ══ -->
+      <div class="sidebar-section">
+        <div class="sidebar-label-row">
+          <span class="sidebar-label">Document Generator</span>
+          <button class="ws-group-collapse-btn" id="ws-document-collapse-btn" onclick="toggleWSGroup('ws-document-items','ws-document-collapse-btn')"><span class='icon' data-lucide='chevron-up'></span></button>
+        </div>
+        <div id="ws-document-items">
+          <div class="sidebar-item qms-sub-item" id="nav-qms-documents" data-view="view-qms-documents">
+            <span class='icon' data-lucide='file-text'></span> All Documents
+          </div>
+          <div class="sidebar-item qms-sub-item" onclick="window.showView('view-qms-documents'); window.qmsLoadMeta && window.qmsLoadMeta().then(function(){ window.qmsDocShowList && window.qmsDocShowList({type:'SOP'}); }); document.querySelectorAll('.sidebar-item').forEach(function(n){n.classList.remove('active');}); this.classList.add('active');">
+            <span class='icon' data-lucide='clipboard-list'></span> SOP
+          </div>
+          <div class="sidebar-item qms-sub-item" onclick="window.showView('view-qms-documents'); window.qmsLoadMeta && window.qmsLoadMeta().then(function(){ window.qmsDocShowList && window.qmsDocShowList({type:'Template'}); }); document.querySelectorAll('.sidebar-item').forEach(function(n){n.classList.remove('active');}); this.classList.add('active');">
+            <span class='icon' data-lucide='layout-template'></span> Templates
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- Administration (Phase 3.5 — Company/User/Role Administration).
+           Not one of the ALD-001 locked-module groups; kept exactly as-is
+           (same ids, same onclick-free RBAC-gated visibility in
+           static/js/admin_assume_context.js::applyRoleBasedVisibility) so
+           the feature and its role gating are fully preserved. -->
+      <div class="sidebar-section" id="admin-nav-section" style="display:none">
+        <div class="sidebar-label">Administration</div>
+        <div class="sidebar-item" id="nav-admin-companies" data-view="view-admin-companies" style="display:none">
+          <span class='icon' data-lucide='building-2'></span> Companies
+        </div>
+        <div class="sidebar-item" id="nav-admin-users" data-view="view-admin-users" style="display:none">
+          <span class='icon' data-lucide='users'></span> Users
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- ══ PharmaPilot (placeholder — no AI implementation). The
+           existing, fully functional AI Assistant chat is kept alongside
+           it unchanged (#nav-chat / #view-chat) so that working feature
+           is not removed. Unchanged per ALD-001 §4. ══ -->
+      <div class="sidebar-section">
+        <div class="sidebar-label">PharmaPilot</div>
+        <div class="sidebar-item" id="nav-pharmapilot" data-view="view-pharmapilot">
+          <span class='icon' data-lucide='bot'></span> PharmaPilot
+        </div>
         <div class="sidebar-item" id="nav-chat" data-view="view-chat">
           <span class='icon' data-lucide='sparkles'></span> AI Assistant
         </div>
@@ -309,8 +439,60 @@
 
     </aside>
 
+    <!-- ══════════════════════════════════════════════════════════════════
+         Workspace Selector (Phase 4 — UI Navigation Refresh)
+         The landing screen shown after login. Purely a navigation front
+         door: every card just triggers the same click/init path the
+         relocated sidebar item it targets already uses, so no new
+         business logic, routes, or backend calls are introduced here.
+         ══════════════════════════════════════════════════════════════════ -->
+    <main class="ws-selector" id="view-workspace-selector">
+      <div class="ws-selector-inner">
+        <h1 class="ws-selector-title">Welcome to PharmaGPT</h1>
+        <p class="ws-selector-subtitle">Choose your workspace.</p>
+
+        <div class="ws-card-grid">
+          <div class="ws-card" onclick="document.getElementById('nav-dashboard').click()">
+            <span class="ws-card-icon icon" data-lucide="layout-dashboard"></span>
+            <h3>Executive Workspace</h3>
+            <p>Dashboards, KPIs, Executive Insights</p>
+          </div>
+
+          <div class="ws-card" onclick="document.getElementById('risk-nav-dashboard').click()">
+            <span class="ws-card-icon icon" data-lucide="flask-conical"></span>
+            <h3>Validation Workspace</h3>
+            <p>Validation Projects &amp; Qualification</p>
+          </div>
+
+          <div class="ws-card" onclick="document.getElementById('nav-qms-dashboard').click()">
+            <span class="ws-card-icon icon" data-lucide="shield"></span>
+            <h3>Quality Workspace</h3>
+            <p>CAPA, Deviations, Change Control</p>
+          </div>
+
+          <div class="ws-card" onclick="document.getElementById('nav-kb').click()">
+            <span class="ws-card-icon icon" data-lucide="library"></span>
+            <h3>Knowledge Workspace</h3>
+            <p>SOPs, Manuals &amp; Reference Documents</p>
+          </div>
+
+          <div class="ws-card" onclick="document.getElementById('nav-qms-documents').click()">
+            <span class="ws-card-icon icon" data-lucide="file-text"></span>
+            <h3>Document Workspace</h3>
+            <p>Controlled Document Authoring</p>
+          </div>
+
+          <div class="ws-card" onclick="document.getElementById('nav-pharmapilot').click()">
+            <span class="ws-card-icon icon" data-lucide="bot"></span>
+            <h3>PharmaPilot</h3>
+            <p>Enterprise AI Assistant (placeholder only)</p>
+          </div>
+        </div>
+      </div>
+    </main>
+
     <!-- ── Home Dashboard ─────────────────────────────────────────────────── -->
-    <main class="dash-container" id="view-dashboard">
+    <main class="dash-container" id="view-dashboard" style="display:none">
 
       <!-- Header -->
       <div class="dash-header">
@@ -370,8 +552,70 @@
         </div>
       </div>
 
+      <!-- Suite Overview (Batch 2) — Equipment, Documents, Change Controls,
+           Validation Status. All fields sourced from pre-existing dashboard
+           aggregate endpoints (qms/dashboard, urs/dashboard, qual/dashboard,
+           report/dashboard, GET /equipment) — no new backend calls. -->
+      <div class="dash-suite-grid" id="dash-suite-grid">
+        <div class="dash-stat-card dash-stat-equipment">
+          <div class="dash-stat-icon" data-lucide="wrench"></div>
+          <div class="dash-stat-value" id="dash-stat-equipment">—</div>
+          <div class="dash-stat-label">Equipment</div>
+          <div class="dash-stat-sub" id="dash-stat-equipment-sub">In the equipment library</div>
+        </div>
+        <div class="dash-stat-card dash-stat-documents">
+          <div class="dash-stat-icon" data-lucide="file-text"></div>
+          <div class="dash-stat-value" id="dash-stat-documents">—</div>
+          <div class="dash-stat-label">Controlled Documents</div>
+          <div class="dash-stat-sub" id="dash-stat-documents-sub">Due for review</div>
+        </div>
+        <div class="dash-stat-card dash-stat-changes">
+          <div class="dash-stat-icon" data-lucide="git-pull-request"></div>
+          <div class="dash-stat-value" id="dash-stat-changes">—</div>
+          <div class="dash-stat-label">Change Controls</div>
+          <div class="dash-stat-sub" id="dash-stat-changes-sub">Pending approval</div>
+        </div>
+        <div class="dash-stat-card dash-stat-validation-status">
+          <div class="dash-stat-icon" data-lucide="clipboard-check"></div>
+          <div class="dash-stat-value" id="dash-stat-validation-status">—</div>
+          <div class="dash-stat-label">Validation Status</div>
+          <div class="dash-stat-sub" id="dash-stat-validation-status-sub">Awaiting review or approval</div>
+        </div>
+      </div>
+
       <!-- Main grid -->
       <div class="dash-grid">
+
+        <!-- Quick Actions -->
+        <div class="dash-card" id="dash-quick-actions-card">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Quick Actions</span>
+            <span class="dash-card-icon" data-lucide="zap"></span>
+          </div>
+          <div class="dash-card-body dash-quick-actions" id="dash-quick-actions-body">
+            <button class="dash-qa-btn" onclick="document.getElementById('btn-new-project') && document.getElementById('btn-new-project').click()">
+              <span class="icon" data-lucide="folder-plus"></span> New Project
+            </button>
+            <button class="dash-qa-btn" onclick="window.showView && window.showView('view-urs-new')">
+              <span class="icon" data-lucide="file-plus"></span> New URS
+            </button>
+            <button class="dash-qa-btn" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-new'); window.startNewWizard && window.startNewWizard();">
+              <span class="icon" data-lucide="shield-alert"></span> New Risk Assessment
+            </button>
+            <button class="dash-qa-btn" onclick="window.showView && window.showView('view-qms-documents'); window.qmsDocOpenNew && window.qmsDocOpenNew();">
+              <span class="icon" data-lucide="file-plus-2"></span> New SOP
+            </button>
+            <button class="dash-qa-btn" onclick="window.showView && window.showView('view-qms-capa'); window.qmsCapaOpenNew && window.qmsCapaOpenNew();">
+              <span class="icon" data-lucide="repeat"></span> New CAPA
+            </button>
+            <button class="dash-qa-btn" onclick="window.showView && window.showView('view-qms-change-control'); window.qmsCCOpenNew && window.qmsCCOpenNew();">
+              <span class="icon" data-lucide="git-pull-request"></span> New Change Control
+            </button>
+            <button class="dash-qa-btn" onclick="window.showView && window.showView('view-report'); window.reportShowNew && window.reportShowNew();">
+              <span class="icon" data-lucide="file-check-2"></span> Generate Validation Report
+            </button>
+          </div>
+        </div>
 
         <!-- Recent Activity -->
         <div class="dash-card" id="dash-recent-activity">
@@ -417,6 +661,24 @@
           </div>
         </div>
 
+        <!-- Favorites (Batch 5) — browser-local, gracefully hidden when empty -->
+        <div class="dash-card" id="dash-favorites-card" style="display:none">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Favorites</span>
+            <span class="dash-card-icon" data-lucide="star"></span>
+          </div>
+          <div class="dash-card-body" id="dash-favorites-body"></div>
+        </div>
+
+        <!-- Recent Items (Batch 5) — browser-local, gracefully hidden when empty -->
+        <div class="dash-card" id="dash-recent-items-card" style="display:none">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Recent Items</span>
+            <span class="dash-card-icon" data-lucide="clock"></span>
+          </div>
+          <div class="dash-card-body" id="dash-recent-items-body"></div>
+        </div>
+
         <!-- System Health -->
         <div class="dash-card dash-card-health" id="dash-health-card">
           <div class="dash-card-header">
@@ -429,6 +691,202 @@
         </div>
 
       </div>
+    </main>
+
+    <!-- ── Error pages (Batch 7) — full-page 403/404/500/Network/Permission
+         states, additive `<main id="view-error-*">` blocks following the
+         same `main[id^='view-']` convention as every other view. Rendered
+         by static/js/error_pages.js. ──────────────────────────────────── -->
+    <main class="error-page-container" id="view-error-403" style="display:none">
+      <div class="error-page-card">
+        <div class="error-page-icon error-page-icon-warning"><span class="icon" data-lucide="shield-x"></span></div>
+        <div class="error-page-code">403</div>
+        <h2 class="error-page-title">Access Denied</h2>
+        <p class="error-page-message" id="error-403-message">You don't have permission to view this resource.</p>
+        <div class="error-page-actions">
+          <button class="btn-primary" onclick="window.showView && window.showView('view-dashboard')">Back to Dashboard</button>
+        </div>
+      </div>
+    </main>
+
+    <main class="error-page-container" id="view-error-404" style="display:none">
+      <div class="error-page-card">
+        <div class="error-page-icon"><span class="icon" data-lucide="file-question"></span></div>
+        <div class="error-page-code">404</div>
+        <h2 class="error-page-title">Not Found</h2>
+        <p class="error-page-message" id="error-404-message">This record couldn't be found. It may have been moved or deleted.</p>
+        <div class="error-page-actions">
+          <button class="btn-primary" onclick="window.showView && window.showView('view-dashboard')">Back to Dashboard</button>
+        </div>
+      </div>
+    </main>
+
+    <main class="error-page-container" id="view-error-500" style="display:none">
+      <div class="error-page-card">
+        <div class="error-page-icon error-page-icon-error"><span class="icon" data-lucide="server-crash"></span></div>
+        <div class="error-page-code">500</div>
+        <h2 class="error-page-title">Something Went Wrong</h2>
+        <p class="error-page-message" id="error-500-message">An unexpected server error occurred. Our team has been notified.</p>
+        <div class="error-page-actions">
+          <button class="btn-secondary" id="error-500-retry">Try Again</button>
+          <button class="btn-primary" onclick="window.showView && window.showView('view-dashboard')">Back to Dashboard</button>
+        </div>
+      </div>
+    </main>
+
+    <main class="error-page-container" id="view-error-network" style="display:none">
+      <div class="error-page-card">
+        <div class="error-page-icon error-page-icon-warning"><span class="icon" data-lucide="wifi-off"></span></div>
+        <h2 class="error-page-title">Network Error</h2>
+        <p class="error-page-message" id="error-network-message">Can't reach PharmaGPT right now. Check your connection and try again.</p>
+        <div class="error-page-actions">
+          <button class="btn-primary" id="error-network-retry">Try Again</button>
+        </div>
+      </div>
+    </main>
+
+    <main class="error-page-container" id="view-error-permission" style="display:none">
+      <div class="error-page-card">
+        <div class="error-page-icon error-page-icon-warning"><span class="icon" data-lucide="lock"></span></div>
+        <h2 class="error-page-title">Permission Denied</h2>
+        <p class="error-page-message" id="error-permission-message">Your role doesn't have access to this area of PharmaGPT.</p>
+        <div class="error-page-actions">
+          <button class="btn-primary" onclick="window.showView && window.showView('view-dashboard')">Back to Dashboard</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- ── Validation Dashboard (ALD-001 Phase B) — Validation Suite's
+         landing page. Every data source below is an existing, unmodified
+         endpoint (see static/js/validation_dashboard.js header comment);
+         no new backend route was added. Reuses the Home Dashboard's own
+         .dash-* CSS classes verbatim — no new CSS. This is an executive
+         summary, not a second project workspace: the Projects panel below
+         shows a read-only recent-projects summary and reuses
+         window.switchToProject / #btn-new-project — it does not
+         reimplement project rendering (see projects.js, unmodified). ─── -->
+    <main class="dash-container" id="view-validation-dashboard" style="display:none">
+
+      <div class="dash-header">
+        <div class="dash-header-left">
+          <span class="dash-icon" data-lucide="layout-dashboard"></span>
+          <div>
+            <h2 class="dash-title">Validation Dashboard</h2>
+            <p class="dash-subtitle">Validation Suite — company-wide status at a glance</p>
+          </div>
+        </div>
+        <button class="dash-refresh-btn" onclick="window.loadValidationDashboard && window.loadValidationDashboard()"><span class='icon' data-lucide='refresh-cw'></span> Refresh</button>
+      </div>
+
+      <!-- 1. KPI Dashboard -->
+      <div class="dash-stats-grid">
+        <div class="dash-stat-card">
+          <div class="dash-stat-icon" data-lucide="folder"></div>
+          <div class="dash-stat-value" id="vd-stat-projects">—</div>
+          <div class="dash-stat-label">Active Projects</div>
+          <div class="dash-stat-sub">Across the Validation Suite</div>
+        </div>
+        <div class="dash-stat-card">
+          <div class="dash-stat-icon" data-lucide="clipboard-list"></div>
+          <div class="dash-stat-value" id="vd-stat-urs">—</div>
+          <div class="dash-stat-label">Open URS</div>
+          <div class="dash-stat-sub">Draft or under review</div>
+        </div>
+        <div class="dash-stat-card">
+          <div class="dash-stat-icon" data-lucide="flask-conical"></div>
+          <div class="dash-stat-value" id="vd-stat-qual">—</div>
+          <div class="dash-stat-label">Qualification Progress</div>
+          <div class="dash-stat-sub" id="vd-stat-qual-sub">IQ / OQ / PQ completed</div>
+        </div>
+        <div class="dash-stat-card">
+          <div class="dash-stat-icon" data-lucide="check-circle"></div>
+          <div class="dash-stat-value" id="vd-stat-approvals">—</div>
+          <div class="dash-stat-label">Pending Approvals</div>
+          <div class="dash-stat-sub">Across all suites</div>
+        </div>
+        <div class="dash-stat-card">
+          <div class="dash-stat-icon" data-lucide="file-check"></div>
+          <div class="dash-stat-value" id="vd-stat-reports">—</div>
+          <div class="dash-stat-label">Validation Reports</div>
+          <div class="dash-stat-sub">Total on file</div>
+        </div>
+        <div class="dash-stat-card">
+          <div class="dash-stat-icon" data-lucide="cog"></div>
+          <div class="dash-stat-value" id="vd-stat-equipment">—</div>
+          <div class="dash-stat-label">Equipment Count</div>
+          <div class="dash-stat-sub">In the Equipment Library</div>
+        </div>
+      </div>
+
+      <div class="dash-grid">
+
+        <!-- 2. Projects Panel — summary only; opens/creates via existing
+             project APIs (window.switchToProject, #btn-new-project) -->
+        <div class="dash-card">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Recent Projects</span>
+            <span class="dash-card-icon" data-lucide="folder"></span>
+          </div>
+          <div class="dash-card-body" id="vd-projects-body">
+            <div class="dash-loading">Loading…</div>
+          </div>
+          <div style="padding:0 20px 16px">
+            <button class="btn-secondary" onclick="document.getElementById('btn-new-project') && document.getElementById('btn-new-project').click()">
+              <span class="icon" data-lucide="folder-plus"></span> New Project
+            </button>
+          </div>
+        </div>
+
+        <!-- 3. Quality Summary Panel (ALD-001-R1) — renamed from "Quality &
+             Compliance"; read-only executive summary only, per instruction
+             "Validation SHALL NOT own Deviations/CAPA/Change Control". Still
+             reuses GET /qms/dashboard verbatim (static/js/
+             validation_dashboard.js::renderQuality, unchanged) — clicking a
+             metric opens that record type's page, now reached via the
+             Quality Management module rather than Validation Suite. -->
+        <div class="dash-card">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Quality Summary</span>
+            <span class="dash-card-icon" data-lucide="shield"></span>
+          </div>
+          <div class="dash-card-body" id="vd-quality-body">
+            <div class="dash-loading">Loading…</div>
+          </div>
+        </div>
+
+        <!-- 4. Approval Queue — merges existing filtered list endpoints -->
+        <div class="dash-card">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Approval Queue</span>
+            <span class="dash-card-icon" data-lucide="check-circle"></span>
+          </div>
+          <div class="dash-card-body" id="vd-approvals-body">
+            <div class="dash-loading">Loading…</div>
+          </div>
+        </div>
+
+        <!-- 5. Recent Activity — reuses GET /dashboard/stats().recent_activity -->
+        <div class="dash-card">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Recent Activity</span>
+            <span class="dash-card-icon" data-lucide="activity"></span>
+          </div>
+          <div class="dash-card-body" id="vd-activity-body">
+            <div class="dash-loading">Loading…</div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+
+    <!-- ── PharmaPilot (Phase 4) — placeholder only, no AI implementation.
+         The working AI Assistant (chat) below is unchanged and remains
+         reachable from the same sidebar group. ─────────────────────────── -->
+    <main class="ws-placeholder" id="view-pharmapilot" style="display:none">
+      <span class="ws-placeholder-icon icon" data-lucide="bot"></span>
+      <h2>PharmaPilot</h2>
+      <p>Enterprise AI Assistant — coming soon.</p>
+      <p class="ws-placeholder-sub">This workspace is a placeholder for a future phase. Use <strong>AI Assistant</strong> below for the current chat assistant.</p>
     </main>
 
     <!-- ── Chat view ────────────────────────────────────────────────────────── -->
@@ -567,6 +1025,21 @@
             </div>
           </div>
 
+          <!-- DQ / FAT / SAT (ALD-001 Phase C). Reuses the working Document
+               Control engine (routes/qms_documents.py, doc_type='DQ'|'FAT'|'SAT')
+               — the old validation.py wizard for these three types already
+               returns 410 Gone server-side (see routes/validation.py::
+               _RETIRED_DOC_TYPES); this is the supported path, not a new one.
+               Rendered/filtered by static/js/project_workspace.js::pwRenderDqFatSat. -->
+          <div class="pw-tab-panel" data-pw-tab="dq-fat-sat">
+            <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+              <button class="btn-secondary" onclick="window.showView && window.showView('view-qms-documents'); window.qmsLoadMeta && window.qmsLoadMeta().then(function(){ window.qmsDocOpenNew && window.qmsDocOpenNew({doc_type:'DQ', project_id: window.activeProject && window.activeProject.id}); });">+ New DQ</button>
+              <button class="btn-secondary" onclick="window.showView && window.showView('view-qms-documents'); window.qmsLoadMeta && window.qmsLoadMeta().then(function(){ window.qmsDocOpenNew && window.qmsDocOpenNew({doc_type:'FAT', project_id: window.activeProject && window.activeProject.id}); });">+ New FAT</button>
+              <button class="btn-secondary" onclick="window.showView && window.showView('view-qms-documents'); window.qmsLoadMeta && window.qmsLoadMeta().then(function(){ window.qmsDocOpenNew && window.qmsDocOpenNew({doc_type:'SAT', project_id: window.activeProject && window.activeProject.id}); });">+ New SAT</button>
+            </div>
+            <div id="pw-dqfatsat-body"></div>
+          </div>
+
           <!-- Risk Assessment / URS / Qualification / Validation Report — entry points.
                These suites carry no project_id column yet, so these are live entry
                points into their existing (previously unwired) dashboards, not
@@ -610,13 +1083,16 @@
               </div>
             </div>
           </div>
+          <!-- Approvals (ALD-001 Phase C). Reuses Phase B's Approval Queue
+               merge logic verbatim (static/js/validation_dashboard.js::
+               loadApprovalQueue, called with this panel's own target id) —
+               no new fetch/merge logic, no new route. Note: since URS/
+               Qualification/Validation Report/Risk carry no project_id
+               (DEC-025), this shows the same company-wide queue as the
+               Validation Dashboard, not one filtered to this project. -->
           <div class="pw-tab-panel" data-pw-tab="approvals">
-            <div class="eq-future-grid">
-              <div class="eq-future-card">
-                <span class='icon' data-lucide='stamp'></span>
-                <div class="eq-future-card-name">Approvals</div>
-                <div class="eq-future-card-tag">Planned</div>
-              </div>
+            <div id="pw-approvals-body">
+              <div class="dash-loading">Loading…</div>
             </div>
           </div>
 
@@ -756,6 +1232,112 @@
       <div id="eqlib-list"></div>
     </main>
 
+    <!-- ── Company Administration view (Phase 3.5) ──────────────────────────── -->
+    <main class="kb-container" id="view-admin-companies" style="display:none">
+      <div class="kb-header">
+        <div class="kb-header-left">
+          <span class="kb-header-icon" data-lucide="building-2"></span>
+          <div>
+            <h2 class="kb-header-title">Company Administration</h2>
+            <p class="kb-header-sub">Create companies and their first Company Admin — Super Admin only</p>
+          </div>
+        </div>
+        <button class="btn-primary" id="btn-new-company">+ New Company</button>
+      </div>
+      <div class="eq-empty" id="admin-companies-empty" style="display:none">
+        <span class='icon' data-lucide='building-2' style="width:40px;height:40px;opacity:0.5"></span>
+        <p>No companies yet.</p>
+      </div>
+      <div id="admin-companies-list"></div>
+    </main>
+
+    <div class="modal-overlay" id="admin-company-modal-overlay"></div>
+    <div class="modal" id="admin-company-modal">
+      <div class="modal-header">
+        <h3>New Company</h3>
+        <button class="modal-close" id="admin-company-modal-close">&times;</button>
+      </div>
+      <form id="admin-company-form">
+        <div class="form-group">
+          <label for="ac-legal-name">Company Legal Name *</label>
+          <input type="text" id="ac-legal-name" placeholder="e.g. Acme Pharmaceuticals Inc." required />
+        </div>
+        <div class="form-group">
+          <label for="ac-industry">Industry Segment *</label>
+          <select id="ac-industry" required>
+            <option value="">— Select —</option>
+            <option value="pharma">Pharma</option>
+            <option value="nutraceutical">Nutraceutical</option>
+            <option value="medical_device">Medical Device</option>
+            <option value="biotech">Biotech</option>
+            <option value="cdmo">CDMO</option>
+            <option value="cro">CRO</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="ac-admin-email">First Company Admin — Email *</label>
+          <input type="email" id="ac-admin-email" placeholder="admin@company.com" required />
+        </div>
+        <div class="form-group">
+          <label for="ac-admin-name">First Company Admin — Display Name *</label>
+          <input type="text" id="ac-admin-name" placeholder="Jane Smith" required />
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn-secondary" id="admin-company-modal-cancel">Cancel</button>
+          <button type="submit" class="btn-primary" id="admin-company-modal-save">Create Company</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- ── User Management view (Phase 3.5) ─────────────────────────────────── -->
+    <main class="kb-container" id="view-admin-users" style="display:none">
+      <div class="kb-header">
+        <div class="kb-header-left">
+          <span class="kb-header-icon" data-lucide="users"></span>
+          <div>
+            <h2 class="kb-header-title">User Management</h2>
+            <p class="kb-header-sub" id="admin-users-sub">Users in your company</p>
+          </div>
+        </div>
+        <button class="btn-primary" id="btn-invite-user">+ Invite User</button>
+      </div>
+      <div class="eq-empty" id="admin-users-empty" style="display:none">
+        <span class='icon' data-lucide='users' style="width:40px;height:40px;opacity:0.5"></span>
+        <p>No users yet.</p>
+      </div>
+      <div id="admin-users-list"></div>
+    </main>
+
+    <div class="modal-overlay" id="admin-user-modal-overlay"></div>
+    <div class="modal" id="admin-user-modal">
+      <div class="modal-header">
+        <h3>Invite User</h3>
+        <button class="modal-close" id="admin-user-modal-close">&times;</button>
+      </div>
+      <form id="admin-user-form">
+        <div class="form-group">
+          <label for="au-email">Email *</label>
+          <input type="email" id="au-email" placeholder="user@company.com" required />
+        </div>
+        <div class="form-group">
+          <label for="au-display-name">Display Name *</label>
+          <input type="text" id="au-display-name" placeholder="Jane Smith" required />
+        </div>
+        <div class="form-group">
+          <label for="au-role">Role *</label>
+          <select id="au-role" required>
+            <option value="2">Company Admin</option>
+            <option value="3" selected>Reviewer / QA</option>
+            <option value="4">User</option>
+          </select>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn-secondary" id="admin-user-modal-cancel">Cancel</button>
+          <button type="submit" class="btn-primary" id="admin-user-modal-save">Send Invite</button>
+        </div>
+      </form>
+    </div>
+
     <!-- ── Validation Document Generator view ───────────────────────────────── -->
     <main class="validation-container" id="view-validation" style="display:none">
 
@@ -891,7 +1473,7 @@
             </div>
             <div class="wizard-nav">
               <button class="btn-risk-secondary" onclick="backToList()">Cancel</button>
-              <button class="btn-risk-primary" onclick="wizardNext()">Next <span class='icon' data-lucide='arrow-right'></span></button>
+              <button class="btn-risk-primary" onclick="riskWizardNext()">Next <span class='icon' data-lucide='arrow-right'></span></button>
             </div>
           </div>
 
@@ -969,8 +1551,8 @@
               </div>
             </div>
             <div class="wizard-nav">
-              <button class="btn-risk-secondary" onclick="wizardBack()"><span class='icon' data-lucide='arrow-left'></span> Back</button>
-              <button class="btn-risk-primary" onclick="wizardNext()">Next <span class='icon' data-lucide='arrow-right'></span></button>
+              <button class="btn-risk-secondary" onclick="riskWizardBack()"><span class='icon' data-lucide='arrow-left'></span> Back</button>
+              <button class="btn-risk-primary" onclick="riskWizardNext()">Next <span class='icon' data-lucide='arrow-right'></span></button>
             </div>
           </div>
 
@@ -983,8 +1565,8 @@
               </div>
             </div>
             <div class="wizard-nav">
-              <button class="btn-risk-secondary" onclick="wizardBack()"><span class='icon' data-lucide='arrow-left'></span> Back</button>
-              <button class="btn-risk-primary" onclick="wizardNext()">Next <span class='icon' data-lucide='arrow-right'></span></button>
+              <button class="btn-risk-secondary" onclick="riskWizardBack()"><span class='icon' data-lucide='arrow-left'></span> Back</button>
+              <button class="btn-risk-primary" onclick="riskWizardNext()">Next <span class='icon' data-lucide='arrow-right'></span></button>
             </div>
           </div>
 
@@ -1006,7 +1588,7 @@
               </div>
             </div>
             <div class="wizard-nav">
-              <button class="btn-risk-secondary" onclick="wizardBack()"><span class='icon' data-lucide='arrow-left'></span> Back</button>
+              <button class="btn-risk-secondary" onclick="riskWizardBack()"><span class='icon' data-lucide='arrow-left'></span> Back</button>
               <button class="btn-risk-primary" onclick="createAndOpenAssessment()">Create &amp; Open <span class='icon' data-lucide='arrow-right'></span></button>
             </div>
           </div>
@@ -1726,6 +2308,10 @@
   <!-- auth.js loads first and patches window.fetch to attach the bearer token
        before any other module's DOMContentLoaded handler can call it (Phase 2
        step 2.6) — see static/js/auth.js. -->
+  <script src="{{ url_for('static', filename='js/ui_states.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/error_pages.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/favorites.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/recent_items.js') }}"></script>
   <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
 
   <!-- Load order: workspace (shared shell) -> dashboard -> projects -> documents -> insights -> validation_config -> validation -> knowledge_base -> chat -->
@@ -1748,70 +2334,24 @@
   <script src="{{ url_for('static', filename='js/qms_deviations.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_capa.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_change_control.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/validation_dashboard.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/admin_assume_context.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/admin_companies.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/admin_users.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/header.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/search.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/notifications.js') }}"></script>
   <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
 
-  <!-- ── Validation sidebar nav items (rendered from config) ──────────────── -->
+  <!-- The "Validation sidebar nav items" builder (buildValNav), plus
+       toggleValSection and switchToValidation, were removed here (ALD-001
+       Phase D — approved cleanup): their sole target, #val-nav-items, no
+       longer exists since the "Generate Document" temporary sidebar entry
+       was removed. The wizard they opened (view-validation,
+       static/js/validation.js, static/js/validation_config.js) is left in
+       place, physically undeleted, per explicit instruction — marked
+       "Legacy Candidate for Removal" pending a future maintenance phase. -->
   <script>
-    (function buildValNav() {
-      const container = document.getElementById("val-nav-items");
-      if (!container || !window.VALIDATION_DOC_ORDER) return;
-
-      const icons = {
-        DQ: "<span class='icon' data-lucide='ruler'></span>", FAT: "<span class='icon' data-lucide='factory'></span>", SAT: "<span class='icon' data-lucide='wrench'></span>",
-        "IQ/OQ Combined": "<span class='icon' data-lucide='wrench'></span>",
-        FMEA: "<span class='icon' data-lucide='alert-triangle'></span>",
-      };
-
-      window.VALIDATION_DOC_ORDER.forEach(type => {
-        const cfg  = window.VALIDATION_DOCS[type] || {};
-        const item = document.createElement("div");
-        item.className = "sidebar-item val-nav-item";
-        item.dataset.doctype = type;
-        item.innerHTML = `
-          <span class="icon" style="font-size:13px">${icons[type] || "<span class='icon' data-lucide='file-text'></span>"}</span>
-          <span class="val-nav-label">${type}</span>
-          <span class="val-nav-sub">${cfg.label ? cfg.label.replace(type + " — ", "").replace(type, "").trim() : ""}</span>
-        `;
-        item.addEventListener("click", () => {
-          switchToValidation(type);
-        });
-        container.appendChild(item);
-      });
-    })();
-
-    // Toggle Validation section collapse
-    let valSectionOpen = true;
-    function toggleValSection() {
-      const items = document.getElementById("val-nav-items");
-      const btn   = document.getElementById("val-collapse-btn");
-      valSectionOpen = !valSectionOpen;
-      items.style.display = valSectionOpen ? "block" : "none";
-      btn.textContent = valSectionOpen ? "▲" : "▼";
-    }
-    window.toggleValSection = toggleValSection;
-
-    // Switch to validation view and open the wizard for a doc type
-    function switchToValidation(docType) {
-      // Update sidebar active state
-      document.querySelectorAll(".sidebar-item[data-view]").forEach(n => n.classList.remove("active"));
-      document.querySelectorAll(".val-nav-item").forEach(n => n.classList.remove("active"));
-      const target = document.querySelector(`.val-nav-item[data-doctype="${docType}"]`);
-      if (target) target.classList.add("active");
-
-      // Show validation view
-      document.querySelectorAll("main[id^='view-']").forEach(v => v.style.display = "none");
-      const valView = document.getElementById("view-validation");
-      if (valView) valView.style.display = "flex";
-
-      // Update the project tag in the validation header
-      const tag = document.getElementById("val-project-tag");
-      if (tag) tag.textContent = window.activeProject ? window.activeProject.name : "No project selected";
-
-      // Open the wizard for this doc type
-      if (window.openValidationWizard) window.openValidationWizard(docType);
-    }
-    window.switchToValidation = switchToValidation;
-
     // Return to the Equipment Library (Phase 2) — used by equipment.js's
     // eqBackToList() when a Profile was opened from here rather than from
     // a Project Workspace's equipment tab.
@@ -1868,6 +2408,14 @@
 
         if (targetId === "view-equipment-library") {
           if (window.eqLoadCompanyList) window.eqLoadCompanyList();
+        }
+
+        if (targetId === "view-admin-companies") {
+          if (window.loadAdminCompanies) window.loadAdminCompanies();
+        }
+
+        if (targetId === "view-admin-users") {
+          if (window.loadAdminUsers) window.loadAdminUsers();
         }
 
         if (targetId === "view-dashboard") {
@@ -1927,27 +2475,29 @@
     }
     window.toggleRiskSection = toggleRiskSection;
 
-    // ── URS Management sidebar collapse ──────────────────────────────────────
-    let ursSectionOpen = true;
-    function toggleURSSection() {
-      const items = document.getElementById("urs-nav-items");
-      const btn   = document.getElementById("urs-collapse-btn");
-      ursSectionOpen = !ursSectionOpen;
-      items.style.display = ursSectionOpen ? "block" : "none";
-      _flipChevron(btn, ursSectionOpen);
-    }
-    window.toggleURSSection = toggleURSSection;
+    // toggleURSSection and the inline toggleQualSection were removed here
+    // (ALD-001 Phase D — approved cleanup): their targets (#urs-nav-items,
+    // #urs-collapse-btn, #qual-nav-items, #qual-collapse-btn) no longer
+    // exist since the URS and Qualification temporary sidebar entries were
+    // removed. Note: qual.js also defines its own toggleQualSection —
+    // that copy was already shadowed/unreachable before this change (this
+    // inline version loaded later and always won) and is left untouched,
+    // reported as a pre-existing legacy item rather than modified here.
 
-    // ── Qualification Suite sidebar collapse ──────────────────────────────────
-    let qualSectionOpen = true;
-    function toggleQualSection() {
-      const items = document.getElementById("qual-nav-items");
-      const btn   = document.getElementById("qual-collapse-btn");
-      qualSectionOpen = !qualSectionOpen;
-      items.style.display = qualSectionOpen ? "block" : "none";
-      _flipChevron(btn, qualSectionOpen);
+    // ── Phase 4: generic collapse for the new outer workspace-group
+    // headers (Knowledge Center / Validation Center / Document Center).
+    // Quality Center reuses the pre-existing toggleQMSSection() above
+    // unchanged since that outer collapse already existed. ──────────────
+    const _wsGroupOpen = {};
+    function toggleWSGroup(itemsId, btnId) {
+      const items = document.getElementById(itemsId);
+      const btn   = document.getElementById(btnId);
+      const open  = _wsGroupOpen[itemsId] === false; // default open
+      _wsGroupOpen[itemsId] = open;
+      if (items) items.style.display = open ? "block" : "none";
+      _flipChevron(btn, open);
     }
-    window.toggleQualSection = toggleQualSection;
+    window.toggleWSGroup = toggleWSGroup;
 
     // Hide all views then show a specific view (shared helper)
     function showView(targetId) {

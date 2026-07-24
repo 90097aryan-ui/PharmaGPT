@@ -57,13 +57,15 @@ function qualShowDetail(qualId) {
 /* ── Dashboard ───────────────────────────────────────────────────────────────── */
 async function loadQualDashboard() {
   const pane = document.getElementById('qual-pane-dashboard');
-  pane.innerHTML = '<div class="qual-loading">Loading dashboard…</div>';
+  if (window.PharmaUI) window.PharmaUI.skeleton(pane, { variant: 'rows', rows: 4 });
+  else pane.innerHTML = '<div class="qual-loading">Loading dashboard…</div>';
   try {
     const res = await fetch('/qual/dashboard');
     const d = await res.json();
     pane.innerHTML = renderQualDashboard(d);
   } catch (e) {
-    pane.innerHTML = `<div class="qual-empty"><div class="qual-empty-icon"><span class=\'icon\' data-lucide=\'alert-triangle\'></span></div><div class="qual-empty-text">Failed to load dashboard</div></div>`;
+    if (window.PharmaUI) window.PharmaUI.errorState(pane, { message: 'Failed to load the Qualification dashboard.', onRetry: loadQualDashboard });
+    else pane.innerHTML = `<div class="qual-empty"><div class="qual-empty-icon"><span class=\'icon\' data-lucide=\'alert-triangle\'></span></div><div class="qual-empty-text">Failed to load dashboard</div></div>`;
   }
 }
 
@@ -164,7 +166,9 @@ async function loadQualList() {
       </select>
       <button class="btn-qual-primary" onclick="qualShowNew()">+ New Qualification</button>
     </div>
-    <div id="qual-list-body"><div class="qual-loading">Loading…</div></div>`;
+    <div id="qual-list-body"></div>`;
+  if (window.PharmaUI) window.PharmaUI.skeleton(document.getElementById('qual-list-body'), { variant: 'table', rows: 5, cols: 9 });
+  else document.getElementById('qual-list-body').innerHTML = '<div class="qual-loading">Loading…</div>';
   await refreshQualListBody();
 }
 
@@ -174,7 +178,9 @@ async function refreshQualListBody() {
     QualState.qualList = await res.json();
     renderQualListBody(QualState.qualList);
   } catch (e) {
-    document.getElementById('qual-list-body').innerHTML = '<div class="qual-empty">Failed to load</div>';
+    const body = document.getElementById('qual-list-body');
+    if (window.PharmaUI) window.PharmaUI.errorState(body, { message: 'Failed to load qualifications.', onRetry: refreshQualListBody });
+    else body.innerHTML = '<div class="qual-empty">Failed to load</div>';
   }
 }
 
@@ -442,6 +448,7 @@ async function loadQualDetail(qualId) {
     const qual = await qualRes.json();
     const protocols = await protRes.json();
     QualState.protocols[qualId] = protocols;
+    if (window.PharmaRecent) window.PharmaRecent.recordOpened("qual", qual.id, qual.title, qual.equipment_name || "");
     pane.innerHTML = renderQualDetail(qual, protocols);
   } catch (e) {
     pane.innerHTML = '<div class="qual-empty">Failed to load qualification</div>';

@@ -17,7 +17,8 @@ async function loadInsights() {
     return;
   }
 
-  panel.innerHTML = `<div class="insights-loading">Loading insights…</div>`;
+  if (window.PharmaUI) window.PharmaUI.skeleton(panel, { variant: "rows", rows: 3 });
+  else panel.innerHTML = `<div class="insights-loading">Loading insights…</div>`;
 
   try {
     const res = await fetch(`/projects/${window.activeProject.id}/insights`);
@@ -25,7 +26,8 @@ async function loadInsights() {
     const data = await res.json();
     renderInsights(panel, data);
   } catch (err) {
-    panel.innerHTML = `<div class="insights-empty"><p>Could not load insights. Please try again.</p></div>`;
+    if (window.PharmaUI) window.PharmaUI.errorState(panel, { message: "Could not load insights.", onRetry: loadInsights });
+    else panel.innerHTML = `<div class="insights-empty"><p>Could not load insights. Please try again.</p></div>`;
   }
 }
 

@@ -108,17 +108,27 @@ async function qmsDocLoadList(filters = {}) {
       </table>
     `;
   } catch (e) {
-    container.innerHTML = `<div class="qms-empty"><p>Failed to load documents: ${e.message}</p></div>`;
+    if (window.PharmaUI) window.PharmaUI.errorState(container, { message: `Failed to load documents: ${e.message}`, onRetry: () => qmsDocLoadList(filters) });
+    else container.innerHTML = `<div class="qms-empty"><p>Failed to load documents: ${e.message}</p></div>`;
   }
 }
 
 // ── Create wizard ───────────────────────────────────────────────────────────
 
-function qmsDocOpenNew() {
+// `prefill` is optional (Phase C, ALD-001 orchestrator rule) — existing
+// callers (sidebar "+ New Document", Home Dashboard's "New SOP" quick
+// action) call this with no arguments and are unaffected. Project
+// Workspace's DQ/FAT/SAT tab passes { doc_type, project_id } so the new
+// document is pre-typed and tagged to the active project — this module
+// still does all the actual work (modal, validation, POST), Project
+// Workspace just supplies a starting point.
+function qmsDocOpenNew(prefill) {
   const meta = window.QMS_META || { document_types: [] };
+  const presetType = (prefill && prefill.doc_type) || "SOP";
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay open";
   overlay.id = "qms-doc-new-modal";
+  overlay.dataset.prefillProjectId = (prefill && prefill.project_id) || "";
   overlay.innerHTML = `
     <div class="modal open qms-modal-lg">
       <div class="modal-header">
@@ -133,7 +143,7 @@ function qmsDocOpenNew() {
           </div>
           <div class="form-field">
             <label>Document Type</label>
-            <select id="qms-new-doc-type">${qmsOptions(meta.document_types, "SOP")}</select>
+            <select id="qms-new-doc-type">${qmsOptions(meta.document_types, presetType)}</select>
           </div>
           <div class="form-field">
             <label>Department</label>
@@ -151,7 +161,7 @@ function qmsDocOpenNew() {
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" onclick="document.getElementById('qms-doc-new-modal').remove()">Cancel</button>
-        <button class="btn-primary" onclick="qmsDocCreate()">Create Document</button>
+        <button class="btn-primary" id="qms-doc-create-btn" onclick="qmsDocCreate()">Create Document</button>
       </div>
     </div>
   `;
@@ -162,6 +172,9 @@ window.qmsDocOpenNew = qmsDocOpenNew;
 async function qmsDocCreate() {
   const title = document.getElementById("qms-new-doc-title").value.trim();
   if (!title) { qmsToast("Title is required"); return; }
+  const btn = document.getElementById("qms-doc-create-btn");
+  if (btn.disabled) return;
+  btn.disabled = true;
   const data = {
     title,
     doc_type: document.getElementById("qms-new-doc-type").value,
@@ -169,6 +182,11 @@ async function qmsDocCreate() {
     category: document.getElementById("qms-new-doc-category").value.trim(),
     owner: document.getElementById("qms-new-doc-owner").value.trim(),
   };
+  // Optional project tag set by qmsDocOpenNew's prefill (Phase C) — absent
+  // for every pre-existing caller, so their payload is unchanged.
+  const modalEl = document.getElementById("qms-doc-new-modal");
+  const prefillProjectId = modalEl && modalEl.dataset.prefillProjectId;
+  if (prefillProjectId) data.project_id = Number(prefillProjectId);
   try {
     const doc = await qmsPostJSON("/qms/documents", data);
     document.getElementById("qms-doc-new-modal").remove();
@@ -176,6 +194,7 @@ async function qmsDocCreate() {
     qmsDocOpenDetail(doc.id);
   } catch (e) {
     qmsToast("Failed to create document: " + e.message);
+    btn.disabled = false;
   }
 }
 window.qmsDocCreate = qmsDocCreate;
@@ -189,6 +208,7 @@ async function qmsDocOpenDetail(id) {
   body.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading document…</div>`;
   try {
     const doc = await qmsFetch(`/qms/documents/${id}`);
+    if (window.PharmaRecent) window.PharmaRecent.recordOpened("documents", doc.id, doc.title, doc.doc_number || "");
     body.innerHTML = `
       <div class="qms-page-header">
         <div>
@@ -217,7 +237,8 @@ async function qmsDocOpenDetail(id) {
     `;
     qmsDocRenderTab(doc);
   } catch (e) {
-    body.innerHTML = `<div class="qms-empty"><p>Failed to load document: ${e.message}</p></div>`;
+    if (window.PharmaUI) window.PharmaUI.errorState(body, { message: `Failed to load document: ${e.message}`, onRetry: () => qmsDocOpenDetail(id) });
+    else body.innerHTML = `<div class="qms-empty"><p>Failed to load document: ${e.message}</p></div>`;
   }
 }
 window.qmsDocOpenDetail = qmsDocOpenDetail;

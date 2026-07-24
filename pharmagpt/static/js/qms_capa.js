@@ -109,7 +109,8 @@ async function qmsCapaLoadList(filters = {}) {
       </table>
     `;
   } catch (e) {
-    container.innerHTML = `<div class="qms-empty"><p>Failed to load CAPAs: ${e.message}</p></div>`;
+    if (window.PharmaUI) window.PharmaUI.errorState(container, { message: `Failed to load CAPAs: ${e.message}`, onRetry: () => qmsCapaLoadList(filters) });
+    else container.innerHTML = `<div class="qms-empty"><p>Failed to load CAPAs: ${e.message}</p></div>`;
   }
 }
 
@@ -156,7 +157,7 @@ function qmsCapaOpenNew() {
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" onclick="document.getElementById('qms-capa-new-modal').remove()">Cancel</button>
-        <button class="btn-primary" onclick="qmsCapaCreate()">Create CAPA</button>
+        <button class="btn-primary" id="qms-capa-create-btn" onclick="qmsCapaCreate()">Create CAPA</button>
       </div>
     </div>
   `;
@@ -167,6 +168,9 @@ window.qmsCapaOpenNew = qmsCapaOpenNew;
 async function qmsCapaCreate() {
   const title = document.getElementById("qms-new-capa-title").value.trim();
   if (!title) { qmsToast("Title is required"); return; }
+  const btn = document.getElementById("qms-capa-create-btn");
+  if (btn.disabled) return;
+  btn.disabled = true;
   const data = {
     title,
     capa_source: document.getElementById("qms-new-capa-source").value,
@@ -182,6 +186,7 @@ async function qmsCapaCreate() {
     qmsCapaOpenDetail(capa.id);
   } catch (e) {
     qmsToast("Failed to create CAPA: " + e.message);
+    btn.disabled = false;
   }
 }
 window.qmsCapaCreate = qmsCapaCreate;
@@ -195,6 +200,7 @@ async function qmsCapaOpenDetail(id) {
   body.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading CAPA…</div>`;
   try {
     const capa = await qmsFetch(`/qms/capa/${id}`);
+    if (window.PharmaRecent) window.PharmaRecent.recordOpened("capa", capa.id, capa.title, capa.capa_number || "");
     body.innerHTML = `
       <div class="qms-page-header">
         <div>
@@ -218,7 +224,8 @@ async function qmsCapaOpenDetail(id) {
     `;
     qmsCapaRenderTab(capa);
   } catch (e) {
-    body.innerHTML = `<div class="qms-empty"><p>Failed to load CAPA: ${e.message}</p></div>`;
+    if (window.PharmaUI) window.PharmaUI.errorState(body, { message: `Failed to load CAPA: ${e.message}`, onRetry: () => qmsCapaOpenDetail(id) });
+    else body.innerHTML = `<div class="qms-empty"><p>Failed to load CAPA: ${e.message}</p></div>`;
   }
 }
 window.qmsCapaOpenDetail = qmsCapaOpenDetail;

@@ -4,6 +4,13 @@
 **Method:** Static review only. No files modified. `.env` was inspected for variable *names* only — no values were read or printed.
 **Date:** 2026-07-21
 
+> **Correction (Phase F.2, 2026-07-24):** this document's claim that `SUPABASE_SERVICE_ROLE_KEY`
+> is "not needed" by the web app (lines below, §"Executive Summary" env-var note, §4's table) was
+> **accurate on 2026-07-21** but is **stale as of Phase 3.5** — `pharmagpt/services/identity_admin.py`
+> now uses it from a live HTTP-reachable path (`POST /companies`, `POST /users`). Left unedited
+> below to preserve this review's original historical record; see `docs/DEPLOYMENT.md` §1 and
+> `.env.example` for the current, corrected guidance.
+
 ---
 
 ## Executive Summary

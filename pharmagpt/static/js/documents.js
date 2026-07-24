@@ -29,11 +29,17 @@ const extractionPollTimers = new Map(); // docId -> interval handle
 async function loadDocuments() {
   if (!window.activeProject) return;
 
+  if (window.PharmaUI) {
+    docEmptyEl.style.display = "none";
+    window.PharmaUI.skeleton(docListEl, { variant: "rows", rows: 3 });
+  }
+
   try {
     const res = await fetch(`/projects/${window.activeProject.id}/documents`);
     const documents = await res.json();
     renderDocuments(documents);
   } catch {
+    if (window.PharmaUI) window.PharmaUI.errorState(docListEl, { message: "Could not load documents.", onRetry: loadDocuments });
     showDocStatus("Could not load documents.", "error");
   }
 }

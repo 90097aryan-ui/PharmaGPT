@@ -38,6 +38,7 @@ import logging
 import re
 from flask import Blueprint, g, jsonify, request, send_file
 
+from pharmagpt import audit
 from pharmagpt import config
 from pharmagpt import database as db
 from pharmagpt import qms_deviation_database as ddb
@@ -123,6 +124,8 @@ def _dual_write_delete(deviation: dict) -> None:
 
 @bp.route("", methods=["GET"])
 def list_deviations():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     filters = {
         "deviation_type": request.args.get("type"),
         "deviation_category": request.args.get("category"),
@@ -142,7 +145,7 @@ def create_deviation():
         return jsonify({"error": "Deviation title is required"}), 400
     deviation = ddb.create_deviation(data, company_id=g.tenant.company_id)
     performed_by = tenancy.signing_identity(g.tenant)["performed_by"]
-    qmsdb.add_audit_entry("deviation", deviation["id"], "Deviation initiated", performed_by)
+    audit.log("deviation", deviation["id"], "Deviation initiated", new=deviation)
     _dual_write_create(deviation, "Deviation initiated", performed_by)
     return jsonify(deviation), 201
 
@@ -157,11 +160,20 @@ def get_deviation(did):
 
 @bp.route("/<int:did>", methods=["PUT"])
 def update_deviation(did):
-    if not tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id):
+    existing = tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id)
+    if not existing:
         return jsonify({"error": "Not found"}), 404
+    # Phase F (WP3, workflow enforcement): Closed is this suite's terminal
+    # status (qms_database.py QMS_META.deviation_statuses) — must be
+    # immutable once reached, same principle as the other GxP record types.
+    if existing["status"] == "Closed":
+        audit.log_failure("deviation", did, "Update blocked (record is Closed)",
+                           reason="Closed deviations are immutable")
+        return jsonify({"error": "This deviation is Closed and cannot be edited"}), 409
     data = request.get_json() or {}
     updated = ddb.update_deviation(did, data)
     _dual_write_update(updated)
+    audit.log("deviation", did, "Updated", old=existing, new=updated)
     return jsonify(updated)
 
 
@@ -173,6 +185,7 @@ def delete_deviation(did):
         return jsonify({"error": "Not found"}), 404
     ddb.delete_deviation(did)
     _dual_write_delete(existing)
+    audit.log("deviation", did, "Deleted", old=existing)
     return jsonify({"deleted": True})
 
 
@@ -183,7 +196,7 @@ def run_investigation(did):
     if not tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     investigation = svc.ai_run_investigation(did)
-    qmsdb.add_audit_entry("deviation", did, "AI investigation run")
+    audit.log("deviation", did, "AI investigation run")
     return jsonify(investigation)
 
 
@@ -285,6 +298,11 @@ def submit_approval(did):
     if not action_name:
         return jsonify({"error": "Action is required"}), 400
 
+    if deviation["status"] == "Closed":
+        audit.log_failure("deviation", did, f"Approval action blocked ({action_name}) — record is Closed",
+                           reason="Closed deviations are immutable")
+        return jsonify({"error": "This deviation is Closed and cannot accept further actions"}), 409
+
     sig = tenancy.signing_identity(g.tenant)
 
     updates = {}
@@ -304,7 +322,8 @@ def submit_approval(did):
         sig["performed_by"], sig["role"],
         data.get("comments", ""), sig["electronic_sig"],
     )
-    qmsdb.add_audit_entry("deviation", did, action_name, sig["performed_by"])
+    audit.log("deviation", did, action_name, old={"status": deviation["status"]},
+              new=updates or None, reason=data.get("comments", ""))
     return jsonify(entry), 201
 
 

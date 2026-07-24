@@ -1,0 +1,63 @@
+/* error_pages.css — Phase 5: full-page 403/404/500/Network/Permission
+   states. Same warm palette as the rest of the app, no new colors. */
+
+.error-page-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  background: var(--bg);
+}
+
+.error-page-card {
+  max-width: 420px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.error-page-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.error-page-icon svg { width: 32px; height: 32px; stroke-width: 1.5; }
+
+.error-page-icon-warning { background: rgba(197,154,65,0.14); color: var(--warning); }
+.error-page-icon-error   { background: rgba(195,95,91,0.14); color: var(--error); }
+
+.error-page-code {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--text-disabled);
+  text-transform: uppercase;
+}
+
+.error-page-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--navy);
+  margin-top: 2px;
+}
+
+.error-page-message {
+  font-size: 13.5px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 4px 0 14px;
+}
+
+.error-page-actions {
+  display: flex;
+  gap: 10px;
+}

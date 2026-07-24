@@ -116,6 +116,10 @@
 .eq-row-actions button:hover { background: var(--bg); }
 .eq-row-actions button.eq-btn-danger { color: #A8544F; border-color: rgba(168,69,63,0.25); }
 .eq-row-actions button.eq-btn-danger:hover { background: rgba(168,69,63,0.06); }
+.eq-row-actions button.eq-btn-fav { padding: 5px 8px; color: var(--text-muted); }
+.eq-row-actions button.eq-btn-fav.is-fav { color: #C79B3B; border-color: rgba(199,155,59,0.35); }
+.eq-row-actions button.eq-btn-fav.is-fav .icon svg { fill: #C79B3B; }
+.eq-row-actions button.eq-btn-fav .icon svg { width: 13px; height: 13px; }
 
 .eq-import-banner {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;

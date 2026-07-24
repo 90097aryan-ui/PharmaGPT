@@ -68,11 +68,14 @@ def load_config(env: dict) -> dict:
 def build_service_role_client(supabase_url: str, service_role_key: str) -> Client:
     """Construct a Supabase client authorised as service_role.
 
-    This is the only function in the entire codebase that builds a client
-    with this key — the running Flask app never does (see
-    pharmagpt/services/supabase_client.py, anon key only). Only call this
-    from a manually-run administrative script, never from request-handling
-    code.
+    This script needs its own client because it must run before any user or
+    route exists to authenticate through. Phase 3.5 adds the one other,
+    narrowly-scoped use of this key in the codebase —
+    pharmagpt/services/supabase_client.py::get_service_role_client(), used
+    only by pharmagpt/services/identity_admin.py behind an authenticated,
+    @require_role-checked route, for the same "mint a new Auth identity"
+    operation this script performs once at bootstrap. Every other Flask
+    request-handling code path still uses the anon key only.
     """
     return create_client(supabase_url, service_role_key)
 

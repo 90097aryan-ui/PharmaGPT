@@ -479,11 +479,23 @@ def get_comments(record_type: str, record_id: int) -> list[dict]:
 # ── Audit trail (shared) ──────────────────────────────────────────────────────
 
 def add_audit_entry(record_type: str, record_id: int, action: str,
-                    performed_by: str = "", detail: str = "") -> dict:
+                    performed_by: str = "", detail: str = "",
+                    company_id: str | None = None, old_values: str = "",
+                    new_values: str = "", reason: str = "", ip_address: str = "",
+                    session_id: str = "", result: str = "success") -> dict:
+    """Write one audit-trail entry. Prefer `pharmagpt.audit.log()` at call
+    sites — it derives `performed_by`/`company_id`/`ip_address`/`session_id`
+    from the authenticated request context so they can't be spoofed by a
+    caller, and computes `old_values`/`new_values` as a diff. This function
+    is the low-level DB write; it trusts whatever its caller passes in."""
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO qms_audit_trail (record_type, record_id, action, detail, performed_by) VALUES (?,?,?,?,?)",
-        (record_type, record_id, action, detail, performed_by),
+        """INSERT INTO qms_audit_trail
+           (record_type, record_id, action, detail, performed_by, company_id,
+            old_values, new_values, reason, ip_address, session_id, result)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (record_type, record_id, action, detail, performed_by, company_id,
+         old_values, new_values, reason, ip_address, session_id, result),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM qms_audit_trail WHERE id = ?", (cur.lastrowid,)).fetchone()

@@ -138,14 +138,11 @@ def validation_generate():
                         system_instruction=PHARMA_SYSTEM_PROMPT,
                         temperature=0.3,   # lower temperature for consistent document structure
                         max_output_tokens=12000,   # bound worst-case output; full protocols normally run 3-8K tokens
-                        # Low-temperature decoding on long, table-heavy structured
-                        # documents was found to occasionally fall into a
-                        # degenerate repetition loop (the model reinforcing its
-                        # own highest-probability continuation indefinitely).
-                        # A frequency penalty directly discourages repeating the
-                        # same tokens and is the standard mitigation for exactly
-                        # this failure mode.
-                        frequency_penalty=0.4,
+                        # frequency_penalty was previously set here to mitigate repetition
+                        # loops on long structured output, but gemini-2.5-flash rejects any
+                        # penalty parameter with a 400 INVALID_ARGUMENT ("Penalty is not
+                        # enabled for models/gemini-2.5-flash"), which broke every generation
+                        # call. Removed until the API/model supports it.
                     ),
                 ):
                     if chunk.text:

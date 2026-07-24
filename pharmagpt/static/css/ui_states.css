@@ -1,0 +1,98 @@
+/* ui_states.css — Phase 5: shared loading / empty / error state styling.
+   Reuses existing style.css design tokens only (--surface, --border,
+   --divider, --radius*, --text-muted, --blue-light, --error). No new
+   colors are introduced. */
+
+/* ── Skeleton (loading) ───────────────────────────────────────────────────── */
+@keyframes ui-shimmer {
+  0%   { background-position: -120% 0; }
+  100% { background-position: 120% 0; }
+}
+
+.ui-skeleton-line,
+.ui-skeleton-avatar,
+.ui-skeleton-cell,
+.ui-skeleton-block {
+  background: linear-gradient(90deg, var(--divider) 25%, var(--bg-secondary) 37%, var(--divider) 63%);
+  background-size: 400% 100%;
+  animation: ui-shimmer 1.4s ease infinite;
+  border-radius: var(--radius);
+}
+
+.ui-skeleton-rows { display: flex; flex-direction: column; gap: 14px; padding: 4px 0; }
+.ui-skeleton-row { display: flex; align-items: center; gap: 10px; }
+.ui-skeleton-avatar { width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; }
+.ui-skeleton-row-lines { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.ui-skeleton-line { height: 10px; }
+.ui-skeleton-line-sm { height: 8px; }
+
+.ui-skeleton-text { display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }
+.ui-skeleton-text .ui-skeleton-line { height: 11px; }
+
+.ui-skeleton-table { display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }
+.ui-skeleton-table-row { display: flex; gap: 10px; }
+.ui-skeleton-cell { height: 14px; flex: 1; }
+.ui-skeleton-table-head .ui-skeleton-cell { height: 10px; opacity: 0.6; }
+
+/* ── Empty / error states ─────────────────────────────────────────────────── */
+.ui-empty-state,
+.ui-error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 32px 20px;
+  gap: 6px;
+}
+
+.ui-state-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.ui-state-icon svg { width: 20px; height: 20px; stroke-width: 1.6; }
+
+.ui-state-icon-error {
+  background: rgba(195, 95, 91, 0.12);
+  color: var(--error);
+}
+
+.ui-state-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+.ui-state-message {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 320px;
+  line-height: 1.5;
+}
+
+.ui-state-action {
+  margin-top: 8px;
+  background: var(--blue-light);
+  color: #FFF;
+  border: none;
+  border-radius: var(--radius);
+  padding: 7px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.ui-state-action:hover { background: var(--blue); }
+
+.ui-state-action-retry {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.ui-state-action-retry:hover { background: var(--bg-secondary); }

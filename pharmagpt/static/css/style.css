@@ -62,6 +62,27 @@
 /* ── Reset ─────────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ── Accessibility: consistent keyboard-focus ring (Phase 5, §13) ────────────
+   Applies app-wide to every interactive element via :focus-visible (mouse
+   clicks don't trigger it, so this never fights the many components' own
+   hover/click states — only Tab-key and other non-pointer focus do). Kept
+   as one rule rather than per-component overrides so every button, link,
+   input, and custom control (sidebar items, tabs, table rows, chips) gets
+   the same treatment without hunting down every existing focus style. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible,
+.sidebar-item:focus-visible,
+.hdr-chip-clickable:focus-visible,
+.ws-card:focus-visible {
+  outline: 2px solid var(--blue-light);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 body {
   font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
   background: var(--bg);
@@ -914,6 +935,19 @@ button:has(> .icon) {
   color: #D89A96;
   background: rgba(198,99,95,0.15);
 }
+
+.proj-fav-btn {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.25);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--radius);
+}
+.proj-fav-btn .icon svg { width: 12px; height: 12px; }
+.proj-fav-btn:hover { color: #E8C77A; background: rgba(232,199,122,0.15); }
+.proj-fav-btn.is-fav { color: #E8C77A; }
+.proj-fav-btn.is-fav .icon svg { fill: #E8C77A; }
 
 /* ── Active project banner (above chat, below welcome) ──────────────────────── */
 .active-project-banner {
@@ -2779,6 +2813,9 @@ button:has(> .icon) {
 }
 .kb-row-btn:hover     { background: var(--border); }
 .kb-row-btn-del:hover { background: #F7E8E7; border-color: #F2D8D6; }
+.kb-row-btn-fav.is-fav { color: #C79B3B; border-color: rgba(199,155,59,0.35); }
+.kb-row-btn-fav.is-fav .icon svg { fill: #C79B3B; width: 13px; height: 13px; }
+.kb-row-btn-fav .icon svg { width: 13px; height: 13px; }
 
 /* ── Detail / preview panel ──────────────────────────────────────────────────── */
 .kb-detail-panel {
@@ -3120,6 +3157,42 @@ button:has(> .icon) {
 .dash-stat-dev      { border-top-color: var(--error); }
 .dash-stat-score    { border-top-color: var(--blue); }
 
+/* ── Suite Overview (Batch 2) ───────────────────────────────────────────────── */
+.dash-suite-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  flex-shrink: 0;
+}
+.dash-stat-equipment         { border-top-color: #8A6B52; }
+.dash-stat-documents         { border-top-color: var(--info); }
+.dash-stat-changes           { border-top-color: var(--warning); }
+.dash-stat-validation-status { border-top-color: var(--blue-light); }
+
+/* ── Quick Actions ────────────────────────────────────────────────────────────── */
+.dash-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.dash-qa-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 9px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  text-align: left;
+}
+.dash-qa-btn:hover { background: var(--bg-secondary); border-color: var(--blue-light); }
+.dash-qa-btn .icon svg { width: 14px; height: 14px; stroke-width: 1.8; color: var(--blue-light); }
+
 /* ── Validation Review Badge ──────────────────────────────────────────────────── */
 #val-review-banner { padding: 0 24px 16px; }
 .val-review-loading {
@@ -3450,16 +3523,20 @@ button:has(> .icon) {
 
 @media (max-width: 1400px) {
   .dash-stats-grid  { grid-template-columns: repeat(4, 1fr); }
+  .dash-suite-grid  { grid-template-columns: repeat(4, 1fr); }
 }
 @media (max-width: 1100px) {
   .dash-stats-grid  { grid-template-columns: repeat(4, 1fr); }
+  .dash-suite-grid  { grid-template-columns: repeat(2, 1fr); }
   .dash-grid        { grid-template-columns: repeat(2, 1fr); }
   .dash-card-health { grid-column: 1 / -1; }
   .dash-health-grid { grid-template-columns: repeat(3, 1fr); }
+  .dash-quick-actions { grid-template-columns: 1fr; }
 }
 @media (max-width: 768px) {
   .dash-container   { padding: 16px; gap: 12px; }
   .dash-stats-grid  { grid-template-columns: repeat(2, 1fr); }
+  .dash-suite-grid  { grid-template-columns: repeat(2, 1fr); }
   .dash-grid        { grid-template-columns: 1fr; }
   .dash-health-grid { grid-template-columns: repeat(2, 1fr); }
 }

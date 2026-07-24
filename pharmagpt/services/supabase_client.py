@@ -1,4 +1,8 @@
 import os
+from functools import wraps
+
+from flask import jsonify
+from postgrest.exceptions import APIError
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
@@ -47,3 +51,47 @@ def get_anonymous_client() -> Client:
     that entirely.
     """
     return create_client(_require_env("SUPABASE_URL"), _require_env("SUPABASE_ANON_KEY"))
+
+
+def get_service_role_client() -> Client:
+    """Return a Supabase client authorised as service_role — bypasses RLS
+    entirely. Only ever call this from pharmagpt/services/identity_admin.py
+    (Phase 3.5), the one live-request code path allowed to use it, for the
+    one operation the anon key structurally cannot perform: minting a brand
+    new Supabase Auth identity (creating a user is not something a Row Level
+    Security policy can grant under the anon key, regardless of how it's
+    written). Every other admin/business-data operation in this codebase —
+    Company/User CRUD, business-data reads/writes — uses
+    get_authenticated_client() and RLS instead.
+
+    scripts/bootstrap_super_admin.py builds its own equivalent client
+    directly (it must run before any user or route exists to call through);
+    this is that same pattern's only other, narrowly-scoped use, reached
+    through an authenticated, role-checked Flask route instead of a CLI
+    script.
+    """
+    return create_client(_require_env("SUPABASE_URL"), _require_env("SUPABASE_SERVICE_ROLE_KEY"))
+
+
+def handle_postgrest_errors(view_func):
+    """Route decorator: catch postgrest.exceptions.APIError (e.g. a missing
+    RLS GRANT — a real, observed failure mode the first time this phase's
+    new migrations haven't been applied yet) and any other exception from a
+    Supabase call, returning a clean JSON 500 instead of letting it surface
+    as an unhandled exception / raw debugger page. Applied to
+    routes/companies.py, routes/users.py, and the Assume Company Context
+    endpoints in routes/auth.py — the first live-request code paths that
+    call Supabase directly as the *primary* data path (every other Supabase
+    caller in this codebase is a best-effort dual-write with its own
+    try/except at the call site)."""
+
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        try:
+            return view_func(*args, **kwargs)
+        except APIError as exc:
+            return jsonify({"error": f"Database error: {exc.message}"}), 500
+        except Exception as exc:
+            return jsonify({"error": f"Unexpected error: {exc}"}), 500
+
+    return wrapped

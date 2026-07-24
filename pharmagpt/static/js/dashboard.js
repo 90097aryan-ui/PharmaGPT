@@ -64,7 +64,11 @@
   function renderActivity(items) {
     const el = document.getElementById("dash-activity-body");
     if (!items || !items.length) {
-      el.innerHTML = '<div class="dash-empty">No activity yet.</div>';
+      if (window.PharmaUI) {
+        window.PharmaUI.emptyState(el, { icon: "activity", title: "No activity yet", message: "Actions across projects, documents, and protocols will show up here." });
+      } else {
+        el.innerHTML = '<div class="dash-empty">No activity yet.</div>';
+      }
       return;
     }
     el.innerHTML = items.map(item => {
@@ -84,7 +88,16 @@
   function renderRecentProjects(projects) {
     const el = document.getElementById("dash-projects-body");
     if (!projects || !projects.length) {
-      el.innerHTML = '<div class="dash-empty">No projects yet. Create one from the sidebar.</div>';
+      if (window.PharmaUI) {
+        window.PharmaUI.emptyState(el, {
+          icon: "folder-plus", title: "No projects yet",
+          message: "Create your first validation project to get started.",
+          actionLabel: "New Project",
+          onAction: () => { const b = document.getElementById("btn-new-project"); if (b) b.click(); },
+        });
+      } else {
+        el.innerHTML = '<div class="dash-empty">No projects yet. Create one from the sidebar.</div>';
+      }
       return;
     }
     el.innerHTML = projects.map(p => `
@@ -134,7 +147,11 @@
     }
 
     if (!rows.length) {
-      el.innerHTML = '<div class="dash-empty">No upcoming reviews or target dates.</div>';
+      if (window.PharmaUI) {
+        window.PharmaUI.emptyState(el, { icon: "calendar-clock", title: "Nothing upcoming", message: "KB review dates and validation targets will appear here as they're scheduled." });
+      } else {
+        el.innerHTML = '<div class="dash-empty">No upcoming reviews or target dates.</div>';
+      }
     } else {
       el.innerHTML = rows.join("");
     }
@@ -143,7 +160,16 @@
   function renderConversations(convs) {
     const el = document.getElementById("dash-convs-body");
     if (!convs || !convs.length) {
-      el.innerHTML = '<div class="dash-empty">No AI conversations yet. Start chatting!</div>';
+      if (window.PharmaUI) {
+        window.PharmaUI.emptyState(el, {
+          icon: "message-square", title: "No conversations yet",
+          message: "Ask the AI Assistant a question to get started.",
+          actionLabel: "Open AI Assistant",
+          onAction: () => { const b = document.getElementById("nav-chat"); if (b) b.click(); },
+        });
+      } else {
+        el.innerHTML = '<div class="dash-empty">No AI conversations yet. Start chatting!</div>';
+      }
       return;
     }
     el.innerHTML = convs.map(c => `
@@ -188,6 +214,164 @@
       </div>`;
   }
 
+  // ── Suite Overview cards (Batch 2) ───────────────────────────────────────────
+  // All values come from pre-existing dashboard aggregate endpoints
+  // (qms/dashboard, urs/dashboard, qual/dashboard, report/dashboard) and a
+  // plain GET /equipment list (counted client-side) — no new backend calls.
+
+  function setStatSub(id, text, attention) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle("is-attention", !!attention);
+  }
+
+  function renderEquipmentCount(count) {
+    document.getElementById("dash-stat-equipment").textContent = count ?? 0;
+    setStatSub("dash-stat-equipment-sub", "In the equipment library");
+  }
+
+  function renderQmsSummaryCards(summary) {
+    if (!summary) return;
+    document.getElementById("dash-stat-documents").textContent = summary.total_documents ?? 0;
+    const dueForReview = summary.docs_due_for_review ?? 0;
+    setStatSub("dash-stat-documents-sub",
+      dueForReview > 0 ? `${dueForReview} due for review` : "None due for review",
+      dueForReview > 0);
+
+    document.getElementById("dash-stat-changes").textContent = summary.total_changes ?? 0;
+    const pendingChanges = summary.pending_change_approvals ?? 0;
+    setStatSub("dash-stat-changes-sub",
+      pendingChanges > 0 ? `${pendingChanges} pending approval` : "None pending approval",
+      pendingChanges > 0);
+  }
+
+  function renderValidationStatus(urs, qual, report) {
+    const pending =
+      (urs && urs.pending_approval || 0) +
+      (qual && qual.pending_approvals || 0) +
+      (report && report.under_review || 0);
+    document.getElementById("dash-stat-validation-status").textContent = pending;
+    setStatSub("dash-stat-validation-status-sub",
+      pending > 0 ? "Awaiting review or approval" : "All caught up",
+      pending > 0);
+  }
+
+  function loadSuiteOverview() {
+    fetch("/equipment")
+      .then(r => r.ok ? r.json() : [])
+      .then(list => renderEquipmentCount(Array.isArray(list) ? list.length : 0))
+      .catch(() => renderEquipmentCount(null));
+
+    fetch("/qms/dashboard")
+      .then(r => r.ok ? r.json() : null)
+      .then(data => renderQmsSummaryCards(data && data.summary))
+      .catch(() => {});
+
+    Promise.all([
+      fetch("/urs/dashboard").then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch("/qual/dashboard").then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch("/report/dashboard").then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([urs, qual, report]) => renderValidationStatus(urs, qual, report));
+  }
+
+  // ── Favorites / Recent Items (Batch 5) ───────────────────────────────────────
+  // Both read browser-local storage only (favorites.js / recent_items.js) —
+  // no fetch, no backend. Sections hide themselves entirely when empty.
+
+  const TYPE_ICONS = {
+    projects: "folder", equipment: "wrench", sops: "clipboard-list",
+    validation_docs: "check-circle-2", kb_documents: "library",
+    capa: "repeat", deviations: "alert-triangle", change_control: "git-pull-request",
+    documents: "file-text", urs: "file-check", risk: "shield-alert",
+    qual: "microscope", report: "file-check-2",
+  };
+
+  function navigateToItem(type, id) {
+    switch (type) {
+      case "projects": if (window.switchToProject) window.switchToProject(id); break;
+      case "equipment": if (window.eqOpenProfile) window.eqOpenProfile(id, "library"); break;
+      case "sops": case "validation_docs": case "kb_documents":
+        if (window.showView) window.showView("view-kb");
+        if (window.kbSelectDoc) window.kbSelectDoc(id);
+        break;
+      case "capa":
+        if (window.showView) window.showView("view-qms-capa");
+        if (window.qmsCapaOpenDetail) window.qmsCapaOpenDetail(id);
+        break;
+      case "deviations":
+        if (window.showView) window.showView("view-qms-deviations");
+        if (window.qmsDevOpenDetail) window.qmsDevOpenDetail(id);
+        break;
+      case "change_control":
+        if (window.showView) window.showView("view-qms-change-control");
+        if (window.qmsCCOpenDetail) window.qmsCCOpenDetail(id);
+        break;
+      case "documents":
+        if (window.showView) window.showView("view-qms-documents");
+        if (window.qmsDocOpenDetail) window.qmsDocOpenDetail(id);
+        break;
+      case "urs": if (window.openURS) window.openURS(id); break;
+      case "risk": if (window.openAssessment) window.openAssessment(id); break;
+      case "qual":
+        if (window.showView) window.showView("view-qual");
+        if (window.qualShowDetail) window.qualShowDetail(id);
+        break;
+      case "report":
+        if (window.showView) window.showView("view-report");
+        if (window.openReport) window.openReport(id);
+        break;
+    }
+  }
+
+  function renderFavorites() {
+    const card = document.getElementById("dash-favorites-card");
+    const body = document.getElementById("dash-favorites-body");
+    if (!card || !body || !window.PharmaFavorites) return;
+
+    const items = window.PharmaFavorites.getAllFlat();
+    if (!items.length) { card.style.display = "none"; return; }
+
+    card.style.display = "flex";
+    body.innerHTML = items.slice(0, 8).map(item => `
+      <div class="dash-proj-row" data-type="${item.type}" data-id="${item.id}">
+        <div class="dash-proj-icon"><span class='icon' data-lucide='${TYPE_ICONS[item.type] || "star"}'></span></div>
+        <div class="dash-proj-info">
+          <div class="dash-proj-name">${truncate(item.title || "Untitled", 40)}</div>
+          <div class="dash-proj-meta">${truncate(item.meta || "", 40)}</div>
+        </div>
+      </div>`).join("");
+
+    body.querySelectorAll("[data-type]").forEach(row => {
+      row.addEventListener("click", () => navigateToItem(row.dataset.type, row.dataset.id));
+    });
+    if (window.refreshIcons) window.refreshIcons();
+  }
+
+  function renderRecentItems() {
+    const card = document.getElementById("dash-recent-items-card");
+    const body = document.getElementById("dash-recent-items-body");
+    if (!card || !body || !window.PharmaRecent) return;
+
+    const items = window.PharmaRecent.getRecent(8);
+    if (!items.length) { card.style.display = "none"; return; }
+
+    card.style.display = "flex";
+    body.innerHTML = items.map(item => `
+      <div class="dash-proj-row" data-type="${item.type}" data-id="${item.id}">
+        <div class="dash-proj-icon"><span class='icon' data-lucide='${TYPE_ICONS[item.type] || "clock"}'></span></div>
+        <div class="dash-proj-info">
+          <div class="dash-proj-name">${truncate(item.title || "Untitled", 40)}</div>
+          <div class="dash-proj-meta">${item.action === "edited" ? "Edited" : "Opened"} · ${fmtDateShort(item.viewedAt)}</div>
+        </div>
+      </div>`).join("");
+
+    body.querySelectorAll("[data-type]").forEach(row => {
+      row.addEventListener("click", () => navigateToItem(row.dataset.type, row.dataset.id));
+    });
+    if (window.refreshIcons) window.refreshIcons();
+  }
+
   // ── Navigate to project from Recent Projects card ────────────────────────────
   // PharmaGPT v1.0 Module 3: opens the same unified Project Workspace a
   // sidebar click would (window.selectProject fetches nothing itself, so we
@@ -229,7 +413,9 @@
     ["dash-activity-body", "dash-projects-body", "dash-upcoming-body",
      "dash-convs-body", "dash-health-body"].forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.innerHTML = '<div class="dash-loading">Loading…</div>';
+      if (!el) return;
+      if (window.PharmaUI) window.PharmaUI.skeleton(el, { variant: "rows", rows: 3 });
+      else el.innerHTML = '<div class="dash-loading">Loading…</div>';
     });
 
     fetch("/dashboard/stats")
@@ -243,11 +429,17 @@
         renderHealth(data.system_health);
       })
       .catch(() => {
-        ["dash-activity-body", "dash-projects-body", "dash-upcoming-body",
-         "dash-convs-body", "dash-health-body"].forEach(id => {
+        ["dash-activity-body", "dash-projects-body", "dash-upcoming-body", "dash-convs-body"].forEach(id => {
           const el = document.getElementById(id);
-          if (el) el.innerHTML = '<div class="dash-empty">Failed to load.</div>';
+          if (!el) return;
+          if (window.PharmaUI) window.PharmaUI.errorState(el, { message: "Failed to load dashboard data.", onRetry: window.loadDashboard });
+          else el.innerHTML = '<div class="dash-empty">Failed to load.</div>';
         });
+        const healthEl = document.getElementById("dash-health-body");
+        if (healthEl) {
+          if (window.PharmaUI) window.PharmaUI.errorState(healthEl, { message: "Failed to load dashboard data.", onRetry: window.loadDashboard });
+          else healthEl.innerHTML = '<div class="dash-empty">Failed to load.</div>';
+        }
       });
 
     // Fetch avg validation score independently (session cache; may be 0 initially)
@@ -255,6 +447,10 @@
       .then(r => r.json())
       .then(d => renderAvgScore(d.avg_score || 0, d.doc_count || 0))
       .catch(() => {});
+
+    loadSuiteOverview();
+    renderFavorites();
+    renderRecentItems();
   };
 
   // Auto-load when the page opens (dashboard is the default view)

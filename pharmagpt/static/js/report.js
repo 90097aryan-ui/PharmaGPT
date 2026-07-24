@@ -585,6 +585,7 @@ window.openReport = async function (id, autoGenerate = false) {
     ReportState.sections = sections;
     ReportState.currentSection = REPORT_SECTIONS_META[0].key;
     ReportState.currentTab = 'overview';
+    if (window.PharmaRecent) window.PharmaRecent.recordOpened("report", report.id, report.title, report.equipment_name || "");
     reportShowView('report-view-detail');
     renderReportDetail(report, sections);
     if (autoGenerate) {

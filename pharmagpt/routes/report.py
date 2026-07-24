@@ -34,6 +34,7 @@ import io
 import logging
 from flask import Blueprint, g, jsonify, request, Response, stream_with_context, send_file
 
+from pharmagpt import audit
 from pharmagpt import report_database as rdb
 from pharmagpt import qual_database as qdb
 from pharmagpt import urs_database as udb
@@ -54,11 +55,42 @@ from google.genai import types
 
 bp = Blueprint("report", __name__, url_prefix="/report")
 
+# Phase F (WP3, workflow enforcement): a Validation Report is the final
+# GAMP5 deliverable — it must not reach "approved" (its QA-sign-off status,
+# see status_map below) unless the qualification it reports on has actually
+# completed PQ. See PHARMAGPT_v1.0_RELEASE_READINESS_REPORT.md C3, the
+# single most consequential gap found by the Phase E audit.
+_PQ_COMPLETED_STATUSES = {"completed", "completed_with_deviations"}
+
+
+def _pq_not_ready_reason(report: dict) -> str | None:
+    """Return a human-readable blocking reason if this report has a linked
+    qualification whose PQ hasn't completed yet; None if it's clear to
+    approve. Linkage itself stays optional — the Phase E finding (C3) this
+    closes was "no check that the LINKED qualification's PQ is complete,"
+    not "linkage must be mandatory" (the latter would be a business-rule
+    change beyond a verified release blocker, and would break the existing,
+    legitimate standalone-report workflow this suite's own regression tests
+    rely on)."""
+    linked_qual_id = report.get("linked_qual_id")
+    if not linked_qual_id:
+        return None
+    qual = qdb.get_qualification(int(linked_qual_id))
+    if not qual:
+        return None
+    if qual.get("pq_status") not in _PQ_COMPLETED_STATUSES:
+        return (f"The linked qualification's PQ is not yet complete (pq_status="
+                f"'{qual.get('pq_status', 'not_started')}') — PQ must be completed before "
+                f"this Validation Report can be approved.")
+    return None
+
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
 @bp.route("/dashboard")
 def dashboard():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     return jsonify(rdb.get_dashboard_stats(g.tenant.company_id))
 
 
@@ -66,6 +98,8 @@ def dashboard():
 
 @bp.route("/", methods=["GET"])
 def list_reports():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     filters = {
         "status":          request.args.get("status"),
         "report_type":     request.args.get("report_type"),
@@ -107,6 +141,7 @@ def create_report():
         data["title"] = f"Validation Report — {data.get('equipment_name','New Equipment')}"
 
     report = rdb.create_report(data, company_id=g.tenant.company_id)
+    audit.log("val_report", report["id"], "Created", new=report)
     return jsonify(report), 201
 
 
@@ -120,21 +155,32 @@ def get_report(rid):
 
 @bp.route("/<int:rid>", methods=["PUT"])
 def update_report(rid):
-    if not tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id):
+    existing = tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id)
+    if not existing:
         return jsonify({"error": "Report not found"}), 404
+    # Phase F (WP3, workflow enforcement): archived/obsolete are terminal in
+    # VALIDATION_REPORT's lifecycle (services/lifecycle_engine.py) —
+    # immutable once reached.
+    if existing["status"] in ("archived", "obsolete"):
+        audit.log_failure("val_report", rid, f"Update blocked (record is {existing['status']})",
+                           reason=f"{existing['status'].capitalize()} reports are immutable")
+        return jsonify({"error": f"This report is {existing['status']} and cannot be edited"}), 409
     data = request.get_json() or {}
     report = rdb.update_report(rid, data)
     if not report:
         return jsonify({"error": "Report not found"}), 404
+    audit.log("val_report", rid, "Updated", old=existing, new=report)
     return jsonify(report)
 
 
 @bp.route("/<int:rid>", methods=["DELETE"])
 @require_role("company_admin")
 def delete_report(rid):
-    if not tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id):
+    existing = tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id)
+    if not existing:
         return jsonify({"error": "Report not found"}), 404
     rdb.delete_report(rid)
+    audit.log("val_report", rid, "Deleted", old=existing)
     return jsonify({"success": True})
 
 
@@ -415,12 +461,19 @@ def add_approval(rid):
         "Rejected": "draft",
         "Obsolete": "obsolete",
     }
+    old_status = report["status"]
     new_status = status_map.get(action)
     if new_status:
         try:
-            lifecycle_engine.validate_transition("VALIDATION_REPORT", report["status"], new_status)
+            lifecycle_engine.validate_transition("VALIDATION_REPORT", old_status, new_status)
         except lifecycle_engine.InvalidTransitionError as exc:
             return jsonify({"error": str(exc)}), 409
+
+        if new_status == "approved":
+            blocker = _pq_not_ready_reason(report)
+            if blocker:
+                audit.log_failure("val_report", rid, "Approval blocked (PQ not complete)", reason=blocker)
+                return jsonify({"error": blocker}), 409
 
         report = rdb.update_report(rid, {"status": new_status})
         if new_status == "released":
@@ -430,7 +483,8 @@ def add_approval(rid):
     entry = rdb.add_approval_entry(
         rid, action, sig["performed_by"], sig["role"], comments, version, sig["electronic_sig"],
     )
-    qmsdb.add_audit_entry("val_report", rid, action, sig["performed_by"])
+    audit.log("val_report", rid, action, old={"status": old_status},
+              new={"status": new_status} if new_status else None, reason=comments)
     return jsonify(entry), 201
 
 
@@ -470,11 +524,15 @@ def create_version(rid):
     if not tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id):
         return jsonify({"error": "Report not found"}), 404
     data = request.get_json() or {}
+    # Phase F fix (C6): created_by is derived from the authenticated
+    # session, never taken from the request body. See
+    # PHARMAGPT_v1.0_RELEASE_READINESS_REPORT.md C6.
     snapshot = rdb.create_version_snapshot(
         rid,
         change_summary=data.get("change_summary", ""),
-        created_by=data.get("created_by", "System"),
+        created_by=tenancy.signing_identity(g.tenant)["performed_by"],
     )
+    audit.log("val_report", rid, "Version snapshot created", new={"change_summary": data.get("change_summary", "")})
     return jsonify(snapshot), 201
 
 
@@ -517,6 +575,8 @@ def export_docx(rid):
 @bp.route("/linked/<int:qual_id>", methods=["GET"])
 def get_linked_report(qual_id):
     """Find the validation report linked to a specific qualification."""
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     reports = rdb.get_all_reports(g.tenant.company_id, {"linked_qual_id": str(qual_id)})
     if reports:
         return jsonify(reports[0])

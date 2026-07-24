@@ -8,9 +8,10 @@
 // All top-level functions are `pw`-prefixed per the DEC-020 collision lesson.
 
 const PW_TABS = [
-  { id: "overview",      label: "Overview" },
+  { id: "overview",      label: "Project Dashboard" },
   { id: "equipment",     label: "Equipment" },
   { id: "documents",     label: "Documents" },
+  { id: "dq-fat-sat",    label: "DQ / FAT / SAT" },
   { id: "risk",          label: "Risk Assessment" },
   { id: "urs",           label: "URS" },
   { id: "qualification", label: "Qualification" },
@@ -104,6 +105,12 @@ function pwRenderTab() {
     if (subtitle) subtitle.textContent = `Project: ${project.name}`;
     if (window.loadDocuments) window.loadDocuments();
     if (window.loadInsights) window.loadInsights();
+  } else if (pwActiveTab === "dq-fat-sat") {
+    pwRenderDqFatSat(project);
+  } else if (pwActiveTab === "approvals") {
+    // Reuses Phase B's Approval Queue merge logic verbatim (validation_dashboard.js),
+    // just targeting this tab's own container — no duplicated fetch/merge logic.
+    if (window.loadApprovalQueue) window.loadApprovalQueue("pw-approvals-body");
   } else if (pwActiveTab === "history") {
     pwRenderHistory(project.id);
   }
@@ -136,10 +143,62 @@ function pwRenderOverview(project) {
   ].join("");
 }
 
+// DQ/FAT/SAT tab (Phase C, ALD-001). Reuses the existing, working Document
+// Control engine (routes/qms_documents.py, doc_type='DQ'|'FAT'|'SAT') — NOT
+// the old validation.py wizard, which already rejects these three types
+// server-side (410 — see routes/validation.py::_RETIRED_DOC_TYPES). Since
+// GET /qms/documents has no project_id filter param, each type is fetched
+// company-wide and filtered client-side by the row's own project_id (a
+// column that already exists on qms_documents but isn't exposed as a query
+// filter) — no backend change either way. Creating a new one navigates to
+// the existing Document Control view and reuses its own creation modal
+// (qmsDocOpenNew) — this tab does not reimplement document creation.
+async function pwRenderDqFatSat(project) {
+  const el = document.getElementById("pw-dqfatsat-body");
+  if (!el) return;
+  if (window.PharmaUI) window.PharmaUI.skeleton(el, { variant: "rows", rows: 3 });
+  else el.innerHTML = "Loading…";
+  try {
+    const [dq, fat, sat] = await Promise.all([
+      fetch("/qms/documents?type=DQ").then(r => r.json()),
+      fetch("/qms/documents?type=FAT").then(r => r.json()),
+      fetch("/qms/documents?type=SAT").then(r => r.json()),
+    ]);
+    const mine = [].concat(dq, fat, sat).filter(d => d.project_id === project.id);
+
+    if (!mine.length) {
+      if (window.PharmaUI) {
+        window.PharmaUI.emptyState(el, {
+          icon: "file-text", title: "No DQ / FAT / SAT documents yet",
+          message: "Use the buttons above to create one for this project via Document Control.",
+        });
+      } else {
+        el.innerHTML = '<div class="eq-empty">No DQ/FAT/SAT documents yet.</div>';
+      }
+      if (window.refreshIcons) window.refreshIcons();
+      return;
+    }
+
+    el.innerHTML = mine.map(d => `
+      <div class="qms-panel-item" style="cursor:pointer" onclick="window.showView && window.showView('view-qms-documents'); window.qmsLoadMeta && window.qmsLoadMeta().then(function(){ window.qmsDocOpenDetail && window.qmsDocOpenDetail(${d.id}); });">
+        <div>
+          <div class="qms-audit-action">${pwEsc(d.doc_number)} · ${pwEsc(d.doc_type)}</div>
+          <div class="qms-panel-item-meta">${pwEsc(d.title)}</div>
+        </div>
+        <div class="qms-panel-item-meta">${pwEsc(d.status || "")}</div>
+      </div>`).join("");
+    if (window.refreshIcons) window.refreshIcons();
+  } catch {
+    if (window.PharmaUI) window.PharmaUI.errorState(el, { message: "Could not load DQ/FAT/SAT documents.", onRetry: () => pwRenderDqFatSat(project) });
+    else el.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Could not load documents.</p>';
+  }
+}
+
 async function pwRenderHistory(projectId) {
   const el = document.getElementById("pw-history-list");
   if (!el) return;
-  el.innerHTML = "Loading…";
+  if (window.PharmaUI) window.PharmaUI.skeleton(el, { variant: "rows", rows: 3 });
+  else el.innerHTML = "Loading…";
   try {
     const res = await fetch(`/qms/project/${projectId}/audit-trail`);
     const entries = await res.json();
@@ -163,7 +222,8 @@ async function pwRenderHistory(projectId) {
       </div>
     `).join("");
   } catch {
-    el.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Could not load project history.</p>';
+    if (window.PharmaUI) window.PharmaUI.errorState(el, { message: "Could not load project history.", onRetry: () => pwRenderHistory(projectId) });
+    else el.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Could not load project history.</p>';
   }
 }
 

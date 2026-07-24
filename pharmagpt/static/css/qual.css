@@ -960,6 +960,9 @@
 }
 
 /* ── Responsive ──────────────────────────────────────────────────────────────── */
+@media (max-width: 1366px) {
+  .qual-body { padding: 18px 20px; }
+}
 @media (max-width: 768px) {
   .qual-form-grid { grid-template-columns: 1fr; }
   .qual-form-grid.three-col { grid-template-columns: 1fr; }

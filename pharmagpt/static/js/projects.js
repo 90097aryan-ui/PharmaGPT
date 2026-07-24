@@ -78,6 +78,20 @@ function renderProjectList(projects) {
       ? `<span class="proj-badge">${p.validation_type}</span>`
       : "";
 
+    // Only company_admin can delete a project (backend-enforced); hide the
+    // button for other roles instead of showing an action that will always
+    // be rejected with no visible feedback.
+    const currentUser = window.PharmaAuth && window.PharmaAuth.getUser();
+    const canDelete = currentUser && currentUser.role === "company_admin";
+    const deleteBtn = canDelete
+      ? `<button class="proj-delete-btn" data-id="${p.id}" title="Delete project"><span class=\'icon\' data-lucide=\'trash-2\'></span></button>`
+      : "";
+
+    const isFav = window.PharmaFavorites && window.PharmaFavorites.isFavorite("projects", p.id);
+    const favBtn = window.PharmaFavorites
+      ? `<button class="proj-fav-btn${isFav ? " is-fav" : ""}" data-id="${p.id}" title="${isFav ? "Remove from Favorites" : "Add to Favorites"}" aria-label="${isFav ? "Remove from Favorites" : "Add to Favorites"}" aria-pressed="${isFav}"><span class=\'icon\' data-lucide=\'star\'></span></button>`
+      : "";
+
     item.innerHTML = `
       <div class="proj-item-left">
         <div class="proj-icon"><span class=\'icon\' data-lucide=\'folder\'></span></div>
@@ -88,20 +102,28 @@ function renderProjectList(projects) {
       </div>
       <div class="proj-item-right">
         ${badge}
-        <button class="proj-delete-btn" data-id="${p.id}" title="Delete project"><span class=\'icon\' data-lucide=\'trash-2\'></span></button>
+        ${favBtn}
+        ${deleteBtn}
       </div>
     `;
 
-    // Select project on click (but not on the delete button)
+    // Select project on click (but not on the delete/favorite button)
     item.addEventListener("click", (e) => {
-      if (e.target.closest(".proj-delete-btn")) return;
+      if (e.target.closest(".proj-delete-btn") || e.target.closest(".proj-fav-btn")) return;
       selectProject(p);
     });
 
     // Delete button
-    item.querySelector(".proj-delete-btn").addEventListener("click", (e) => {
+    item.querySelector(".proj-delete-btn")?.addEventListener("click", (e) => {
       e.stopPropagation();
       confirmDeleteProject(p);
+    });
+
+    // Favorite toggle
+    item.querySelector(".proj-fav-btn")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      window.PharmaFavorites.toggleFavorite("projects", p.id, { title: p.name, meta: p.equipment_name || "" });
+      renderProjectList(projects);
     });
 
     projectListEl.appendChild(item);
@@ -112,6 +134,7 @@ function renderProjectList(projects) {
 
 async function selectProject(project) {
   window.activeProject = project;
+  if (window.PharmaRecent) window.PharmaRecent.recordOpened("projects", project.id, project.name, project.equipment_name || "");
 
   // Update the active project banner above the chat
   activeProjNameEl.textContent = project.name;
@@ -207,7 +230,11 @@ async function confirmDeleteProject(project) {
   if (!confirm(`Delete project "${project.name}" and all its messages? This cannot be undone.`)) return;
 
   try {
-    await fetch(`/projects/${project.id}`, { method: "DELETE" });
+    const res = await fetch(`/projects/${project.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || "Could not delete project.");
+    }
 
     // If we deleted the active project, clear the banner and chat
     if (window.activeProject && window.activeProject.id === project.id) {
@@ -222,8 +249,8 @@ async function confirmDeleteProject(project) {
     }
 
     await loadProjects();
-  } catch {
-    alert("Could not delete project. Please try again.");
+  } catch (e) {
+    alert(e.message || "Could not delete project. Please try again.");
   }
 }
 

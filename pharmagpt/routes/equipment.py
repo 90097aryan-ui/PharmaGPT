@@ -24,6 +24,7 @@ import logging
 
 from flask import Blueprint, g, jsonify, request
 
+from pharmagpt import audit
 from pharmagpt import config
 from pharmagpt import database as db
 from pharmagpt import equipment_database as equipdb
@@ -180,6 +181,7 @@ def create_equipment(project_id):
 
     equipment = equipdb.create_equipment(project_id, data)
     _dual_write_create(equipment)
+    audit.log("equipment", equipment["id"], "Created", new=equipment)
     return jsonify(equipment), 201
 
 
@@ -194,6 +196,7 @@ def import_legacy_equipment(project_id):
     if not equipment:
         return jsonify({"error": "Project has no legacy equipment information to import"}), 400
     _dual_write_create(equipment)
+    audit.log("equipment", equipment["id"], "Created (imported from legacy fields)", new=equipment)
     return jsonify(equipment), 201
 
 
@@ -227,13 +230,15 @@ def get_equipment(equipment_id):
 
 @bp.route("/equipment/<int:equipment_id>", methods=["PUT"])
 def update_equipment(equipment_id):
-    if not equipdb.get_equipment_scoped(equipment_id, g.tenant.company_id):
+    existing = equipdb.get_equipment_scoped(equipment_id, g.tenant.company_id)
+    if not existing:
         return jsonify({"error": "Equipment not found"}), 404
     data = request.get_json() or {}
     if "name" in data and not (data.get("name") or "").strip():
         return jsonify({"error": "Equipment name cannot be empty"}), 400
     updated = equipdb.update_equipment(equipment_id, data)
     _dual_write_update(updated)
+    audit.log("equipment", equipment_id, "Updated", old=existing, new=updated)
     return jsonify(updated)
 
 
@@ -245,6 +250,7 @@ def delete_equipment(equipment_id):
         return jsonify({"error": "Equipment not found"}), 404
     equipdb.delete_equipment(equipment_id)
     _dual_write_delete(existing)
+    audit.log("equipment", equipment_id, "Deleted", old=existing)
     return jsonify({"status": "deleted"})
 
 
@@ -294,6 +300,7 @@ def link_equipment_document(equipment_id):
     title_snapshot = source_doc.get("title") or source_doc.get("original_name") or ""
     link = equipdb.link_equipment_document(equipment_id, document_role, source_type, source_id, title_snapshot)
     _dual_write_link(equipment_id, link)
+    audit.log("equipment", equipment_id, f"Document linked ({document_role}: {source_type}#{source_id})", new=link)
     return jsonify(link), 201
 
 
@@ -306,6 +313,7 @@ def unlink_equipment_document(equipment_id, link_id):
     equipdb.unlink_equipment_document(link_id)
     if existing_link:
         _dual_write_unlink(existing_link)
+        audit.log("equipment", equipment_id, "Document unlinked", old=existing_link)
     return jsonify({"status": "unlinked"})
 
 

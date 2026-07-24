@@ -123,7 +123,8 @@ async function loadRiskDashboard() {
     const stats = await res.json();
     renderDashboard(stats);
   } catch (e) {
-    body.innerHTML = `<div class="risk-empty"><p>Failed to load dashboard. ${e.message}</p></div>`;
+    if (window.PharmaUI) window.PharmaUI.errorState(body, { message: `Failed to load dashboard. ${e.message}`, onRetry: loadRiskDashboard });
+    else body.innerHTML = `<div class="risk-empty"><p>Failed to load dashboard. ${e.message}</p></div>`;
   }
 }
 
@@ -265,7 +266,8 @@ async function loadAssessmentList() {
     RiskState.assessments = assessments;
     renderAssessmentList(assessments);
   } catch (e) {
-    body.innerHTML = `<div class="risk-empty"><p>Error loading. ${e.message}</p></div>`;
+    if (window.PharmaUI) window.PharmaUI.errorState(body, { message: `Error loading assessments. ${e.message}`, onRetry: loadAssessmentList });
+    else body.innerHTML = `<div class="risk-empty"><p>Error loading. ${e.message}</p></div>`;
   }
 }
 
@@ -404,7 +406,7 @@ window.selectMethodology = function (key) {
   renderMethodologySelector();
 };
 
-window.wizardNext = function () {
+window.riskWizardNext = function () {
   const step = RiskState.wizardStep;
   if (step === 1) {
     if (!RiskState.selectedType) { alert("Please select a risk type."); return; }
@@ -419,7 +421,7 @@ window.wizardNext = function () {
   }
 };
 
-window.wizardBack = function () {
+window.riskWizardBack = function () {
   if (RiskState.wizardStep > 1) riskRenderWizardStep(RiskState.wizardStep - 1);
 };
 
@@ -461,6 +463,10 @@ window.createAndOpenAssessment = async function () {
       return;
     }
     const assessment = await res.json();
+    if (!assessment || assessment.id == null) {
+      alert("Error: server did not return a saved assessment id.");
+      return;
+    }
     RiskState.currentAssessment = assessment;
     openAssessmentEditor(assessment);
   } catch (e) {
@@ -481,6 +487,7 @@ async function openAssessment(id) {
     const items = await iRes.json();
     RiskState.currentAssessment = assessment;
     RiskState.currentItems = items;
+    if (window.PharmaRecent) window.PharmaRecent.recordOpened("risk", assessment.id, assessment.title, assessment.assessment_type || "");
     openAssessmentEditor(assessment, items);
   } catch (e) {
     alert("Error loading assessment: " + e.message);
@@ -517,9 +524,9 @@ function renderEditor(assessment, items) {
       <div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
           <button class="btn-risk-secondary" onclick="backToList()" style="padding:6px 12px;font-size:12px"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Back</button>
-          <h2 style="font-size:18px;font-weight:800;color:var(--navy)">${typeInfo.icon} ${esc(assessment.title)}</h2>
-          <span class="badge badge-${statusCls}">${assessment.status}</span>
-          <span class="badge badge-${priorityCls}">${assessment.priority}</span>
+          <h2 style="font-size:18px;font-weight:800;color:var(--navy)">${typeInfo.icon} ${esc(assessment.title || "Untitled Assessment")}</h2>
+          <span class="badge badge-${statusCls}">${esc(assessment.status || "Draft")}</span>
+          <span class="badge badge-${priorityCls}">${esc(assessment.priority || "Medium")}</span>
         </div>
         <div style="font-size:12px;color:var(--text-muted);display:flex;gap:16px;flex-wrap:wrap">
           <span><span class=\'icon\' data-lucide=\'clipboard-list\'></span> ${esc(methodology)}</span>
@@ -545,7 +552,7 @@ function renderEditor(assessment, items) {
         <span style="font-size:11px;font-weight:400;color:var(--text-muted)">Powered by Gemini 2.5 Flash</span>
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-        <button class="btn-risk-primary" id="btn-ai-generate-${assessment.id}" onclick="aiGenerateItems(${assessment.id})">
+        <button class="btn-risk-primary" id="btn-ai-generate-${assessment.id}" onclick="aiGenerateItems(${JSON.stringify(assessment.id ?? null)})" ${assessment.id == null ? "disabled" : ""}>
           <span class=\'icon\' data-lucide=\'sparkles\'></span> AI Generate Risk Items
         </button>
         <button class="btn-risk-secondary" onclick="aiReview(${assessment.id})">
@@ -917,6 +924,14 @@ window.aiGenerateItems = async function (aid) {
   if (RiskState.isGenerating) return;
   const a = RiskState.currentAssessment;
   if (!a) return;
+
+  if (aid == null || Number.isNaN(Number(aid))) {
+    const msg = "Please save the assessment before using AI generation.";
+    const statusEl = document.getElementById(`ai-status-${aid}`);
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--risk-critical)">${msg}</span>`;
+    else alert(msg);
+    return;
+  }
 
   if (!confirm(`Generate AI risk items for "${a.title}" using ${a.methodology}?\n\nThis will replace any unsaved rows in the table.`)) return;
 
@@ -1359,7 +1374,16 @@ window.useTemplate = async function (t) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
+    if (!res.ok) {
+      const err = await res.json();
+      alert("Error: " + (err.error || "Failed to create assessment"));
+      return;
+    }
     const assessment = await res.json();
+    if (!assessment || assessment.id == null) {
+      alert("Error: server did not return a saved assessment id.");
+      return;
+    }
     RiskState.currentAssessment = assessment;
     openAssessmentEditor(assessment, []);
  showToast(`Assessment created from template: ${t.name}`);

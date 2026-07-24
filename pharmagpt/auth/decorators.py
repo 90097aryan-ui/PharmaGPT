@@ -27,10 +27,23 @@ def extract_bearer_token() -> str:
 
 def require_auth(view_func):
     """Reject the request unless it carries a valid Supabase Auth bearer
-    token, and make the resolved TenantContext available as `g.tenant`."""
+    token, and make the resolved TenantContext available as `g.tenant`.
+
+    If `g.tenant` is already set (the global before_request gate in
+    pharmagpt/auth/middleware.py already resolved it for every non-exempt
+    route, including Assume Company Context's company_id override — see
+    middleware.py::apply_assumed_company_context), this is a no-op
+    passthrough rather than a second resolution: re-resolving here would
+    silently discard that override with a fresh, non-assumed TenantContext.
+    Still performs its own full resolution when `g.tenant` isn't already
+    present (e.g. exercised directly against a throwaway app in tests, or a
+    future route exempted from the global gate)."""
 
     @wraps(view_func)
     def wrapped(*args, **kwargs):
+        if hasattr(g, "tenant"):
+            return view_func(*args, **kwargs)
+
         access_token = extract_bearer_token()
         if not access_token:
             return jsonify({"error": "Missing or malformed Authorization header"}), 401

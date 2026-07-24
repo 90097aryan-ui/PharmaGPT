@@ -1,0 +1,127 @@
+/* workspace_selector.css — Phase 4 UI Navigation Refresh.
+ * Styles for the post-login Workspace Selector landing screen
+ * (#view-workspace-selector in templates/index.html). Purely additive;
+ * reuses the existing --navy/--blue/--bg/--surface/--border palette from
+ * style.css so the selector matches the rest of the app. */
+
+.ws-selector {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  background: var(--bg);
+  padding: 48px 24px;
+}
+
+.ws-selector-inner {
+  width: 100%;
+  max-width: 1040px;
+  text-align: center;
+}
+
+.ws-selector-title {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--navy);
+  margin: 0 0 8px;
+}
+
+.ws-selector-subtitle {
+  font-size: 15px;
+  color: var(--text-muted);
+  margin: 0 0 40px;
+}
+
+.ws-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 20px;
+  text-align: left;
+}
+
+.ws-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.ws-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--blue-light);
+}
+
+.ws-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius);
+  background: var(--soft-blue);
+  color: var(--blue-light);
+  margin-bottom: 16px;
+}
+
+.ws-card-icon svg { width: 22px; height: 22px; }
+
+.ws-card h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--navy);
+}
+
+.ws-card p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* ── PharmaPilot placeholder view ─────────────────────────────────────── */
+.ws-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 6px;
+  padding: 48px 24px;
+  background: var(--bg);
+}
+.ws-placeholder-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--soft-blue);
+  color: var(--blue-light);
+  margin-bottom: 12px;
+}
+.ws-placeholder-icon svg { width: 26px; height: 26px; }
+.ws-placeholder h2 { margin: 0; color: var(--navy); font-size: 20px; }
+.ws-placeholder p { margin: 0; color: var(--text-muted); font-size: 14px; }
+.ws-placeholder-sub { max-width: 420px; font-size: 13px !important; margin-top: 8px !important; }
+
+/* ── New outer sidebar group collapse chevrons (Knowledge/Validation/
+   Quality/Document Center) — mirrors the existing .val-collapse-btn look. */
+.ws-group-collapse-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.55);
+  cursor: pointer;
+  padding: 2px 4px;
+  display: inline-flex;
+  align-items: center;
+}
+.ws-group-collapse-btn:hover { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.75); }
+.ws-group-collapse-btn .icon svg { width: 11px; height: 11px; }

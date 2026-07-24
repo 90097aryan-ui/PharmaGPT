@@ -43,6 +43,7 @@ import time
 from datetime import date, datetime
 from flask import Blueprint, g, jsonify, request
 
+from pharmagpt import audit
 from pharmagpt import urs_database as udb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
@@ -99,6 +100,8 @@ bp = Blueprint("urs", __name__, url_prefix="/urs")
 
 @bp.route("/dashboard")
 def dashboard():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     return jsonify(udb.get_dashboard_stats(g.tenant.company_id))
 
 
@@ -106,6 +109,8 @@ def dashboard():
 
 @bp.route("/", methods=["GET"])
 def list_urs():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     filters = {
         "status":         request.args.get("status"),
         "category":       request.args.get("category"),
@@ -131,6 +136,7 @@ def create_urs():
     # effective_date from `data` regardless of what's set here.
     data["prepared_by"] = _current_display_name(fallback=data.get("prepared_by", ""))
     urs = udb.create_urs(data, company_id=g.tenant.company_id)
+    audit.log("urs", urs["id"], "Created", new=urs)
     return jsonify(urs), 201
 
 
@@ -144,8 +150,16 @@ def get_urs(uid):
 
 @bp.route("/<int:uid>", methods=["PUT"])
 def update_urs(uid):
-    if not tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id):
+    existing = tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id)
+    if not existing:
         return jsonify({"error": "URS not found"}), 404
+    # Phase F (WP3, workflow enforcement): a record in a terminal/locked
+    # status must not be silently editable via a plain field PUT — only the
+    # approval-workflow endpoint may move it out of Obsolete.
+    if existing["status"] == lifecycle.OBSOLETE:
+        audit.log_failure("urs", uid, "Update blocked (record is Obsolete)",
+                           reason="Obsolete URS records are immutable")
+        return jsonify({"error": "This URS is Obsolete and cannot be edited"}), 409
     data = request.get_json() or {}
     if "status" in data:
         return jsonify({
@@ -159,15 +173,18 @@ def update_urs(uid):
     # these read-only fields.
     data = {k: v for k, v in data.items() if k not in _SYSTEM_CONTROLLED_FIELDS}
     updated = udb.update_urs(uid, data)
+    audit.log("urs", uid, "Updated", old=existing, new=updated)
     return jsonify(updated)
 
 
 @bp.route("/<int:uid>", methods=["DELETE"])
 @require_role("company_admin")
 def delete_urs(uid):
-    if not tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id):
+    existing = tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id)
+    if not existing:
         return jsonify({"error": "URS not found"}), 404
     udb.delete_urs(uid)
+    audit.log("urs", uid, "Deleted", old=existing)
     return jsonify({"deleted": True})
 
 
@@ -366,6 +383,10 @@ def review_urs(uid):
         "compliance_score": review_data.get("compliance_score", 0),
         "completeness_score": review_data.get("completeness_score", 0),
     })
+    audit.log("urs", uid, "AI Review Completed", new={
+        "compliance_score": review_data.get("compliance_score", 0),
+        "completeness_score": review_data.get("completeness_score", 0),
+    })
     return jsonify(review_data)
 
 
@@ -497,9 +518,15 @@ def create_version(uid):
         return jsonify({"error": "URS not found"}), 404
     data = request.get_json() or {}
     change_summary = data.get("change_summary", "Version snapshot")
-    created_by = data.get("created_by", "System")
+    # Phase F fix (C6): created_by is derived from the authenticated
+    # session, never taken from the request body (previously defaulted to
+    # the client-supplied value, or the literal string "System" — either
+    # way spoofable/meaningless for an e-signature-adjacent record). See
+    # PHARMAGPT_v1.0_RELEASE_READINESS_REPORT.md C6.
+    created_by = _current_display_name(fallback="System")
     snapshot = udb.create_version_snapshot(uid, change_summary, created_by)
     udb.add_approval_entry(uid, "Version Snapshot Created", created_by, "", change_summary)
+    audit.log("urs", uid, "Version Snapshot Created", new={"change_summary": change_summary})
     return jsonify(snapshot), 201
 
 

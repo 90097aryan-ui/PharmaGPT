@@ -35,7 +35,15 @@
 
   // ── Load & render ──────────────────────────────────────────────────────────
 
+  // Guards against out-of-order responses: if two searches are in flight
+  // (e.g. a fast typist or a slow network), only the response matching the
+  // most recently issued request is applied — an earlier, slower response
+  // arriving after a newer one must not overwrite it with stale results.
+  let kbRequestSeq = 0;
+
   async function loadKBDocuments() {
+    const requestId = ++kbRequestSeq;
+
     const params = new URLSearchParams();
     if (state.activeFolder)   params.set('folder',    state.activeFolder);
     if (state.searchTitle)    params.set('title',     state.searchTitle);
@@ -43,11 +51,29 @@
     if (state.searchFileType) params.set('file_type', state.searchFileType);
     if (state.searchKeyword)  params.set('keyword',   state.searchKeyword);
 
+    const listEl = document.getElementById('kb-doc-list');
+    const emptyEl = document.getElementById('kb-doc-empty');
+    if (listEl && window.PharmaUI) {
+      if (emptyEl) emptyEl.style.display = 'none';
+      window.PharmaUI.skeleton(listEl, { variant: 'rows', rows: 4 });
+    }
+
+    let docs;
     try {
       const resp = await fetch(`/kb/documents?${params}`);
-      if (!resp.ok) return;
-      state.documents = await resp.json();
-    } catch { return; }
+      if (!resp.ok) throw new Error('Request failed (' + resp.status + ')');
+      docs = await resp.json();
+    } catch (e) {
+      if (requestId !== kbRequestSeq) return;
+      if (listEl && window.PharmaUI) {
+        if (emptyEl) emptyEl.style.display = 'none';
+        window.PharmaUI.errorState(listEl, { message: 'Could not load Knowledge Base documents.', onRetry: loadKBDocuments });
+      }
+      return;
+    }
+
+    if (requestId !== kbRequestSeq) return; // a newer request has since started
+    state.documents = docs;
 
     renderKBList();
     await refreshFolderCounts();
@@ -102,7 +128,19 @@
 
     if (!docs.length) {
       list.innerHTML = '';
-      if (empty) empty.style.display = 'flex';
+      if (empty) {
+        const hasActiveFilter = !!(state.activeFolder || state.searchTitle || state.searchTag || state.searchFileType || state.searchKeyword);
+        const title = empty.querySelector('p');
+        const sub = empty.querySelector('.kb-empty-sub');
+        if (hasActiveFilter) {
+          if (title) title.textContent = 'No documents match your search.';
+          if (sub) sub.textContent = 'Try a different title, tag, file type, or keyword — or clear the search.';
+        } else {
+          if (title) title.textContent = 'No documents found.';
+          if (sub) sub.innerHTML = 'Upload your first document using the <strong>+ Add Document</strong> button above.';
+        }
+        empty.style.display = 'flex';
+      }
       return;
     }
     if (empty) empty.style.display = 'none';
@@ -126,6 +164,9 @@
             ${tagsHtml ? `<div class="kb-tags-row">${tagsHtml}</div>` : ''}
           </div>
           <div class="kb-doc-row-actions">
+            ${(doc.folder === 'SOP' || doc.folder === 'Validation') && window.PharmaFavorites
+              ? `<button class="kb-row-btn kb-row-btn-fav${window.PharmaFavorites.isFavorite(doc.folder === 'SOP' ? 'sops' : 'validation_docs', doc.id) ? ' is-fav' : ''}" onclick="event.stopPropagation();kbToggleFavorite(${doc.id},'${doc.folder}')" title="Toggle Favorite"><span class='icon' data-lucide='star'></span></button>`
+              : ''}
  <button class="kb-row-btn"onclick="event.stopPropagation();kbViewDoc(${doc.id})"title="View"></button>
  <button class="kb-row-btn kb-row-btn-del"onclick="event.stopPropagation();kbDeleteDoc(${doc.id})"title="Delete"></button>
           </div>
@@ -203,9 +244,24 @@
       state.selectedDoc = await resp.json();
     } catch { return; }
 
+    if (window.PharmaRecent) {
+      const type = state.selectedDoc.folder === 'SOP' ? 'sops'
+        : state.selectedDoc.folder === 'Validation' ? 'validation_docs' : 'kb_documents';
+      window.PharmaRecent.recordOpened(type, state.selectedDoc.id, state.selectedDoc.title, state.selectedDoc.folder || '');
+    }
+
     renderKBList();
     renderKBDetail(state.selectedDoc);
   }
+
+  function kbToggleFavorite(id, folder) {
+    if (!window.PharmaFavorites) return;
+    const doc = state.documents.find(d => d.id === id) || (state.selectedDoc && state.selectedDoc.id === id ? state.selectedDoc : null);
+    const type = folder === 'SOP' ? 'sops' : 'validation_docs';
+    window.PharmaFavorites.toggleFavorite(type, id, { title: doc ? doc.title : `Document #${id}`, meta: folder });
+    renderKBList();
+  }
+  window.kbToggleFavorite = kbToggleFavorite;
 
   function renderKBDetail(doc) {
     const panel = document.getElementById('kb-detail-panel');

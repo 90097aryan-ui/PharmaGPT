@@ -11,7 +11,17 @@
 // ── Fetch wrapper ──────────────────────────────────────────────────────────────
 
 async function qmsFetch(url, opts = {}) {
-  const res = await fetch(url, opts);
+  let res;
+  try {
+    res = await fetch(url, opts);
+  } catch (networkErr) {
+    // fetch() rejecting (not a non-2xx response) means the request never
+    // reached the server — DNS/connection failure, not a per-record issue.
+    // That's global, not local to this one panel, so it's the one case
+    // this app escalates to a full-page state instead of an inline one.
+    if (window.PharmaErrorPages) window.PharmaErrorPages.show("network");
+    throw networkErr;
+  }
   let data = null;
   try { data = await res.json(); } catch (e) { /* no JSON body */ }
   if (!res.ok) {
@@ -137,16 +147,22 @@ window.qmsStream = qmsStream;
 async function qmsRenderAttachments(containerId, recordType, recordId) {
   const el = document.getElementById(containerId);
   if (!el) return;
-  el.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading attachments…</div>`;
+  if (window.PharmaUI) window.PharmaUI.skeleton(el, { variant: "rows", rows: 2 });
+  else el.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading attachments…</div>`;
   try {
     const attachments = await qmsFetch(`/qms/${recordType}/${recordId}/attachments`);
+    const listId = `${containerId}-list`;
     el.innerHTML = `
       <div style="margin-bottom:12px">
         <input type="file" id="qms-attach-file-${recordType}-${recordId}" style="font-size:12px" />
         <input type="text" id="qms-attach-desc-${recordType}-${recordId}" placeholder="Description (optional)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;margin-left:6px" />
         <button class="btn-primary" style="padding:6px 14px;font-size:12px" onclick="qmsUploadAttachment('${recordType}',${recordId})">Upload</button>
       </div>
-      ${attachments.length ? attachments.map(a => `
+      <div id="${listId}"></div>
+    `;
+    const listEl = document.getElementById(listId);
+    if (attachments.length) {
+      listEl.innerHTML = attachments.map(a => `
         <div class="qms-panel-item">
           <div>
             <span class="qms-attachment-icon">\u{1F4CE}</span>${a.original_name}
@@ -157,10 +173,15 @@ async function qmsRenderAttachments(containerId, recordType, recordId) {
             <a href="/qms/attachments/${a.id}/download" style="font-size:11px;margin-right:10px">Download</a>
             <a href="#" style="font-size:11px;color:#C35F5B" onclick="qmsDeleteAttachment('${recordType}',${recordId},${a.id});return false;">Delete</a>
           </div>
-        </div>`).join("") : `<div class="qms-panel-item-meta">No attachments yet.</div>`}
-    `;
+        </div>`).join("");
+    } else if (window.PharmaUI) {
+      window.PharmaUI.emptyState(listEl, { icon: "paperclip", title: "No attachments yet", message: "Files you upload above will appear here." });
+    } else {
+      listEl.innerHTML = `<div class="qms-panel-item-meta">No attachments yet.</div>`;
+    }
   } catch (e) {
-    el.innerHTML = `<div class="qms-panel-item-meta">Failed to load attachments: ${e.message}</div>`;
+    if (window.PharmaUI) window.PharmaUI.errorState(el, { message: e.message, onRetry: () => qmsRenderAttachments(containerId, recordType, recordId) });
+    else el.innerHTML = `<div class="qms-panel-item-meta">Failed to load attachments: ${e.message}</div>`;
   }
 }
 window.qmsRenderAttachments = qmsRenderAttachments;
@@ -195,26 +216,37 @@ window.qmsDeleteAttachment = qmsDeleteAttachment;
 async function qmsRenderComments(containerId, recordType, recordId) {
   const el = document.getElementById(containerId);
   if (!el) return;
-  el.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading comments…</div>`;
+  if (window.PharmaUI) window.PharmaUI.skeleton(el, { variant: "rows", rows: 2 });
+  else el.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading comments…</div>`;
   try {
     const comments = await qmsFetch(`/qms/${recordType}/${recordId}/comments`);
+    const listId = `${containerId}-list`;
     el.innerHTML = `
       <div style="display:flex;gap:8px;margin-bottom:14px">
         <input type="text" id="qms-comment-author-${recordType}-${recordId}" placeholder="Your name" style="flex:0 0 140px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px" />
         <input type="text" id="qms-comment-text-${recordType}-${recordId}" placeholder="Add a comment…" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px" />
         <button class="btn-primary" style="padding:8px 14px;font-size:12px" onclick="qmsAddComment('${recordType}',${recordId})">Post</button>
       </div>
-      ${comments.length ? comments.map(c => `
+      <div id="${listId}"></div>
+    `;
+    const listEl = document.getElementById(listId);
+    if (comments.length) {
+      listEl.innerHTML = comments.map(c => `
         <div class="qms-panel-item">
           <div>
             <strong>${c.author || "Anonymous"}</strong>${c.role ? ` <span class="qms-panel-item-meta">(${c.role})</span>` : ""}
             <div>${c.comment}</div>
             <div class="qms-panel-item-meta">${c.created_at}</div>
           </div>
-        </div>`).join("") : `<div class="qms-panel-item-meta">No comments yet.</div>`}
-    `;
+        </div>`).join("");
+    } else if (window.PharmaUI) {
+      window.PharmaUI.emptyState(listEl, { icon: "message-square", title: "No comments yet", message: "Be the first to add context for reviewers." });
+    } else {
+      listEl.innerHTML = `<div class="qms-panel-item-meta">No comments yet.</div>`;
+    }
   } catch (e) {
-    el.innerHTML = `<div class="qms-panel-item-meta">Failed to load comments: ${e.message}</div>`;
+    if (window.PharmaUI) window.PharmaUI.errorState(el, { message: e.message, onRetry: () => qmsRenderComments(containerId, recordType, recordId) });
+    else el.innerHTML = `<div class="qms-panel-item-meta">Failed to load comments: ${e.message}</div>`;
   }
 }
 window.qmsRenderComments = qmsRenderComments;
@@ -235,19 +267,27 @@ window.qmsAddComment = qmsAddComment;
 async function qmsRenderAuditTrail(containerId, recordType, recordId) {
   const el = document.getElementById(containerId);
   if (!el) return;
-  el.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading audit trail…</div>`;
+  if (window.PharmaUI) window.PharmaUI.skeleton(el, { variant: "rows", rows: 3 });
+  else el.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading audit trail…</div>`;
   try {
     const entries = await qmsFetch(`/qms/${recordType}/${recordId}/audit-trail`);
-    el.innerHTML = entries.length ? entries.map(e => `
-      <div class="qms-panel-item">
-        <div>
-          <span class="qms-audit-action">${e.action}</span>
-          ${e.detail ? ` — ${e.detail}` : ""}
-          <div class="qms-panel-item-meta">${e.performed_by || "System"} · ${e.created_at}</div>
-        </div>
-      </div>`).join("") : `<div class="qms-panel-item-meta">No audit trail entries yet.</div>`;
+    if (entries.length) {
+      el.innerHTML = entries.map(e => `
+        <div class="qms-panel-item">
+          <div>
+            <span class="qms-audit-action">${e.action}</span>
+            ${e.detail ? ` — ${e.detail}` : ""}
+            <div class="qms-panel-item-meta">${e.performed_by || "System"} · ${e.created_at}</div>
+          </div>
+        </div>`).join("");
+    } else if (window.PharmaUI) {
+      window.PharmaUI.emptyState(el, { icon: "history", title: "No audit trail entries yet", message: "System-recorded actions on this record will appear here." });
+    } else {
+      el.innerHTML = `<div class="qms-panel-item-meta">No audit trail entries yet.</div>`;
+    }
   } catch (e) {
-    el.innerHTML = `<div class="qms-panel-item-meta">Failed to load audit trail: ${e.message}</div>`;
+    if (window.PharmaUI) window.PharmaUI.errorState(el, { message: e.message, onRetry: () => qmsRenderAuditTrail(containerId, recordType, recordId) });
+    else el.innerHTML = `<div class="qms-panel-item-meta">Failed to load audit trail: ${e.message}</div>`;
   }
 }
 window.qmsRenderAuditTrail = qmsRenderAuditTrail;
@@ -261,10 +301,12 @@ window.qmsRenderAuditTrail = qmsRenderAuditTrail;
 async function qmsRenderApproval(containerId, recordType, recordId, actions, postUrl, onSubmitted) {
   const el = document.getElementById(containerId);
   if (!el) return;
-  el.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading approval trail…</div>`;
+  if (window.PharmaUI) window.PharmaUI.skeleton(el, { variant: "rows", rows: 3 });
+  else el.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading approval trail…</div>`;
   try {
     const entries = await qmsFetch(`/qms/${recordType}/${recordId}/approval`);
     const formId = `qms-approval-form-${recordType}-${recordId}`;
+    const listId = `${containerId}-list`;
     el.innerHTML = `
       <div class="qms-section-card" style="margin-bottom:14px">
         <h3>Record Approval Action</h3>
@@ -290,18 +332,27 @@ async function qmsRenderApproval(containerId, recordType, recordId, actions, pos
           <button class="btn-primary" onclick="qmsSubmitApproval('${formId}','${postUrl}','${containerId}','${recordType}',${recordId})">Submit</button>
         </div>
       </div>
-      ${entries.length ? entries.map(a => `
+      <div id="${listId}"></div>
+    `;
+    const listEl = document.getElementById(listId);
+    if (entries.length) {
+      listEl.innerHTML = entries.map(a => `
         <div class="qms-panel-item">
           <div>
             <span class="qms-audit-action">${a.action}</span>
             <div class="qms-panel-item-meta">${a.performed_by || ""}${a.role ? ` (${a.role})` : ""} · ${a.created_at}</div>
             ${a.comments ? `<div>${a.comments}</div>` : ""}
           </div>
-        </div>`).join("") : `<div class="qms-panel-item-meta">No approval actions recorded yet.</div>`}
-    `;
+        </div>`).join("");
+    } else if (window.PharmaUI) {
+      window.PharmaUI.emptyState(listEl, { icon: "stamp", title: "No approval actions recorded yet", message: "Submit an action above to start the approval trail." });
+    } else {
+      listEl.innerHTML = `<div class="qms-panel-item-meta">No approval actions recorded yet.</div>`;
+    }
     if (onSubmitted) window._qmsApprovalCallbacks[containerId] = onSubmitted;
   } catch (e) {
-    el.innerHTML = `<div class="qms-panel-item-meta">Failed to load approval trail: ${e.message}</div>`;
+    if (window.PharmaUI) window.PharmaUI.errorState(el, { message: e.message, onRetry: () => qmsRenderApproval(containerId, recordType, recordId, actions, postUrl, onSubmitted) });
+    else el.innerHTML = `<div class="qms-panel-item-meta">Failed to load approval trail: ${e.message}</div>`;
   }
 }
 window.qmsRenderApproval = qmsRenderApproval;
@@ -328,7 +379,8 @@ window.qmsSubmitApproval = qmsSubmitApproval;
 
 async function initQMSDashboard() {
   const body = document.getElementById("qms-dashboard-body");
-  body.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading QMS dashboard…</div>`;
+  if (window.PharmaUI) window.PharmaUI.skeleton(body, { variant: "rows", rows: 4 });
+  else body.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading QMS dashboard…</div>`;
   try {
     const stats = await qmsFetch("/qms/dashboard");
     const s = stats.summary;
@@ -389,7 +441,8 @@ async function initQMSDashboard() {
       </div>
     `;
   } catch (e) {
-    body.innerHTML = `<div class="qms-empty"><p>Failed to load QMS dashboard: ${e.message}</p></div>`;
+    if (window.PharmaUI) window.PharmaUI.errorState(body, { message: e.message, onRetry: initQMSDashboard });
+    else body.innerHTML = `<div class="qms-empty"><p>Failed to load QMS dashboard: ${e.message}</p></div>`;
   }
 }
 window.initQMSDashboard = initQMSDashboard;

@@ -14,6 +14,7 @@
 -- the company_id-scoped policy set Phase 3 introduces, and does not preview
 -- or replace it.
 
+drop policy if exists users_select_own on users;
 create policy users_select_own on users
     for select
     to authenticated

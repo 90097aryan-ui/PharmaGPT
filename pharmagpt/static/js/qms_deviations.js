@@ -112,7 +112,8 @@ async function qmsDevLoadList(filters = {}) {
       </table>
     `;
   } catch (e) {
-    container.innerHTML = `<div class="qms-empty"><p>Failed to load deviations: ${e.message}</p></div>`;
+    if (window.PharmaUI) window.PharmaUI.errorState(container, { message: `Failed to load deviations: ${e.message}`, onRetry: () => qmsDevLoadList(filters) });
+    else container.innerHTML = `<div class="qms-empty"><p>Failed to load deviations: ${e.message}</p></div>`;
   }
 }
 
@@ -179,7 +180,7 @@ function qmsDevOpenNew() {
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" onclick="document.getElementById('qms-dev-new-modal').remove()">Cancel</button>
-        <button class="btn-primary" onclick="qmsDevCreate()">Create Deviation</button>
+        <button class="btn-primary" id="qms-dev-create-btn" onclick="qmsDevCreate()">Create Deviation</button>
       </div>
     </div>
   `;
@@ -190,6 +191,9 @@ window.qmsDevOpenNew = qmsDevOpenNew;
 async function qmsDevCreate() {
   const title = document.getElementById("qms-new-dev-title").value.trim();
   if (!title) { qmsToast("Title is required"); return; }
+  const btn = document.getElementById("qms-dev-create-btn");
+  if (btn.disabled) return;
+  btn.disabled = true;
   const data = {
     title,
     deviation_type: document.getElementById("qms-new-dev-type").value,
@@ -210,6 +214,7 @@ async function qmsDevCreate() {
     qmsDevOpenDetail(dev.id);
   } catch (e) {
     qmsToast("Failed to create deviation: " + e.message);
+    btn.disabled = false;
   }
 }
 window.qmsDevCreate = qmsDevCreate;
@@ -223,6 +228,7 @@ async function qmsDevOpenDetail(id) {
   body.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading deviation…</div>`;
   try {
     const dev = await qmsFetch(`/qms/deviations/${id}`);
+    if (window.PharmaRecent) window.PharmaRecent.recordOpened("deviations", dev.id, dev.title, dev.deviation_number || "");
     body.innerHTML = `
       <div class="qms-page-header">
         <div>
@@ -248,7 +254,8 @@ async function qmsDevOpenDetail(id) {
     `;
     qmsDevRenderTab(dev);
   } catch (e) {
-    body.innerHTML = `<div class="qms-empty"><p>Failed to load deviation: ${e.message}</p></div>`;
+    if (window.PharmaUI) window.PharmaUI.errorState(body, { message: `Failed to load deviation: ${e.message}`, onRetry: () => qmsDevOpenDetail(id) });
+    else body.innerHTML = `<div class="qms-empty"><p>Failed to load deviation: ${e.message}</p></div>`;
   }
 }
 window.qmsDevOpenDetail = qmsDevOpenDetail;

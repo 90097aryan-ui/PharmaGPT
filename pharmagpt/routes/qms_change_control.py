@@ -50,6 +50,7 @@ import logging
 import re
 from flask import Blueprint, g, jsonify, request, send_file
 
+from pharmagpt import audit
 from pharmagpt import config
 from pharmagpt import database as db
 from pharmagpt import qms_change_control_database as ccdb
@@ -134,6 +135,8 @@ def _dual_write_delete(cc: dict) -> None:
 
 @bp.route("", methods=["GET"])
 def list_change_controls():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     filters = {
         "change_type": request.args.get("type"),
         "change_category": request.args.get("category"),
@@ -153,7 +156,7 @@ def create_change_control():
         return jsonify({"error": "Change control title is required"}), 400
     cc = ccdb.create_change_control(data, company_id=g.tenant.company_id)
     performed_by = tenancy.signing_identity(g.tenant)["performed_by"]
-    qmsdb.add_audit_entry("change_control", cc["id"], "Change control drafted", performed_by)
+    audit.log("change_control", cc["id"], "Change control drafted", new=cc)
     _dual_write_create(cc, "Change control drafted", performed_by)
     return jsonify(cc), 201
 
@@ -168,11 +171,20 @@ def get_change_control(cc_id):
 
 @bp.route("/<int:cc_id>", methods=["PUT"])
 def update_change_control(cc_id):
-    if not tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id):
+    existing = tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id)
+    if not existing:
         return jsonify({"error": "Not found"}), 404
+    # Phase F (WP3, workflow enforcement): Closed is this suite's terminal
+    # status (qms_database.py QMS_META.change_control_statuses) — must be
+    # immutable once reached.
+    if existing["status"] == "Closed":
+        audit.log_failure("change_control", cc_id, "Update blocked (record is Closed)",
+                           reason="Closed change controls are immutable")
+        return jsonify({"error": "This change control is Closed and cannot be edited"}), 409
     data = request.get_json() or {}
     updated = ccdb.update_change_control(cc_id, data)
     _dual_write_update(updated)
+    audit.log("change_control", cc_id, "Updated", old=existing, new=updated)
     return jsonify(updated)
 
 
@@ -184,6 +196,7 @@ def delete_change_control(cc_id):
         return jsonify({"error": "Not found"}), 404
     ccdb.delete_change_control(cc_id)
     _dual_write_delete(existing)
+    audit.log("change_control", cc_id, "Deleted", old=existing)
     return jsonify({"deleted": True})
 
 
@@ -335,6 +348,10 @@ def submit_approval(cc_id):
     action_name = data.get("action", "")
     if not action_name:
         return jsonify({"error": "Action is required"}), 400
+    if cc["status"] == "Closed":
+        audit.log_failure("change_control", cc_id, f"Approval action blocked ({action_name}) — record is Closed",
+                           reason="Closed change controls are immutable")
+        return jsonify({"error": "This change control is Closed and cannot accept further actions"}), 409
 
     sig = tenancy.signing_identity(g.tenant)
 
@@ -359,7 +376,8 @@ def submit_approval(cc_id):
         sig["performed_by"], sig["role"],
         data.get("comments", ""), sig["electronic_sig"],
     )
-    qmsdb.add_audit_entry("change_control", cc_id, action_name, sig["performed_by"])
+    audit.log("change_control", cc_id, action_name, old={"status": cc["status"]}, new=updates or None,
+              reason=data.get("comments", ""))
     return jsonify(entry), 201
 
 

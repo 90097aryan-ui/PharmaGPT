@@ -1350,6 +1350,7 @@ window.openURS = async function (id) {
     ]);
     ursState.currentURS = urs;
     ursState.requirements = reqs;
+    if (window.PharmaRecent) window.PharmaRecent.recordOpened("urs", urs.id, urs.title, urs.equipment_name || "");
     renderDetailView(urs, reqs);
   } catch (e) {
     ursToast(`Error: ${e.message}`, "error");

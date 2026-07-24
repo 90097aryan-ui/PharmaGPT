@@ -42,6 +42,7 @@ import logging
 import re
 from flask import Blueprint, g, jsonify, request, Response, stream_with_context, send_file
 
+from pharmagpt import audit
 from pharmagpt import qms_document_database as qdb
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
@@ -61,6 +62,8 @@ bp = Blueprint("qms_documents", __name__, url_prefix="/qms/documents")
 
 @bp.route("", methods=["GET"])
 def list_documents():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     filters = {
         "doc_type": request.args.get("type"),
         "status": request.args.get("status"),
@@ -79,8 +82,7 @@ def create_document():
     if not data.get("title", "").strip():
         return jsonify({"error": "Document title is required"}), 400
     document = qdb.create_document(data, company_id=g.tenant.company_id)
-    performed_by = tenancy.signing_identity(g.tenant)["performed_by"]
-    qmsdb.add_audit_entry("document", document["id"], "Document created", performed_by)
+    audit.log("document", document["id"], "Document created", new=document)
     return jsonify(document), 201
 
 
@@ -94,19 +96,30 @@ def get_document(did):
 
 @bp.route("/<int:did>", methods=["PUT"])
 def update_document(did):
-    if not tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id):
+    existing = tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
+    if not existing:
         return jsonify({"error": "Not found"}), 404
+    # Phase F (WP3, workflow enforcement): Obsolete is the terminal state in
+    # QMS_DOCUMENT's lifecycle (services/lifecycle_engine.py) — a record must
+    # be immutable once it reaches it, or Obsolete carries no real guarantee.
+    if existing["status"] == "Obsolete":
+        audit.log_failure("document", did, "Update blocked (record is Obsolete)",
+                           reason="Obsolete documents are immutable")
+        return jsonify({"error": "This document is Obsolete and cannot be edited"}), 409
     data = request.get_json() or {}
     updated = qdb.update_document(did, data)
+    audit.log("document", did, "Updated", old=existing, new=updated)
     return jsonify(updated)
 
 
 @bp.route("/<int:did>", methods=["DELETE"])
 @require_role("company_admin")
 def delete_document(did):
-    if not tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id):
+    existing = tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
+    if not existing:
         return jsonify({"error": "Not found"}), 404
     qdb.delete_document(did)
+    audit.log("document", did, "Deleted", old=existing)
     return jsonify({"deleted": True})
 
 
@@ -130,8 +143,10 @@ def generate_draft(did):
                 full += chunk
                 yield f"data: {json.dumps({'chunk': chunk})}\n\n"
             qdb.update_document(did, {"content": full})
+            audit.log("document", did, "AI draft generated", new={"content_length": len(full)})
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
+            audit.log_failure("document", did, "AI draft generation failed", reason=str(e))
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
     return Response(
@@ -170,11 +185,15 @@ def create_version(did):
     if not new_version:
         return jsonify({"error": "Version label is required"}), 400
 
+    # Phase F fix (C6): changed_by is derived from the authenticated
+    # session, never taken from the request body — see
+    # PHARMAGPT_v1.0_RELEASE_READINESS_REPORT.md C6.
+    changed_by = tenancy.signing_identity(g.tenant)["performed_by"]
     qdb.create_version(did, document.get("version", "1.0"), data.get("change_summary", ""),
-                       document.get("content", ""), data.get("changed_by", ""))
+                       document.get("content", ""), changed_by)
     qdb.update_document(did, {"version": new_version})
-    qmsdb.add_audit_entry("document", did, "New version created",
-                          data.get("changed_by", ""), f"{document.get('version')} -> {new_version}")
+    audit.log("document", did, "New version created",
+              old={"version": document.get("version")}, new={"version": new_version})
     return jsonify(qdb.get_document(did)), 201
 
 
@@ -286,7 +305,8 @@ def submit_approval(did):
         sig["performed_by"], sig["role"],
         data.get("comments", ""), sig["electronic_sig"],
     )
-    qmsdb.add_audit_entry("document", did, action_name, sig["performed_by"])
+    audit.log("document", did, action_name, new={"status": document.get("status")},
+              reason=data.get("comments", ""))
     return jsonify(entry), 201
 
 

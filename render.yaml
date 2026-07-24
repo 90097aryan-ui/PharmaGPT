@@ -37,6 +37,16 @@ services:
         sync: false
       - key: SUPABASE_ANON_KEY
         sync: false
+      # Required by pharmagpt/services/identity_admin.py::provision_user()
+      # (routes/companies.py::create_company, routes/users.py::invite_user)
+      # — the one live-request path allowed to bypass RLS to mint a new
+      # Supabase Auth identity. Without this set, company creation and user
+      # invitation fail at runtime with a clean 500 ("SUPABASE_SERVICE_ROLE_KEY
+      # not found in .env"). NOT auto-populated by sync:false — set the real
+      # value by hand in the Render dashboard (Supabase project settings ->
+      # API -> service_role key). See docs/DEPLOYMENT_RUNBOOK.md.
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
       # ── Phase 3 Postgres migration flags — DO NOT set to "dual"/"postgres"
       # in this environment yet. Cutover is gated on an extended Staging
       # soak of each flag in "dual" plus a 2-company RLS isolation

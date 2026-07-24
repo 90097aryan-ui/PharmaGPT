@@ -13,6 +13,7 @@ DELETE /documents/<id>               delete file + metadata
 GET    /projects/<id>/insights       aggregated document statistics
 """
 
+from pharmagpt import audit
 from pharmagpt import database as db
 from pharmagpt import documents as doc_utils
 from pharmagpt import tenancy
@@ -179,6 +180,8 @@ def delete_document(doc_id):
 
     doc_utils.delete_from_disk(doc["project_id"], doc["stored_filename"])
     db.delete_document(doc_id)
+    audit.log("project_document", doc_id, "Deleted",
+              old={"original_name": doc.get("original_name"), "project_id": doc.get("project_id")})
     return jsonify({"status": "deleted"})
 
 

@@ -89,7 +89,7 @@ def get_all_documents(company_id: str | None = None, filters: dict | None = None
 
     sql = "SELECT id, doc_number, doc_type, title, department, category, version, status, " \
           "effective_date, review_date, expiry_date, owner, reviewer, approver, project_id, " \
-          "created_at, updated_at FROM qms_documents"
+          "created_at, updated_at, company_id FROM qms_documents"
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
     sql += " ORDER BY created_at DESC"

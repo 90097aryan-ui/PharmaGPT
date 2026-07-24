@@ -34,6 +34,7 @@ import os
 from werkzeug.utils import secure_filename
 from flask import Blueprint, g, jsonify, request, send_file
 
+from pharmagpt import audit
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import qms_document_database as qdocdb
 from pharmagpt import qms_deviation_database as qdevdb
@@ -42,6 +43,8 @@ from pharmagpt import qms_change_control_database as qccdb
 from pharmagpt import qual_database as qualdb
 from pharmagpt import report_database as reportdb
 from pharmagpt import risk_database as riskdb
+from pharmagpt import equipment_database as equipdb
+from pharmagpt import urs_database as ursdb
 from pharmagpt import database as db
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
@@ -64,6 +67,13 @@ bp = Blueprint("qms_common", __name__, url_prefix="/qms")
 VALID_RECORD_TYPES = {
     "document", "deviation", "capa", "change_control", "project",
     "qualification", "val_report", "risk_assessment",
+    # Phase F (audit-trail completeness): widened so URS and Equipment also
+    # get a shared attachments/comments/audit-trail/approval viewer instead
+    # of URS's audit trail being unreachable through this endpoint and
+    # Equipment having none at all — see
+    # PHARMAGPT_v1.0_RELEASE_READINESS_REPORT.md C4 and
+    # docs/AUDIT_TRAIL_COVERAGE_REPORT.md.
+    "urs", "equipment", "kb_document",
 }
 
 _GETTERS = {
@@ -75,6 +85,17 @@ _GETTERS = {
     "qualification": qualdb.get_qualification,
     "val_report": reportdb.get_report,
     "risk_assessment": riskdb.get_assessment,
+    "urs": ursdb.get_urs,
+    "kb_document": db.get_kb_document,
+}
+
+# "equipment" is scoped by joining through its owning Project
+# (pharmagpt/equipment_database.py::get_equipment_scoped) rather than a
+# company_id column of its own — it needs `company_id` passed into the
+# getter itself, unlike every other record type above, so it can't go
+# through the generic getter(record_id) + scoped_or_none() path below.
+_JOIN_SCOPED_GETTERS = {
+    "equipment": equipdb.get_equipment_scoped,
 }
 
 
@@ -86,6 +107,8 @@ def _record_exists(record_type: str, record_id: int) -> bool:
     record_id) with no company_id column of their own, so this check is the
     only thing standing between a caller and another company's attachments/
     comments/audit trail/e-signatures for a guessed record_id."""
+    if record_type in _JOIN_SCOPED_GETTERS:
+        return bool(_JOIN_SCOPED_GETTERS[record_type](record_id, g.tenant.company_id))
     getter = _GETTERS.get(record_type)
     if not getter:
         return False
@@ -98,6 +121,8 @@ def _record_exists(record_type: str, record_id: int) -> bool:
 @bp.route("/dashboard")
 def dashboard():
     """Unified stats across Document Control, Deviations, CAPA, and Change Control."""
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     doc_stats = qdocdb.get_dashboard_stats(g.tenant.company_id)
     dev_stats = qdevdb.get_dashboard_stats(g.tenant.company_id)
     capa_stats = qcapadb.get_dashboard_stats(g.tenant.company_id)
@@ -181,12 +206,17 @@ def upload_attachment(record_type, record_id):
     file.save(os.path.join(upload_dir, safe_name))
     file_size = os.path.getsize(os.path.join(upload_dir, safe_name))
 
+    # Phase F fix (C6): uploaded_by is derived from the authenticated
+    # session, never taken from the request body — a client-supplied
+    # `uploaded_by` used to let any authenticated caller attribute an
+    # attachment to an arbitrary name. See
+    # PHARMAGPT_v1.0_RELEASE_READINESS_REPORT.md C6.
+    uploader = g.tenant.display_name or g.tenant.email
     attachment = qmsdb.add_attachment(
         record_type, record_id, safe_name, file.filename, extension, file_size,
-        request.form.get("description", ""), request.form.get("uploaded_by", ""),
+        request.form.get("description", ""), uploader,
     )
-    qmsdb.add_audit_entry(record_type, record_id, "Attachment uploaded",
-                          request.form.get("uploaded_by", ""), file.filename)
+    audit.log(record_type, record_id, "Attachment uploaded", new={"filename": file.filename, "description": request.form.get("description", "")})
     return jsonify(attachment), 201
 
 
@@ -216,6 +246,8 @@ def delete_attachment(attachment_id):
     if os.path.exists(path):
         os.remove(path)
     qmsdb.delete_attachment(attachment_id)
+    audit.log(attachment["record_type"], attachment["record_id"], "Attachment deleted",
+              old={"filename": attachment.get("original_name")})
     return jsonify({"deleted": True})
 
 
@@ -239,8 +271,12 @@ def add_comment(record_type, record_id):
     data = request.get_json() or {}
     if not data.get("comment", "").strip():
         return jsonify({"error": "Comment text is required"}), 400
-    comment = qmsdb.add_comment(record_type, record_id, data.get("author", ""),
-                                data["comment"], data.get("role", ""))
+    # Phase F fix (C6): author/role are derived from the authenticated
+    # session, never taken from the request body — see
+    # PHARMAGPT_v1.0_RELEASE_READINESS_REPORT.md C6.
+    author = g.tenant.display_name or g.tenant.email
+    comment = qmsdb.add_comment(record_type, record_id, author, data["comment"], g.tenant.role)
+    audit.log(record_type, record_id, "Comment added", new={"comment": data["comment"]})
     return jsonify(comment), 201
 
 

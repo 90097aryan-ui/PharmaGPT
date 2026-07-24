@@ -22,7 +22,7 @@
 
 -- ── Projects & Work Product (§4.2) ─────────────────────────────────────────
 
-create table projects (
+create table if not exists projects (
     id               uuid primary key default gen_random_uuid(),
     company_id       uuid not null references companies(id),
     name             text not null,
@@ -37,10 +37,10 @@ create table projects (
     updated_at       timestamptz not null default now()
 );
 
-create index idx_projects_company_id on projects (company_id);
-create index idx_projects_company_id_status on projects (company_id, status);
+create index if not exists idx_projects_company_id on projects (company_id);
+create index if not exists idx_projects_company_id_status on projects (company_id, status);
 
-create table project_members (
+create table if not exists project_members (
     id          uuid primary key default gen_random_uuid(),
     company_id  uuid not null references companies(id),
     project_id  uuid not null references projects(id) on delete cascade,
@@ -50,13 +50,13 @@ create table project_members (
     constraint uq_project_members_project_user unique (project_id, user_id)
 );
 
-create index idx_project_members_company_id on project_members (company_id);
-create index idx_project_members_project_id on project_members (project_id);
-create index idx_project_members_user_id on project_members (user_id);
+create index if not exists idx_project_members_company_id on project_members (company_id);
+create index if not exists idx_project_members_project_id on project_members (project_id);
+create index if not exists idx_project_members_user_id on project_members (user_id);
 
 -- ── Equipment Library (§4.3) ────────────────────────────────────────────────
 
-create table equipment (
+create table if not exists equipment (
     id                    uuid primary key default gen_random_uuid(),
     company_id            uuid not null references companies(id),
     equipment_code        text null,
@@ -86,11 +86,11 @@ create table equipment (
     updated_at            timestamptz not null default now()
 );
 
-create index idx_equipment_company_id on equipment (company_id);
+create index if not exists idx_equipment_company_id on equipment (company_id);
 
 -- ── Document Engine (§4.4) ──────────────────────────────────────────────────
 
-create table document_categories (
+create table if not exists document_categories (
     id          uuid primary key default gen_random_uuid(),
     company_id  uuid not null references companies(id),
     name        text not null,
@@ -98,9 +98,9 @@ create table document_categories (
     constraint uq_document_categories_company_name unique (company_id, name)
 );
 
-create index idx_document_categories_company_id on document_categories (company_id);
+create index if not exists idx_document_categories_company_id on document_categories (company_id);
 
-create table tags (
+create table if not exists tags (
     id          uuid primary key default gen_random_uuid(),
     company_id  uuid not null references companies(id),
     name        text not null,
@@ -108,9 +108,9 @@ create table tags (
     constraint uq_tags_company_name unique (company_id, name)
 );
 
-create index idx_tags_company_id on tags (company_id);
+create index if not exists idx_tags_company_id on tags (company_id);
 
-create table documents (
+create table if not exists documents (
     id                 uuid primary key default gen_random_uuid(),
     company_id         uuid not null references companies(id),
     project_id         uuid null references projects(id) on delete set null,
@@ -126,13 +126,13 @@ create table documents (
     updated_at         timestamptz not null default now()
 );
 
-create index idx_documents_company_id on documents (company_id);
-create index idx_documents_company_id_status on documents (company_id, status);
-create index idx_documents_company_id_project_id on documents (company_id, project_id);
-create index idx_documents_company_id_type_status on documents (company_id, document_type, status);
-create index idx_documents_active on documents (company_id, status) where status <> 'archived';
+create index if not exists idx_documents_company_id on documents (company_id);
+create index if not exists idx_documents_company_id_status on documents (company_id, status);
+create index if not exists idx_documents_company_id_project_id on documents (company_id, project_id);
+create index if not exists idx_documents_company_id_type_status on documents (company_id, document_type, status);
+create index if not exists idx_documents_active on documents (company_id, status) where status <> 'archived';
 
-create table document_versions (
+create table if not exists document_versions (
     id             uuid primary key default gen_random_uuid(),
     company_id     uuid not null references companies(id),
     document_id    uuid not null references documents(id),
@@ -148,14 +148,23 @@ create table document_versions (
     created_at     timestamptz not null default now()
 );
 
-create index idx_document_versions_company_id on document_versions (company_id);
-create index idx_document_versions_document_id on document_versions (document_id);
+create index if not exists idx_document_versions_company_id on document_versions (company_id);
+create index if not exists idx_document_versions_document_id on document_versions (document_id);
 
-alter table documents
-    add constraint fk_documents_current_version
-    foreign key (current_version_id) references document_versions(id);
+-- ALTER TABLE ADD CONSTRAINT has no IF NOT EXISTS in Postgres — guard via
+-- pg_constraint so re-running this file doesn't error on a prior run.
+do $$
+begin
+    if not exists (
+        select 1 from pg_constraint where conname = 'fk_documents_current_version'
+    ) then
+        alter table documents
+            add constraint fk_documents_current_version
+            foreign key (current_version_id) references document_versions(id);
+    end if;
+end $$;
 
-create table document_tags (
+create table if not exists document_tags (
     id          uuid primary key default gen_random_uuid(),
     company_id  uuid not null references companies(id),
     document_id uuid not null references documents(id) on delete cascade,
@@ -163,9 +172,9 @@ create table document_tags (
     constraint uq_document_tags_document_tag unique (document_id, tag_id)
 );
 
-create index idx_document_tags_company_id on document_tags (company_id);
+create index if not exists idx_document_tags_company_id on document_tags (company_id);
 
-create table document_references (
+create table if not exists document_references (
     id                     uuid primary key default gen_random_uuid(),
     company_id             uuid not null references companies(id),
     referencing_document_id uuid not null references documents(id),
@@ -174,15 +183,15 @@ create table document_references (
     created_at             timestamptz not null default now()
 );
 
-create index idx_document_references_company_id on document_references (company_id);
-create index idx_document_references_referencing on document_references (referencing_document_id);
-create index idx_document_references_referenced on document_references (referenced_document_id);
+create index if not exists idx_document_references_company_id on document_references (company_id);
+create index if not exists idx_document_references_referencing on document_references (referencing_document_id);
+create index if not exists idx_document_references_referenced on document_references (referenced_document_id);
 
 -- ── Equipment <-> everything else (§6) ──────────────────────────────────────
 -- Polymorphic: no FK on (record_type, record_id) by design (§22 risk,
 -- accepted — application-layer validation + fixed enum for record_type).
 
-create table equipment_links (
+create table if not exists equipment_links (
     id           uuid primary key default gen_random_uuid(),
     company_id   uuid not null references companies(id),
     equipment_id uuid not null references equipment(id),
@@ -191,13 +200,13 @@ create table equipment_links (
     created_at   timestamptz not null default now()
 );
 
-create index idx_equipment_links_company_id on equipment_links (company_id);
-create index idx_equipment_links_equipment_id on equipment_links (equipment_id);
-create index idx_equipment_links_record on equipment_links (record_type, record_id);
+create index if not exists idx_equipment_links_company_id on equipment_links (company_id);
+create index if not exists idx_equipment_links_equipment_id on equipment_links (equipment_id);
+create index if not exists idx_equipment_links_record on equipment_links (record_type, record_id);
 
 -- ── Quality Records / QMS (§4.7) ────────────────────────────────────────────
 
-create table deviations (
+create table if not exists deviations (
     id          uuid primary key default gen_random_uuid(),
     company_id  uuid not null references companies(id),
     project_id  uuid null references projects(id) on delete set null,
@@ -207,10 +216,10 @@ create table deviations (
     updated_at  timestamptz not null default now()
 );
 
-create index idx_deviations_company_id on deviations (company_id);
-create index idx_deviations_company_id_status on deviations (company_id, status);
+create index if not exists idx_deviations_company_id on deviations (company_id);
+create index if not exists idx_deviations_company_id_status on deviations (company_id, status);
 
-create table capas (
+create table if not exists capas (
     id          uuid primary key default gen_random_uuid(),
     company_id  uuid not null references companies(id),
     project_id  uuid null references projects(id) on delete set null,
@@ -220,10 +229,10 @@ create table capas (
     updated_at  timestamptz not null default now()
 );
 
-create index idx_capas_company_id on capas (company_id);
-create index idx_capas_company_id_status on capas (company_id, status);
+create index if not exists idx_capas_company_id on capas (company_id);
+create index if not exists idx_capas_company_id_status on capas (company_id, status);
 
-create table change_controls (
+create table if not exists change_controls (
     id          uuid primary key default gen_random_uuid(),
     company_id  uuid not null references companies(id),
     project_id  uuid null references projects(id) on delete set null,
@@ -233,10 +242,10 @@ create table change_controls (
     updated_at  timestamptz not null default now()
 );
 
-create index idx_change_controls_company_id on change_controls (company_id);
-create index idx_change_controls_company_id_status on change_controls (company_id, status);
+create index if not exists idx_change_controls_company_id on change_controls (company_id);
+create index if not exists idx_change_controls_company_id_status on change_controls (company_id, status);
 
-create table risk_assessments (
+create table if not exists risk_assessments (
     id          uuid primary key default gen_random_uuid(),
     company_id  uuid not null references companies(id),
     project_id  uuid null references projects(id) on delete set null,
@@ -246,13 +255,13 @@ create table risk_assessments (
     updated_at  timestamptz not null default now()
 );
 
-create index idx_risk_assessments_company_id on risk_assessments (company_id);
-create index idx_risk_assessments_company_id_status on risk_assessments (company_id, status);
+create index if not exists idx_risk_assessments_company_id on risk_assessments (company_id);
+create index if not exists idx_risk_assessments_company_id_status on risk_assessments (company_id, status);
 
 -- ── Shared / Polymorphic Infrastructure (§4.6, §9) ──────────────────────────
 -- No FK on (record_type, record_id) — same accepted trade-off as equipment_links.
 
-create table audit_trail (
+create table if not exists audit_trail (
     id                    uuid primary key default gen_random_uuid(),
     company_id            uuid not null references companies(id),
     actor_user_id         uuid null references users(id),
@@ -264,10 +273,10 @@ create table audit_trail (
     occurred_at           timestamptz not null default now()
 );
 
-create index idx_audit_trail_company_id on audit_trail (company_id);
-create index idx_audit_trail_record on audit_trail (record_type, record_id);
+create index if not exists idx_audit_trail_company_id on audit_trail (company_id);
+create index if not exists idx_audit_trail_record on audit_trail (record_type, record_id);
 
-create table attachments (
+create table if not exists attachments (
     id           uuid primary key default gen_random_uuid(),
     company_id   uuid not null references companies(id),
     record_type  text not null,
@@ -280,10 +289,10 @@ create table attachments (
     created_at   timestamptz not null default now()
 );
 
-create index idx_attachments_company_id on attachments (company_id);
-create index idx_attachments_record on attachments (record_type, record_id);
+create index if not exists idx_attachments_company_id on attachments (company_id);
+create index if not exists idx_attachments_record on attachments (record_type, record_id);
 
-create table comments (
+create table if not exists comments (
     id           uuid primary key default gen_random_uuid(),
     company_id   uuid not null references companies(id),
     record_type  text not null,
@@ -293,10 +302,10 @@ create table comments (
     created_at   timestamptz not null default now()
 );
 
-create index idx_comments_company_id on comments (company_id);
-create index idx_comments_record on comments (record_type, record_id);
+create index if not exists idx_comments_company_id on comments (company_id);
+create index if not exists idx_comments_record on comments (record_type, record_id);
 
-create table approvals (
+create table if not exists approvals (
     id           uuid primary key default gen_random_uuid(),
     company_id   uuid not null references companies(id),
     record_type  text not null,
@@ -307,12 +316,12 @@ create table approvals (
     decided_at   timestamptz not null default now()
 );
 
-create index idx_approvals_company_id on approvals (company_id);
-create index idx_approvals_record on approvals (record_type, record_id);
+create index if not exists idx_approvals_company_id on approvals (company_id);
+create index if not exists idx_approvals_record on approvals (record_type, record_id);
 
 -- ── AI Workspace (§4.5) ──────────────────────────────────────────────────────
 
-create table ai_conversations (
+create table if not exists ai_conversations (
     id          uuid primary key default gen_random_uuid(),
     company_id  uuid not null references companies(id),
     project_id  uuid null references projects(id) on delete set null,
@@ -320,9 +329,9 @@ create table ai_conversations (
     created_at  timestamptz not null default now()
 );
 
-create index idx_ai_conversations_company_id on ai_conversations (company_id);
+create index if not exists idx_ai_conversations_company_id on ai_conversations (company_id);
 
-create table ai_messages (
+create table if not exists ai_messages (
     id               uuid primary key default gen_random_uuid(),
     company_id       uuid not null references companies(id),
     conversation_id  uuid not null references ai_conversations(id),
@@ -332,10 +341,10 @@ create table ai_messages (
     created_at       timestamptz not null default now()
 );
 
-create index idx_ai_messages_company_id on ai_messages (company_id);
-create index idx_ai_messages_conversation_id on ai_messages (conversation_id);
+create index if not exists idx_ai_messages_company_id on ai_messages (company_id);
+create index if not exists idx_ai_messages_conversation_id on ai_messages (conversation_id);
 
-create table ai_jobs (
+create table if not exists ai_jobs (
     id            uuid primary key default gen_random_uuid(),
     company_id    uuid not null references companies(id),
     job_type      text not null,
@@ -347,10 +356,10 @@ create table ai_jobs (
     updated_at    timestamptz not null default now()
 );
 
-create index idx_ai_jobs_company_id on ai_jobs (company_id);
-create index idx_ai_jobs_company_id_status on ai_jobs (company_id, status);
+create index if not exists idx_ai_jobs_company_id on ai_jobs (company_id);
+create index if not exists idx_ai_jobs_company_id_status on ai_jobs (company_id, status);
 
-create table ai_usage_ledger (
+create table if not exists ai_usage_ledger (
     id          uuid primary key default gen_random_uuid(),
     company_id  uuid not null references companies(id),
     user_id     uuid null references users(id),
@@ -361,11 +370,11 @@ create table ai_usage_ledger (
     created_at  timestamptz not null default now()
 );
 
-create index idx_ai_usage_ledger_company_id on ai_usage_ledger (company_id);
+create index if not exists idx_ai_usage_ledger_company_id on ai_usage_ledger (company_id);
 
 -- ── Operational / Platform (§4.8) ───────────────────────────────────────────
 
-create table notifications (
+create table if not exists notifications (
     id          uuid primary key default gen_random_uuid(),
     company_id  uuid not null references companies(id),
     user_id     uuid not null references users(id),
@@ -375,10 +384,10 @@ create table notifications (
     created_at  timestamptz not null default now()
 );
 
-create index idx_notifications_company_id on notifications (company_id);
-create index idx_notifications_user_id on notifications (user_id);
+create index if not exists idx_notifications_company_id on notifications (company_id);
+create index if not exists idx_notifications_user_id on notifications (user_id);
 
-create table search_index (
+create table if not exists search_index (
     id          uuid primary key default gen_random_uuid(),
     company_id  uuid not null references companies(id),
     record_type text not null,
@@ -391,23 +400,23 @@ create table search_index (
     updated_at  timestamptz not null default now()
 );
 
-create index idx_search_index_company_id on search_index (company_id);
-create index idx_search_index_gin on search_index using gin (search_vector);
+create index if not exists idx_search_index_company_id on search_index (company_id);
+create index if not exists idx_search_index_gin on search_index using gin (search_vector);
 
 -- ── Reserved tables (§21) — schema only, empty, no code path touches them ──
 
-create table permissions (
+create table if not exists permissions (
     id   uuid primary key default gen_random_uuid(),
     name text not null unique
 );
 
-create table role_permissions (
+create table if not exists role_permissions (
     id            uuid primary key default gen_random_uuid(),
     role_id       smallint not null references roles(id),
     permission_id uuid not null references permissions(id)
 );
 
-create table calibration_records (
+create table if not exists calibration_records (
     id           uuid primary key default gen_random_uuid(),
     company_id   uuid not null references companies(id),
     equipment_id uuid not null references equipment(id) on delete cascade,
@@ -415,9 +424,9 @@ create table calibration_records (
     created_at   timestamptz not null default now()
 );
 
-create index idx_calibration_records_company_id on calibration_records (company_id);
+create index if not exists idx_calibration_records_company_id on calibration_records (company_id);
 
-create table preventive_maintenance_records (
+create table if not exists preventive_maintenance_records (
     id           uuid primary key default gen_random_uuid(),
     company_id   uuid not null references companies(id),
     equipment_id uuid not null references equipment(id) on delete cascade,
@@ -425,9 +434,9 @@ create table preventive_maintenance_records (
     created_at   timestamptz not null default now()
 );
 
-create index idx_pm_records_company_id on preventive_maintenance_records (company_id);
+create index if not exists idx_pm_records_company_id on preventive_maintenance_records (company_id);
 
-create table spare_parts (
+create table if not exists spare_parts (
     id           uuid primary key default gen_random_uuid(),
     company_id   uuid not null references companies(id),
     equipment_id uuid not null references equipment(id) on delete cascade,
@@ -435,64 +444,64 @@ create table spare_parts (
     created_at   timestamptz not null default now()
 );
 
-create index idx_spare_parts_company_id on spare_parts (company_id);
+create index if not exists idx_spare_parts_company_id on spare_parts (company_id);
 
-create table signature_events (
+create table if not exists signature_events (
     id           uuid primary key default gen_random_uuid(),
     company_id   uuid not null references companies(id),
     approval_id  uuid not null references approvals(id),
     signed_at    timestamptz not null default now()
 );
 
-create index idx_signature_events_company_id on signature_events (company_id);
+create index if not exists idx_signature_events_company_id on signature_events (company_id);
 
-create table data_retention_policies (
+create table if not exists data_retention_policies (
     id          uuid primary key default gen_random_uuid(),
     company_id  uuid not null references companies(id),
     policy      jsonb not null default '{}'::jsonb,
     created_at  timestamptz not null default now()
 );
 
-create index idx_data_retention_policies_company_id on data_retention_policies (company_id);
+create index if not exists idx_data_retention_policies_company_id on data_retention_policies (company_id);
 
-create table integration_configs (
+create table if not exists integration_configs (
     id          uuid primary key default gen_random_uuid(),
     company_id  uuid not null references companies(id),
     config      jsonb not null default '{}'::jsonb,
     created_at  timestamptz not null default now()
 );
 
-create index idx_integration_configs_company_id on integration_configs (company_id);
+create index if not exists idx_integration_configs_company_id on integration_configs (company_id);
 
-create table api_keys (
+create table if not exists api_keys (
     id          uuid primary key default gen_random_uuid(),
     company_id  uuid not null references companies(id),
     key_hash    text not null,
     created_at  timestamptz not null default now()
 );
 
-create index idx_api_keys_company_id on api_keys (company_id);
+create index if not exists idx_api_keys_company_id on api_keys (company_id);
 
-create table subscriptions (
+create table if not exists subscriptions (
     id          uuid primary key default gen_random_uuid(),
     company_id  uuid not null references companies(id),
     plan        text null,
     created_at  timestamptz not null default now()
 );
 
-create table plans (
+create table if not exists plans (
     id   uuid primary key default gen_random_uuid(),
     name text not null unique
 );
 
-create table invoices (
+create table if not exists invoices (
     id          uuid primary key default gen_random_uuid(),
     company_id  uuid not null references companies(id),
     amount_cents integer null,
     created_at  timestamptz not null default now()
 );
 
-create index idx_invoices_company_id on invoices (company_id);
+create index if not exists idx_invoices_company_id on invoices (company_id);
 
 -- ── RLS: default-deny on every table above ──────────────────────────────────
 -- Same posture as 0001_identity_tenancy_up.sql: RLS enabled, zero policies,

@@ -51,6 +51,7 @@ import io
 import logging
 from flask import Blueprint, g, jsonify, request, Response, stream_with_context, send_file
 
+from pharmagpt import audit
 from pharmagpt import qual_database as qdb
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
@@ -67,6 +68,33 @@ logger = logging.getLogger(__name__)
 from google.genai import types
 
 bp = Blueprint("qual", __name__, url_prefix="/qual")
+
+
+# Phase F (WP3, workflow enforcement): GAMP5/FDA/EU GMP Annex 15 require IQ
+# to be complete before OQ begins, and OQ complete before PQ begins — see
+# PHARMAGPT_v1.0_RELEASE_READINESS_REPORT.md C2. Protocols don't carry their
+# own "Approved" status (only the parent Qualification does); "complete"
+# here means the prior-stage protocol reached a terminal execution status
+# (qual.py::complete_protocol below), which is the closest existing
+# equivalent and the same status this suite already uses everywhere else to
+# mean "this stage is done."
+_PROTOCOL_PREREQUISITE = {"OQ": "IQ", "PQ": "OQ"}
+_PROTOCOL_COMPLETED_STATUSES = {"completed", "completed_with_deviations"}
+
+
+def _missing_prerequisite_protocol(qid: int, protocol_type: str) -> str | None:
+    """Return a human-readable error if `protocol_type` requires a prior
+    stage that doesn't exist yet or isn't complete for this qualification;
+    None if the prerequisite is satisfied (or there isn't one, e.g. IQ)."""
+    required_type = _PROTOCOL_PREREQUISITE.get(protocol_type)
+    if not required_type:
+        return None
+    siblings = [p for p in qdb.get_protocols_for_qual(qid) if p.get("protocol_type") == required_type]
+    if not siblings:
+        return f"No {required_type} protocol exists for this qualification yet — {required_type} must be completed before {protocol_type} can begin."
+    if not any(p.get("status") in _PROTOCOL_COMPLETED_STATUSES for p in siblings):
+        return f"{required_type} protocol exists but is not yet completed — {required_type} must be completed before {protocol_type} can begin."
+    return None
 
 
 def _scoped_protocol(qid, pid):
@@ -89,6 +117,8 @@ def _scoped_protocol(qid, pid):
 
 @bp.route("/dashboard")
 def dashboard():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     return jsonify(qdb.get_dashboard_stats(g.tenant.company_id))
 
 
@@ -96,6 +126,8 @@ def dashboard():
 
 @bp.route("/", methods=["GET"])
 def list_qualifications():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     filters = {
         "status":         request.args.get("status"),
         "category":       request.args.get("category"),
@@ -119,6 +151,7 @@ def create_qualification():
     if not data.get("title", "").strip():
         data["title"] = f"Qualification — {data.get('equipment_name', 'New Equipment')}"
     qual = qdb.create_qualification(data, company_id=g.tenant.company_id)
+    audit.log("qualification", qual["id"], "Created", new=qual)
     return jsonify(qual), 201
 
 
@@ -132,19 +165,30 @@ def get_qualification(qid):
 
 @bp.route("/<int:qid>", methods=["PUT"])
 def update_qualification(qid):
-    if not tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id):
+    existing = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
+    if not existing:
         return jsonify({"error": "Qualification not found"}), 404
+    # Phase F (WP3, workflow enforcement): obsolete is the terminal state in
+    # QUALIFICATION's lifecycle (services/lifecycle_engine.py) — immutable
+    # once reached.
+    if existing["status"] == "obsolete":
+        audit.log_failure("qualification", qid, "Update blocked (record is obsolete)",
+                           reason="Obsolete qualifications are immutable")
+        return jsonify({"error": "This qualification is obsolete and cannot be edited"}), 409
     data = request.get_json() or {}
     updated = qdb.update_qualification(qid, data)
+    audit.log("qualification", qid, "Updated", old=existing, new=updated)
     return jsonify(updated)
 
 
 @bp.route("/<int:qid>", methods=["DELETE"])
 @require_role("company_admin")
 def delete_qualification(qid):
-    if not tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id):
+    existing = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
+    if not existing:
         return jsonify({"error": "Qualification not found"}), 404
     qdb.delete_qualification(qid)
+    audit.log("qualification", qid, "Deleted", old=existing)
     return jsonify({"deleted": True})
 
 
@@ -166,10 +210,17 @@ def create_protocol(qid):
     protocol_type = data.get("protocol_type", "IQ").upper()
     if protocol_type not in ("IQ", "OQ", "PQ"):
         return jsonify({"error": "protocol_type must be IQ, OQ, or PQ"}), 400
+    # Phase F (WP3): the sequencing gate is enforced at *execution* time
+    # (execute_test_case below), not at creation time — drafting/preparing
+    # an OQ or PQ protocol document while IQ is still in progress is
+    # legitimate GxP practice (and already relied on by this suite's own
+    # regression tests); what must not happen is *running* OQ/PQ tests
+    # before the prior stage is complete.
     # Auto-fill from qualification
     if not data.get("title"):
         data["title"] = f"{protocol_type} Protocol — {qual.get('equipment_name', '')}"
     protocol = qdb.create_protocol(qid, protocol_type, data)
+    audit.log("qualification", qid, f"{protocol_type} Protocol created", new=protocol)
     return jsonify(protocol), 201
 
 
@@ -183,19 +234,24 @@ def get_protocol(qid, pid):
 
 @bp.route("/<int:qid>/protocols/<int:pid>", methods=["PUT"])
 def update_protocol(qid, pid):
-    if not _scoped_protocol(qid, pid):
+    existing = _scoped_protocol(qid, pid)
+    if not existing:
         return jsonify({"error": "Protocol not found"}), 404
     data = request.get_json() or {}
     updated = qdb.update_protocol(pid, data)
+    audit.log("qualification", qid, f"{existing.get('protocol_type','')} Protocol updated",
+              old=existing, new=updated)
     return jsonify(updated)
 
 
 @bp.route("/<int:qid>/protocols/<int:pid>", methods=["DELETE"])
 @require_role("company_admin")
 def delete_protocol(qid, pid):
-    if not _scoped_protocol(qid, pid):
+    existing = _scoped_protocol(qid, pid)
+    if not existing:
         return jsonify({"error": "Protocol not found"}), 404
     qdb.delete_protocol(pid)
+    audit.log("qualification", qid, f"{existing.get('protocol_type','')} Protocol deleted", old=existing)
     return jsonify({"deleted": True})
 
 
@@ -335,10 +391,15 @@ def generate_test_cases(qid, pid):
                 merged = existing + ai_tcs
                 qdb.save_test_cases(pid, qid, merged)
                 qdb.update_protocol(pid, {"ai_generated": 1})
+                audit.log("qualification", qid, f"{protocol_type} AI test cases generated",
+                          new={"protocol_id": pid, "count": len(ai_tcs)})
                 yield f"data: {json.dumps({'done': True, 'count': len(ai_tcs)})}\n\n"
             except Exception as parse_err:
+                audit.log_failure("qualification", qid, f"{protocol_type} AI test case generation parse failed",
+                                   reason=str(parse_err))
                 yield f"data: {json.dumps({'done': True, 'parse_error': str(parse_err)})}\n\n"
         except Exception as e:
+            audit.log_failure("qualification", qid, f"{protocol_type} AI test case generation failed", reason=str(e))
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
     return Response(
@@ -410,8 +471,27 @@ def execute_test_case(qid, pid, tcid):
     protocol = _scoped_protocol(qid, pid)
     if not protocol:
         return jsonify({"error": "Protocol not found"}), 404
+
+    # Phase F (WP3, workflow enforcement): re-check the sequencing gate at
+    # execution time too, not just at protocol-creation time — a protocol
+    # created before this fix, or whose prerequisite was later deleted/
+    # regressed, must not be executable out of sequence either. See C2.
+    protocol_type = protocol.get("protocol_type", "IQ").upper()
+    blocker = _missing_prerequisite_protocol(qid, protocol_type)
+    if blocker:
+        audit.log_failure("qualification", qid, f"{protocol_type} test execution blocked", reason=blocker)
+        return jsonify({"error": blocker}), 409
+
     data = request.get_json() or {}
+    # Phase F fix (C6): who actually ran the test is the authenticated
+    # caller, not a free-text field from the request body — see
+    # PHARMAGPT_v1.0_RELEASE_READINESS_REPORT.md C6. `executed_by` is still
+    # accepted for the frontend's own display purposes but no longer used
+    # for the auto-opened deviation's attribution below.
+    executed_by = tenancy.signing_identity(g.tenant)["performed_by"]
     result = qdb.save_execution(tcid, pid, qid, data)
+    audit.log("qualification", qid, f"{protocol_type} test case executed",
+              new={"test_case_id": tcid, "result": data.get("result")})
 
     # Auto-update protocol status to in_progress
     qual = qdb.get_qualification(qid)   # already tenant-verified by _scoped_protocol() above
@@ -429,7 +509,7 @@ def execute_test_case(qid, pid, tcid):
             "title": f"Test Failed: {data.get('test_name', f'TC-{tcid}')}",
             "description": f"Test case failed. Actual result: {data.get('actual_result', '')}",
             "impact": "Major" if protocol.get("protocol_type") == "IQ" else "Minor",
-            "raised_by": data.get("executed_by", ""),
+            "raised_by": executed_by,
             "raised_date": data.get("executed_date", ""),
         })
 
@@ -437,8 +517,15 @@ def execute_test_case(qid, pid, tcid):
 
 
 @bp.route("/<int:qid>/protocols/<int:pid>/complete", methods=["POST"])
+@require_role("company_admin", "reviewer_qa")
 def complete_protocol(qid, pid):
-    """Mark protocol as completed and update qualification status."""
+    """Mark protocol as completed and update qualification status.
+
+    Phase F fix (C7): this route previously had no role guard despite being
+    a QA-significant status transition — any authenticated `user` could
+    close out a protocol. See
+    PHARMAGPT_v1.0_RELEASE_READINESS_REPORT.md C7.
+    """
     protocol = _scoped_protocol(qid, pid)
     if not protocol:
         return jsonify({"error": "Protocol not found"}), 404
@@ -467,13 +554,21 @@ def complete_protocol(qid, pid):
             updates["overall_status"] = "completed"
         qdb.update_qualification(qid, updates)
 
+    # Phase F fix (C6): performed_by is derived from the authenticated
+    # session, never taken from the request body — the previous
+    # data.get("performed_by", "System") accepted any client-supplied name
+    # for what is effectively an execution sign-off. See
+    # PHARMAGPT_v1.0_RELEASE_READINESS_REPORT.md C6.
+    sig = tenancy.signing_identity(g.tenant)
     qdb.add_approval_entry(
         qid, pid,
         f"{protocol.get('protocol_type','')} Protocol Execution Complete",
-        data.get("performed_by", "System"), "Executor",
+        sig["performed_by"], sig["role"],
         data.get("comments", ""),
         protocol.get("revision", "A"),
     )
+    audit.log("qualification", qid, f"{protocol.get('protocol_type','')} Protocol completed",
+              new={"protocol_id": pid, "status": overall_status, "fail_count": fail_count})
 
     return jsonify({"status": overall_status, "fail_count": fail_count})
 
@@ -493,6 +588,7 @@ def create_deviation(qid):
         return jsonify({"error": "Qualification not found"}), 404
     data = request.get_json() or {}
     dev = qdb.create_deviation(qid, data)
+    audit.log("qualification", qid, "Deviation raised", new=dev)
     return jsonify(dev), 201
 
 
@@ -507,6 +603,7 @@ def update_deviation(qid, did):
     updated = qdb.update_deviation(did, data)
     if not updated:
         return jsonify({"error": "Deviation not found"}), 404
+    audit.log("qualification", qid, "Deviation updated", old=existing_dev, new=updated)
     return jsonify(updated)
 
 
@@ -560,7 +657,7 @@ def add_approval(qid):
         qual.get("revision", "A"),
         sig["electronic_sig"],
     )
-    qmsdb.add_audit_entry("qualification", qid, action, sig["performed_by"])
+    audit.log("qualification", qid, action, old={"status": qual["status"]}, reason=data.get("comments", ""))
     return jsonify(entry), 201
 
 
@@ -613,7 +710,14 @@ def create_version(qid, pid):
     if not _scoped_protocol(qid, pid):
         return jsonify({"error": "Protocol not found"}), 404
     data = request.get_json() or {}
-    snapshot = qdb.create_version_snapshot(qid, pid, data.get("change_summary", "Version snapshot"), data.get("created_by", "System"))
+    # Phase F fix (C6): created_by is derived from the authenticated
+    # session, never taken from the request body. See
+    # PHARMAGPT_v1.0_RELEASE_READINESS_REPORT.md C6.
+    created_by = tenancy.signing_identity(g.tenant)["performed_by"]
+    change_summary = data.get("change_summary", "Version snapshot")
+    snapshot = qdb.create_version_snapshot(qid, pid, change_summary, created_by)
+    audit.log("qualification", qid, "Protocol version snapshot created",
+              new={"protocol_id": pid, "change_summary": change_summary})
     return jsonify(snapshot), 201
 
 

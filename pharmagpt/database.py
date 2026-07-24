@@ -448,6 +448,23 @@ def init_db() -> None:
     conn.execute("UPDATE kb_documents SET company_id = ? WHERE company_id IS NULL", (BOOTSTRAP_COMPANY_ID,))
     conn.commit()
 
+    # ── Phase F: audit-trail completeness (PHARMAGPT_v1.0_PHASE_F...) ─────────
+    # qms_audit_trail originally captured only action/detail/performed_by —
+    # insufficient for a 21 CFR Part 11 audit trail (Timestamp/User/Company/
+    # Object Type/Object ID/Action/Old Value/New Value/Reason/Session-IP/
+    # Result). Purely additive; see pharmagpt/audit.py for the writer.
+    for _col, _ddl in (
+        ("company_id",  "TEXT DEFAULT NULL"),
+        ("old_values",  "TEXT DEFAULT ''"),
+        ("new_values",  "TEXT DEFAULT ''"),
+        ("reason",      "TEXT DEFAULT ''"),
+        ("ip_address",  "TEXT DEFAULT ''"),
+        ("session_id",  "TEXT DEFAULT ''"),
+        ("result",      "TEXT DEFAULT 'success'"),
+    ):
+        _add_column_if_missing(conn, "qms_audit_trail", _col, _ddl)
+    conn.commit()
+
     _migrate_val_projects(conn)
 
     conn.close()
@@ -1104,7 +1121,7 @@ def get_kb_documents(company_id: str | None = None, folder: str | None = None, t
                    original_name, file_type, file_size, word_count, page_count,
                    extraction_status, upload_date, extraction_progress_current,
                    extraction_progress_total, extraction_engine, quality_score,
-                   pages_failed, error_message, postgres_id
+                   pages_failed, error_message, postgres_id, company_id
             FROM kb_documents {where} ORDER BY upload_date DESC""",
         params,
     ).fetchall()

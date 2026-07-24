@@ -39,6 +39,7 @@ import logging
 import re
 from flask import Blueprint, g, jsonify, request, send_file
 
+from pharmagpt import audit
 from pharmagpt import config
 from pharmagpt import database as db
 from pharmagpt import qms_capa_database as cdb
@@ -122,6 +123,8 @@ def _dual_write_delete(capa: dict) -> None:
 
 @bp.route("", methods=["GET"])
 def list_capas():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     filters = {
         "capa_source": request.args.get("source"),
         "status": request.args.get("status"),
@@ -140,13 +143,15 @@ def create_capa():
         return jsonify({"error": "CAPA title is required"}), 400
     capa = cdb.create_capa(data, company_id=g.tenant.company_id)
     performed_by = tenancy.signing_identity(g.tenant)["performed_by"]
-    qmsdb.add_audit_entry("capa", capa["id"], "CAPA created", performed_by)
+    audit.log("capa", capa["id"], "CAPA created", new=capa)
     _dual_write_create(capa, "CAPA created", performed_by)
     return jsonify(capa), 201
 
 
 @bp.route("/trend-summary", methods=["GET"])
 def trend_summary():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     return jsonify({"summary": svc.ai_trend_summary(g.tenant.company_id)})
 
 
@@ -160,11 +165,20 @@ def get_capa(cid):
 
 @bp.route("/<int:cid>", methods=["PUT"])
 def update_capa(cid):
-    if not tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id):
+    existing = tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id)
+    if not existing:
         return jsonify({"error": "Not found"}), 404
+    # Phase F (WP3, workflow enforcement): Closed is this suite's terminal
+    # status (qms_database.py QMS_META.capa_statuses) — must be immutable
+    # once reached.
+    if existing["status"] == "Closed":
+        audit.log_failure("capa", cid, "Update blocked (record is Closed)",
+                           reason="Closed CAPAs are immutable")
+        return jsonify({"error": "This CAPA is Closed and cannot be edited"}), 409
     data = request.get_json() or {}
     updated = cdb.update_capa(cid, data)
     _dual_write_update(updated)
+    audit.log("capa", cid, "Updated", old=existing, new=updated)
     return jsonify(updated)
 
 
@@ -176,6 +190,7 @@ def delete_capa(cid):
         return jsonify({"error": "Not found"}), 404
     cdb.delete_capa(cid)
     _dual_write_delete(existing)
+    audit.log("capa", cid, "Deleted", old=existing)
     return jsonify({"deleted": True})
 
 
@@ -214,7 +229,12 @@ def upsert_action(cid):
 
 
 @bp.route("/actions/<int:aid>/escalate", methods=["POST"])
+@require_role("company_admin", "reviewer_qa")
 def escalate_action(aid):
+    # Phase F fix (C7): escalation was previously reachable by any
+    # authenticated role — see PHARMAGPT_v1.0_RELEASE_READINESS_REPORT.md
+    # C7. It's a QA-significant action, same tier as the CAPA approval
+    # endpoint, so it now carries the same role guard.
     existing = cdb.get_action(aid)
     if not existing or not tenancy.scoped_or_none(cdb.get_capa(existing["capa_id"]), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
@@ -222,6 +242,8 @@ def escalate_action(aid):
     action = cdb.escalate_action(aid, data.get("escalated_to", ""), data.get("escalated_date", ""))
     if not action:
         return jsonify({"error": "Not found"}), 404
+    audit.log("capa", existing["capa_id"], "CAPA action escalated",
+              new={"escalated_to": data.get("escalated_to", "")})
     return jsonify(action)
 
 
@@ -276,6 +298,10 @@ def submit_approval(cid):
     action_name = data.get("action", "")
     if not action_name:
         return jsonify({"error": "Action is required"}), 400
+    if capa["status"] == "Closed":
+        audit.log_failure("capa", cid, f"Approval action blocked ({action_name}) — record is Closed",
+                           reason="Closed CAPAs are immutable")
+        return jsonify({"error": "This CAPA is Closed and cannot accept further actions"}), 409
 
     sig = tenancy.signing_identity(g.tenant)
 
@@ -296,7 +322,8 @@ def submit_approval(cid):
         sig["performed_by"], sig["role"],
         data.get("comments", ""), sig["electronic_sig"],
     )
-    qmsdb.add_audit_entry("capa", cid, action_name, sig["performed_by"])
+    audit.log("capa", cid, action_name, old={"status": capa["status"]}, new=updates or None,
+              reason=data.get("comments", ""))
     return jsonify(entry), 201
 
 

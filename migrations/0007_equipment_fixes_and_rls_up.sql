@@ -23,12 +23,14 @@
 alter table equipment alter column gmp_impact type text using gmp_impact::text;
 alter table equipment add column if not exists notes text null;
 
+drop policy if exists equipment_company_scoped on equipment;
 create policy equipment_company_scoped on equipment
     for all
     to authenticated
     using (company_id = current_company_id())
     with check (company_id = current_company_id());
 
+drop policy if exists equipment_links_company_scoped on equipment_links;
 create policy equipment_links_company_scoped on equipment_links
     for all
     to authenticated

@@ -17,6 +17,8 @@ bp = Blueprint("dashboard", __name__)
 @bp.route("/dashboard/stats", methods=["GET"])
 def dashboard_stats():
     """Return aggregated statistics for the Home Dashboard, scoped to the caller's company."""
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     return jsonify(db.get_dashboard_stats(g.tenant.company_id))
 
 

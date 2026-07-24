@@ -354,6 +354,13 @@
 
 /* ── Responsive ─────────────────────────────────────────────────────────── */
 
+@media (max-width: 1366px) {
+  .qms-body { padding: 18px 20px; }
+}
+@media (max-width: 1024px) {
+  .qms-body { overflow-x: auto; }
+  .qms-table { min-width: 640px; }
+}
 @media (max-width: 900px) {
   .qms-stats-grid { grid-template-columns: repeat(2, 1fr); }
   .qms-page-header { flex-direction: column; align-items: flex-start; gap: 10px; }

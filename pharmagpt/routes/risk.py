@@ -37,6 +37,7 @@ import json
 import logging
 from flask import Blueprint, g, jsonify, request, Response, stream_with_context
 
+from pharmagpt import audit
 from pharmagpt import config
 from pharmagpt import risk_database as rdb
 from pharmagpt import qms_database as qmsdb
@@ -116,6 +117,8 @@ def _dual_write_delete(assessment: dict) -> None:
 
 @bp.route("/dashboard")
 def dashboard():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     return jsonify(rdb.get_dashboard_stats(g.tenant.company_id))
 
 
@@ -123,6 +126,8 @@ def dashboard():
 
 @bp.route("/assessments", methods=["GET"])
 def list_assessments():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     filters = {
         "assessment_type": request.args.get("type"),
         "methodology": request.args.get("methodology"),
@@ -143,6 +148,7 @@ def create_assessment():
         return jsonify({"error": "Assessment title is required"}), 400
     assessment = rdb.create_assessment(data, company_id=g.tenant.company_id)
     rdb.add_approval_entry(assessment["id"], "Assessment created", data.get("assessment_owner", ""), "Owner")
+    audit.log("risk_assessment", assessment["id"], "Created", new=assessment)
     _dual_write_create(assessment)
     return jsonify(assessment), 201
 
@@ -157,11 +163,20 @@ def get_assessment(aid):
 
 @bp.route("/assessments/<int:aid>", methods=["PUT"])
 def update_assessment(aid):
-    if not tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id):
+    existing = tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id)
+    if not existing:
         return jsonify({"error": "Not found"}), 404
+    # Phase F (WP3, workflow enforcement): Closed is the terminal state in
+    # RISK_ASSESSMENT's lifecycle (services/lifecycle_engine.py) —
+    # immutable once reached.
+    if existing["status"] == "Closed":
+        audit.log_failure("risk_assessment", aid, "Update blocked (record is Closed)",
+                           reason="Closed risk assessments are immutable")
+        return jsonify({"error": "This risk assessment is Closed and cannot be edited"}), 409
     data = request.get_json() or {}
     updated = rdb.update_assessment(aid, data)
     _dual_write_update(updated)
+    audit.log("risk_assessment", aid, "Updated", old=existing, new=updated)
     return jsonify(updated)
 
 
@@ -173,6 +188,7 @@ def delete_assessment(aid):
         return jsonify({"error": "Not found"}), 404
     rdb.delete_assessment(aid)
     _dual_write_delete(existing)
+    audit.log("risk_assessment", aid, "Deleted", old=existing)
     return jsonify({"deleted": True})
 
 
@@ -348,17 +364,30 @@ def add_approval(aid):
         data.get("comments", ""),
         sig["electronic_sig"],
     )
-    qmsdb.add_audit_entry("risk_assessment", aid, action_name, sig["performed_by"])
+    audit.log("risk_assessment", aid, action_name, old={"status": a["status"]}, reason=data.get("comments", ""))
     return jsonify(entry), 201
 
 
 # ── Publish to Library ────────────────────────────────────────────────────────
 
 @bp.route("/assessments/<int:aid>/publish", methods=["POST"])
+@require_role("company_admin", "reviewer_qa")
 def publish_to_library(aid):
-    if not tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id):
+    """Phase F fix (C7): this endpoint previously had no role guard and no
+    status check at all, letting any authenticated `user` publish an
+    assessment straight to the shared Risk Library — completely bypassing
+    the role-gated "Approved" approval action that's supposed to be the
+    only path to publication. See
+    PHARMAGPT_v1.0_RELEASE_READINESS_REPORT.md C7."""
+    assessment = tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id)
+    if not assessment:
         return jsonify({"error": "Not found"}), 404
+    if assessment["status"] != "Approved":
+        audit.log_failure("risk_assessment", aid, "Publish to library blocked (not Approved)",
+                           reason=f"status is '{assessment['status']}'")
+        return jsonify({"error": "Only an Approved risk assessment can be published to the library"}), 409
     count = rdb.publish_assessment_to_library(aid)
+    audit.log("risk_assessment", aid, "Published to library", new={"items_published": count})
     return jsonify({"published": count})
 
 
@@ -366,6 +395,8 @@ def publish_to_library(aid):
 
 @bp.route("/library", methods=["GET"])
 def get_library():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     category = request.args.get("category")
     keyword = request.args.get("q")
     return jsonify(rdb.get_library(g.tenant.company_id, category=category, keyword=keyword))

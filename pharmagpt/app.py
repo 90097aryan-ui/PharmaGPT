@@ -13,12 +13,13 @@ Shared runtime state (Gemini client, history cache) lives in state.py.
 """
 
 import uuid
-from flask import Flask, jsonify, render_template, session
+from flask import Flask, jsonify, render_template, request, session
 
 from pharmagpt.config import FLASK_SECRET_KEY, FLASK_DEBUG, FLASK_PORT, MAX_FILE_SIZE
 from pharmagpt.logging_config import configure_logging
 from pharmagpt import database as db
 from pharmagpt.auth import register_auth_middleware
+from pharmagpt.auth.middleware import is_exempt
 
 configure_logging()
 
@@ -39,6 +40,8 @@ from pharmagpt.routes.qms_deviations import bp as qms_deviations_bp
 from pharmagpt.routes.qms_capa       import bp as qms_capa_bp
 from pharmagpt.routes.qms_change_control import bp as qms_change_control_bp
 from pharmagpt.routes.equipment       import bp as equipment_bp
+from pharmagpt.routes.companies       import bp as companies_bp
+from pharmagpt.routes.users           import bp as users_bp
 
 
 # ── Application setup ─────────────────────────────────────────────────────────
@@ -82,6 +85,8 @@ app.register_blueprint(qms_deviations_bp)
 app.register_blueprint(qms_capa_bp)
 app.register_blueprint(qms_change_control_bp)
 app.register_blueprint(equipment_bp)
+app.register_blueprint(companies_bp)
+app.register_blueprint(users_bp)
 
 
 # ── SPA shell ─────────────────────────────────────────────────────────────────
@@ -100,6 +105,37 @@ def index():
 def health():
     """Unauthenticated liveness endpoint for deployment/uptime checks."""
     return jsonify({"status": "ok"})
+
+
+# ── JSON error responses for every API path ──────────────────────────────────
+# This is a single-page app: "/" is the only server-rendered HTML page, so
+# every other non-exempt path (see auth/middleware.py's is_exempt — the SPA
+# shell, /health, /static/*, /auth/login) is an AJAX endpoint called via
+# fetch(). Flask's default error pages are HTML, which a fetch() caller
+# can't parse ("Unexpected token '<'") — a renamed/typo'd/missing route
+# would otherwise surface as a JS parse error instead of a readable JSON
+# error. These handlers make "never return HTML to fetch()" a guarantee
+# rather than a convention every route has to remember.
+
+@app.errorhandler(404)
+def handle_404(e):
+    if is_exempt(request.path):
+        return e
+    return jsonify({"error": "Not found"}), 404
+
+
+@app.errorhandler(405)
+def handle_405(e):
+    if is_exempt(request.path):
+        return e
+    return jsonify({"error": "Method not allowed"}), 405
+
+
+@app.errorhandler(500)
+def handle_500(e):
+    if is_exempt(request.path):
+        return e
+    return jsonify({"error": "Internal server error"}), 500
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

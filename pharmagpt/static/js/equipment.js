@@ -45,14 +45,18 @@ async function eqLoadList() {
   }
   subtitle.textContent = `Project: ${window.activeProject.name}`;
 
+  const listEl = document.getElementById("eq-list");
+  document.getElementById("eq-empty").style.display = "none";
+  if (window.PharmaUI) window.PharmaUI.skeleton(listEl, { variant: "rows", rows: 3 });
+
   try {
     const res = await fetch(`/projects/${window.activeProject.id}/equipment`);
     const equipment = await res.json();
     eqRenderList(equipment);
     eqRenderImportBanner(equipment);
   } catch {
-    document.getElementById("eq-list").innerHTML =
-      '<p style="color:var(--text-muted);font-size:13px">Could not load equipment.</p>';
+    if (window.PharmaUI) window.PharmaUI.errorState(listEl, { message: "Could not load equipment.", onRetry: eqLoadList });
+    else listEl.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Could not load equipment.</p>';
   }
 }
 
@@ -126,6 +130,7 @@ function eqRenderList(equipmentList, opts) {
         ${eq.qualification_status ? `<span class="badge ${eqStatusBadgeClass(eq.qualification_status)}">${eqEsc(eq.qualification_status)}</span>` : ""}
       </div>
       <div class="eq-row-actions">
+        ${window.PharmaFavorites ? `<button class="eq-btn-fav${window.PharmaFavorites.isFavorite("equipment", eq.id) ? " is-fav" : ""}" data-id="${eq.id}" title="Toggle Favorite" aria-label="Toggle Favorite" aria-pressed="${window.PharmaFavorites.isFavorite("equipment", eq.id)}"><span class='icon' data-lucide='star'></span></button>` : ""}
         <button class="eq-btn-profile" data-id="${eq.id}"><span class='icon' data-lucide='layout-panel-left'></span> Profile</button>
         <button class="eq-btn-edit" data-id="${eq.id}"><span class='icon' data-lucide='pencil'></span> Edit</button>
         <button class="eq-btn-danger eq-btn-delete" data-id="${eq.id}" data-name="${eqEsc(eq.name)}"><span class='icon' data-lucide='trash-2'></span></button>
@@ -141,6 +146,11 @@ function eqRenderList(equipmentList, opts) {
       e.stopPropagation();
       eqConfirmDelete(e.currentTarget.dataset.id, e.currentTarget.dataset.name);
     });
+    row.querySelector(".eq-btn-fav")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      window.PharmaFavorites.toggleFavorite("equipment", eq.id, { title: eq.name, meta: eq.equipment_code || eq.manufacturer || "" });
+      eqRenderList(equipmentList, opts);
+    });
     listEl.appendChild(row);
   });
 
@@ -151,6 +161,10 @@ function eqRenderList(equipmentList, opts) {
 
 async function eqLoadCompanyList() {
   const countEl = document.getElementById("eqlib-count");
+  const listEl = document.getElementById("eqlib-list");
+  const emptyEl = document.getElementById("eqlib-empty");
+  if (emptyEl) emptyEl.style.display = "none";
+  if (window.PharmaUI) window.PharmaUI.skeleton(listEl, { variant: "rows", rows: 4 });
   try {
     const res = await fetch("/equipment");
     const equipment = await res.json();
@@ -160,8 +174,8 @@ async function eqLoadCompanyList() {
     });
   } catch {
     if (countEl) countEl.textContent = "";
-    document.getElementById("eqlib-list").innerHTML =
-      '<p style="color:var(--text-muted);font-size:13px">Could not load the Equipment Library.</p>';
+    if (window.PharmaUI) window.PharmaUI.errorState(listEl, { message: "Could not load the Equipment Library.", onRetry: eqLoadCompanyList });
+    else listEl.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Could not load the Equipment Library.</p>';
   }
 }
 window.eqLoadCompanyList = eqLoadCompanyList;
@@ -325,10 +339,13 @@ async function eqRenderProfile() {
     if (!res.ok) throw new Error();
     equipment = await res.json();
   } catch {
-    document.getElementById("eq-profile-body").innerHTML =
-      '<p style="color:var(--text-muted);font-size:13px">Could not load this equipment record.</p>';
+    const body = document.getElementById("eq-profile-body");
+    if (window.PharmaUI) window.PharmaUI.errorState(body, { message: "Could not load this equipment record.", onRetry: eqRenderProfile });
+    else body.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Could not load this equipment record.</p>';
     return;
   }
+
+  if (window.PharmaRecent) window.PharmaRecent.recordOpened("equipment", equipment.id, equipment.name, equipment.equipment_code || "");
 
   document.getElementById("eq-profile-title").textContent = equipment.name || "Equipment";
   document.getElementById("eq-profile-sub").textContent =

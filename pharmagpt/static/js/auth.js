@@ -46,6 +46,22 @@
 
   let session = readStoredSession();
 
+  // ── Shared toast (Phase 3.5, Objective 8 — "clear feedback") ─────────────
+  // Generalizes risk.js's showToast() (the simplest of two independent,
+  // per-module toast implementations already in this codebase — report.js
+  // has its own '.report-toast'; neither is touched here) into one shared,
+  // global function, so every module can surface a message without
+  // reinventing its own toast DOM/CSS. Exposed as window.PharmaAuth.showToast.
+  function showGlobalToast(message) {
+    const toast = document.createElement("div");
+    toast.style.cssText = `position:fixed;bottom:24px;right:24px;background:#3F3A36;color:#FFF;
+      padding:12px 20px;border-radius:10px;font-size:13px;z-index:9999;max-width:360px;
+      box-shadow:0 4px 20px rgba(0,0,0,0.3)`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 4000);
+  }
+
   // ── Public API (used by static/js/*.js modules that want it, e.g. a
   // future "logged in as" display; nothing else currently depends on it) ──
   window.PharmaAuth = {
@@ -53,9 +69,15 @@
     getUser: () => (session && session.user) || null,
     getAccessToken: () => (session && session.access_token) || null,
     logout: () => logout(),
+    showToast: showGlobalToast,
   };
 
-  // ── fetch() patch: attach the bearer token to same-origin requests ──────
+  // ── fetch() patch: attach the bearer token to same-origin requests, and
+  // surface a visible toast on any 403 — the acceptance test found several
+  // actions (e.g. Super Admin creating a project) failed with a correct
+  // backend 403 but zero user-facing feedback; this closes that gap
+  // globally, at the one chokepoint every module's fetch() already passes
+  // through, without touching any individual module's own error handling. ──
   window.fetch = function (input, init) {
     const token = session && session.access_token;
     if (!token) return nativeFetch(input, init);
@@ -69,7 +91,20 @@
     if (!headers.has("Authorization")) {
       headers.set("Authorization", "Bearer " + token);
     }
-    return nativeFetch(input, Object.assign({}, init, { headers: headers }));
+    return nativeFetch(input, Object.assign({}, init, { headers: headers })).then(function (res) {
+      if (res.status === 403) {
+        res
+          .clone()
+          .json()
+          .then(function (body) {
+            showGlobalToast((body && body.error) || "You don't have permission to do that.");
+          })
+          .catch(function () {
+            showGlobalToast("You don't have permission to do that.");
+          });
+      }
+      return res;
+    });
   };
 
   // ── View toggling ─────────────────────────────────────────────────────
@@ -98,6 +133,13 @@
     document.querySelector("header").style.display = "flex";
     document.querySelector(".app-body").style.display = "flex";
     showUserBadge(user);
+    // Phase 3.5: role-gated Administration nav + Assume Company Context
+    // button/banner. Defined in static/js/admin_assume_context.js, which
+    // loads after this file — safe to call here because showApp() only
+    // ever runs from an async continuation (after the /auth/login or
+    // /auth/me fetch resolves), by which point every <script> tag below
+    // this one has already executed synchronously.
+    if (window.applyRoleBasedVisibility) window.applyRoleBasedVisibility(user);
   }
 
   function showUserBadge(user) {

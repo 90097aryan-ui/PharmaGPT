@@ -114,7 +114,8 @@ async function qmsCCLoadList(filters = {}) {
       </table>
     `;
   } catch (e) {
-    container.innerHTML = `<div class="qms-empty"><p>Failed to load change controls: ${e.message}</p></div>`;
+    if (window.PharmaUI) window.PharmaUI.errorState(container, { message: `Failed to load change controls: ${e.message}`, onRetry: () => qmsCCLoadList(filters) });
+    else container.innerHTML = `<div class="qms-empty"><p>Failed to load change controls: ${e.message}</p></div>`;
   }
 }
 
@@ -181,7 +182,7 @@ function qmsCCOpenNew() {
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" onclick="document.getElementById('qms-cc-new-modal').remove()">Cancel</button>
-        <button class="btn-primary" onclick="qmsCCCreate()">Create Change Control</button>
+        <button class="btn-primary" id="qms-cc-create-btn" onclick="qmsCCCreate()">Create Change Control</button>
       </div>
     </div>
   `;
@@ -192,6 +193,9 @@ window.qmsCCOpenNew = qmsCCOpenNew;
 async function qmsCCCreate() {
   const title = document.getElementById("qms-new-cc-title").value.trim();
   if (!title) { qmsToast("Title is required"); return; }
+  const btn = document.getElementById("qms-cc-create-btn");
+  if (btn.disabled) return;
+  btn.disabled = true;
   const data = {
     title,
     change_type: document.getElementById("qms-new-cc-type").value,
@@ -212,6 +216,7 @@ async function qmsCCCreate() {
     qmsCCOpenDetail(cc.id);
   } catch (e) {
     qmsToast("Failed to create change control: " + e.message);
+    btn.disabled = false;
   }
 }
 window.qmsCCCreate = qmsCCCreate;
@@ -227,6 +232,7 @@ async function qmsCCOpenDetail(id) {
   body.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading change control…</div>`;
   try {
     const cc = await qmsFetch(`/qms/change-control/${id}`);
+    if (window.PharmaRecent) window.PharmaRecent.recordOpened("change_control", cc.id, cc.title, cc.cc_number || "");
     body.innerHTML = `
       <div class="qms-page-header">
         <div>
@@ -251,7 +257,8 @@ async function qmsCCOpenDetail(id) {
     `;
     qmsCCRenderTab(cc);
   } catch (e) {
-    body.innerHTML = `<div class="qms-empty"><p>Failed to load change control: ${e.message}</p></div>`;
+    if (window.PharmaUI) window.PharmaUI.errorState(body, { message: `Failed to load change control: ${e.message}`, onRetry: () => qmsCCOpenDetail(id) });
+    else body.innerHTML = `<div class="qms-empty"><p>Failed to load change control: ${e.message}</p></div>`;
   }
 }
 window.qmsCCOpenDetail = qmsCCOpenDetail;

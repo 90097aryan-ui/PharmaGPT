@@ -31,6 +31,7 @@ $$;
 -- Full target (company_admin OR project_members membership) lands once
 -- project_members is populated with real data.
 
+drop policy if exists projects_company_scoped on projects;
 create policy projects_company_scoped on projects
     for all
     to authenticated
@@ -42,6 +43,7 @@ create policy projects_company_scoped on projects
 -- membership); this policy just means the table isn't default-deny-locked
 -- once real membership rows start landing in a later phase.
 
+drop policy if exists project_members_company_scoped on project_members;
 create policy project_members_company_scoped on project_members
     for all
     to authenticated

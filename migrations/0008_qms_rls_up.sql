@@ -10,21 +10,25 @@
 --
 -- Run in the Supabase SQL Editor. Rollback: 0008_qms_rls_down.sql.
 
+drop policy if exists deviations_company_scoped on deviations;
 create policy deviations_company_scoped on deviations
     for all to authenticated
     using (company_id = current_company_id())
     with check (company_id = current_company_id());
 
+drop policy if exists capas_company_scoped on capas;
 create policy capas_company_scoped on capas
     for all to authenticated
     using (company_id = current_company_id())
     with check (company_id = current_company_id());
 
+drop policy if exists change_controls_company_scoped on change_controls;
 create policy change_controls_company_scoped on change_controls
     for all to authenticated
     using (company_id = current_company_id())
     with check (company_id = current_company_id());
 
+drop policy if exists risk_assessments_company_scoped on risk_assessments;
 create policy risk_assessments_company_scoped on risk_assessments
     for all to authenticated
     using (company_id = current_company_id())
@@ -36,10 +40,12 @@ create policy risk_assessments_company_scoped on risk_assessments
 -- SELECT are therefore two separate, narrower policies here, not "for all"
 -- — there is deliberately no UPDATE/DELETE policy for any role.
 
+drop policy if exists audit_trail_insert_company_scoped on audit_trail;
 create policy audit_trail_insert_company_scoped on audit_trail
     for insert to authenticated
     with check (company_id = current_company_id());
 
+drop policy if exists audit_trail_select_company_scoped on audit_trail;
 create policy audit_trail_select_company_scoped on audit_trail
     for select to authenticated
     using (company_id = current_company_id());

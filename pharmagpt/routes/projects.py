@@ -21,6 +21,7 @@ import logging
 
 from flask import Blueprint, g, jsonify, request
 
+from pharmagpt import audit
 from pharmagpt import config
 from pharmagpt import database as db
 from pharmagpt import equipment_database as equipdb
@@ -100,6 +101,8 @@ def _dual_write_delete(project: dict) -> None:
 @bp.route("/projects", methods=["GET"])
 def list_projects():
     """Return all projects belonging to the caller's company, newest first."""
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     return jsonify(db.get_all_projects(g.tenant.company_id))
 
 
@@ -137,8 +140,7 @@ def create_project():
         protocol_number=data.get("protocol_number", "").strip(),
         report_number=data.get("report_number", "").strip(),
     )
-    performed_by = tenancy.signing_identity(g.tenant)["performed_by"]
-    qmsdb.add_audit_entry("project", project["id"], "Project created", performed_by)
+    audit.log("project", project["id"], "Project created", new=project)
     _dual_write_create(project)
     _link_equipment_to_new_project(project)
     return jsonify(project), 201
@@ -173,11 +175,12 @@ def get_project(project_id):
 @bp.route("/projects/<int:project_id>", methods=["PUT"])
 def update_project(project_id):
     """Update a project's mutable fields (see module docstring for the field list)."""
-    if not tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id):
+    existing = tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id)
+    if not existing:
         return jsonify({"error": "Project not found"}), 404
     data    = request.get_json() or {}
     updated = db.update_project(project_id, data)
-    qmsdb.add_audit_entry("project", project_id, "Project details updated")
+    audit.log("project", project_id, "Project details updated", old=existing, new=updated)
     _dual_write_update(updated)
     return jsonify(updated)
 
@@ -189,7 +192,7 @@ def delete_project(project_id):
     existing = tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id)
     if not existing:
         return jsonify({"error": "Project not found"}), 404
-    qmsdb.add_audit_entry("project", project_id, "Project deleted")
+    audit.log("project", project_id, "Project deleted", old=existing)
     db.delete_project(project_id)
     _dual_write_delete(existing)
     history_cache.pop(project_id, None)

@@ -164,7 +164,7 @@ async function _setupStep3(panel) {
     <div class="val-step-content">
       <h3 class="val-step-title">Step 3 — Reference Documents</h3>
       <p class="val-step-sub">Select uploaded project documents to include as context for the AI generator.</p>
-      <div id="val-doc-select-list"><div class="val-loading">Loading documents…</div></div>
+      <div id="val-doc-select-list"></div>
       <div class="val-nav-row">
         <button class="val-btn-secondary" onclick="valBack()"><span class=\'icon\' data-lucide=\'arrow-left\'></span> Back</button>
         <button class="val-btn-primary" onclick="valNext()">Next <span class=\'icon\' data-lucide=\'arrow-right\'></span> Generate</button>
@@ -178,6 +178,9 @@ async function _setupStep3(panel) {
     list.innerHTML = "<p class='val-note'>No project selected. Documents cannot be loaded.</p>";
     return;
   }
+
+  if (window.PharmaUI) window.PharmaUI.skeleton(list, { variant: "rows", rows: 3 });
+  else list.innerHTML = '<div class="val-loading">Loading documents…</div>';
 
   try {
     const res  = await fetch(`/projects/${window.activeProject.id}/documents`);
@@ -208,7 +211,8 @@ async function _setupStep3(panel) {
         </label>`).join("")}
     `;
   } catch {
-    list.innerHTML = "<p class='val-note'>Could not load documents.</p>";
+    if (window.PharmaUI) window.PharmaUI.errorState(list, { message: "Could not load documents.", onRetry: () => _setupStep3(panel) });
+    else list.innerHTML = "<p class='val-note'>Could not load documents.</p>";
   }
 }
 

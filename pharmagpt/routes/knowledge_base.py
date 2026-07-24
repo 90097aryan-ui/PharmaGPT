@@ -18,6 +18,7 @@ import logging
 
 from flask import Blueprint, g, jsonify, request, send_file
 
+from pharmagpt import audit
 from pharmagpt import config
 from pharmagpt import database as db
 from pharmagpt import documents as doc_utils
@@ -81,6 +82,9 @@ def kb_list_documents():
         keyword   — substring match in title and extracted text_content
         title     — substring match in title only
     """
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
+
     folder    = request.args.get("folder",    "").strip() or None
     tag       = request.args.get("tag",       "").strip() or None
     file_type = request.args.get("file_type", "").strip() or None
@@ -150,6 +154,7 @@ def kb_upload_document():
 
     db.mark_kb_pending(kb_doc["id"])
     _dual_write_create(kb_doc)
+    audit.log("kb_document", kb_doc["id"], "Uploaded", new={"title": title, "folder": folder, "original_name": file.filename})
     process_document_async("kb", kb_doc["id"], doc_utils.get_kb_file_path(stored_filename), extension)
     return jsonify(db.get_kb_document(kb_doc["id"])), 201
 
@@ -242,6 +247,7 @@ def kb_delete_document(kb_id):
     doc_utils.delete_kb_from_disk(doc["stored_filename"])
     db.delete_kb_document(kb_id)
     _dual_write_delete(doc)
+    audit.log("kb_document", kb_id, "Deleted", old={"title": doc.get("title"), "original_name": doc.get("original_name")})
     return jsonify({"status": "deleted"})
 
 
