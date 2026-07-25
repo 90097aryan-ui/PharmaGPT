@@ -113,6 +113,7 @@ def create_company():
             company_id=company_row["id"], role_id=company_admin_role_id,
         )
     except IdentityProvisioningError as exc:
+        logger.exception("create_company: admin provisioning failed for company %s", company_row["id"])
         return jsonify({
             "company": company_row,
             "error": f"Company created, but admin provisioning failed — retry provisioning "

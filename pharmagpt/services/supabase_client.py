@@ -1,3 +1,4 @@
+import logging
 import os
 from functools import wraps
 
@@ -7,6 +8,8 @@ from supabase import create_client, Client
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 def _require_env(name: str) -> str:
@@ -90,8 +93,10 @@ def handle_postgrest_errors(view_func):
         try:
             return view_func(*args, **kwargs)
         except APIError as exc:
+            logger.exception("handle_postgrest_errors: Supabase APIError in %s", view_func.__name__)
             return jsonify({"error": f"Database error: {exc.message}"}), 500
         except Exception as exc:
+            logger.exception("handle_postgrest_errors: unexpected error in %s", view_func.__name__)
             return jsonify({"error": f"Unexpected error: {exc}"}), 500
 
     return wrapped
