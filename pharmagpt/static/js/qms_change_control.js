@@ -122,6 +122,7 @@ async function qmsCCLoadList(filters = {}) {
 // ── Create wizard ───────────────────────────────────────────────────────────
 
 function qmsCCOpenNew() {
+  if (window.PharmaAuth && !window.PharmaAuth.requireCompanyContext()) return;
   const meta = window.QMS_META || { change_types: [], change_categories: [] };
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay open";

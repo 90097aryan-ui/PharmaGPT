@@ -70,6 +70,17 @@ class _FakeQuery:
         return [r for r in rows if all(r.get(k) == v for k, v in self._filters.items())]
 
     def execute(self):
+        if (
+            self.table_name == "break_glass_access"
+            and self._op == "select"
+            and self._single
+            and self.store.get("_raise_on_verification_check")
+        ):
+            # RBF-001 Fix 1 regression coverage: simulates a transient
+            # network/Postgres failure on the *verification* lookup
+            # middleware.py runs on every request while a grant is assumed —
+            # never the initial insert/update from assume-company itself.
+            raise RuntimeError("simulated transient Supabase error")
         table = self.store.setdefault(self.table_name, [])
         if self._op == "insert":
             row = dict(self._payload)
@@ -201,6 +212,32 @@ def test_company_admin_cannot_assume_context(client, store):
             headers=AUTH_HEADERS,
         )
     assert resp.status_code == 403
+
+
+def test_transient_verification_error_preserves_context(client, store):
+    """RBF-001 Fix 1 (P0 — Silent Company Context Loss). A transient failure
+    verifying the break_glass_access grant (network blip, Postgres timeout)
+    must NOT be treated as a revoke: the request should fail closed with a
+    5xx and the session must still hold the assumed company afterward, once
+    the transient condition clears."""
+    p1, p2 = _patched_clients(store)
+    with _as(SUPER_ADMIN), p1, p2:
+        assume_resp = client.post(
+            "/auth/assume-company",
+            json={"company_id": COMPANY_A, "reason": "Support ticket #1"},
+            headers=AUTH_HEADERS,
+        )
+        assert assume_resp.status_code == 201
+
+        store["_raise_on_verification_check"] = True
+        failing_resp = client.get("/projects", headers=AUTH_HEADERS)
+        assert failing_resp.status_code == 500
+        # The grant itself must be untouched — not revoked as a side effect.
+        assert store["break_glass_access"][0].get("revoked_at") is None
+
+        store["_raise_on_verification_check"] = False
+        recovered_resp = client.get("/projects", headers=AUTH_HEADERS)
+    assert recovered_resp.status_code == 200
 
 
 def test_me_reports_assumed_context_fields(client, store):

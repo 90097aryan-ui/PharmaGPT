@@ -123,6 +123,7 @@ async function qmsDocLoadList(filters = {}) {
 // still does all the actual work (modal, validation, POST), Project
 // Workspace just supplies a starting point.
 function qmsDocOpenNew(prefill) {
+  if (window.PharmaAuth && !window.PharmaAuth.requireCompanyContext()) return;
   const meta = window.QMS_META || { document_types: [] };
   const presetType = (prefill && prefill.doc_type) || "SOP";
   const overlay = document.createElement("div");

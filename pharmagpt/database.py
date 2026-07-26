@@ -448,6 +448,54 @@ def init_db() -> None:
     conn.execute("UPDATE kb_documents SET company_id = ? WHERE company_id IS NULL", (BOOTSTRAP_COMPANY_ID,))
     conn.commit()
 
+    # ── RBF-001 Fix 2: creator/updater attribution (P0 release blocker) ──────
+    # Projects and Knowledge Base documents had no created_by/updated_by/
+    # updated_at at all — every regulated record needs immutable creator
+    # info. Purely additive columns; existing rows are backfilled (never
+    # left NULL-and-unexplained, never fabricated):
+    #   - created_by: recovered from the already-existing qms_audit_trail
+    #     "Project created"/"Uploaded" entry's performed_by where one exists
+    #     (it already captured the real actor — see pharmagpt/audit.py) —
+    #     more accurate than leaving every legacy row blank. Rows with no
+    #     matching audit entry (predate the audit.log() call itself) are
+    #     left '' rather than guessed.
+    #   - updated_at: seeded from the row's own created_at/upload_date, i.e.
+    #     "last known state is as of creation" — accurate, not fabricated.
+    for _col, _ddl in (("created_by", "TEXT DEFAULT ''"), ("updated_by", "TEXT DEFAULT ''"), ("updated_at", "TIMESTAMP DEFAULT NULL")):
+        _add_column_if_missing(conn, "projects", _col, _ddl)
+        _add_column_if_missing(conn, "kb_documents", _col, _ddl)
+    conn.commit()
+
+    conn.execute("UPDATE projects SET updated_at = created_at WHERE updated_at IS NULL")
+    conn.execute("UPDATE kb_documents SET updated_at = upload_date WHERE updated_at IS NULL")
+    conn.execute("""
+        UPDATE projects SET created_by = (
+            SELECT performed_by FROM qms_audit_trail
+            WHERE record_type = 'project' AND record_id = projects.id
+              AND action = 'Project created' AND performed_by != ''
+            ORDER BY created_at ASC LIMIT 1
+        )
+        WHERE created_by = '' AND EXISTS (
+            SELECT 1 FROM qms_audit_trail
+            WHERE record_type = 'project' AND record_id = projects.id
+              AND action = 'Project created' AND performed_by != ''
+        )
+    """)
+    conn.execute("""
+        UPDATE kb_documents SET created_by = (
+            SELECT performed_by FROM qms_audit_trail
+            WHERE record_type = 'kb_document' AND record_id = kb_documents.id
+              AND action = 'Uploaded' AND performed_by != ''
+            ORDER BY created_at ASC LIMIT 1
+        )
+        WHERE created_by = '' AND EXISTS (
+            SELECT 1 FROM qms_audit_trail
+            WHERE record_type = 'kb_document' AND record_id = kb_documents.id
+              AND action = 'Uploaded' AND performed_by != ''
+        )
+    """)
+    conn.commit()
+
     # ── Phase F: audit-trail completeness (PHARMAGPT_v1.0_PHASE_F...) ─────────
     # qms_audit_trail originally captured only action/detail/performed_by —
     # insufficient for a 21 CFR Part 11 audit trail (Timestamp/User/Company/
@@ -497,14 +545,14 @@ def _migrate_val_projects(conn: sqlite3.Connection) -> None:
                (name, equipment_name, manufacturer, department, validation_type,
                 owner, approver, target_date, risk_category, status, model,
                 location, protocol_number, report_number, equipment_id,
-                migrated_from_val_project_id, company_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                migrated_from_val_project_id, company_id, created_by, updated_by, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'','',?)""",
             (
                 vp["name"], vp["equipment_name"], vp["manufacturer"], vp["department"],
                 vp["validation_type"], vp["owner"], vp["approver"], vp["target_date"],
                 vp["risk_category"], vp["status"], vp["model"], vp["location"],
                 vp["protocol_number"], vp["report_number"], vp["equipment_id"], vp["id"],
-                BOOTSTRAP_COMPANY_ID,
+                BOOTSTRAP_COMPANY_ID, vp["created_at"],
             ),
         )
         new_project_id = cur.lastrowid
@@ -528,7 +576,8 @@ def create_project(name: str, equipment_name: str, manufacturer: str,
                    owner: str = "", approver: str = "", target_date: str | None = None,
                    risk_category: str = "", status: str = "In Progress",
                    model: str = "", location: str = "",
-                   protocol_number: str = "", report_number: str = "") -> dict:
+                   protocol_number: str = "", report_number: str = "",
+                   created_by: str = "") -> dict:
     """
     Insert a new project row and return the full project dict.
 
@@ -543,17 +592,22 @@ def create_project(name: str, equipment_name: str, manufacturer: str,
     entity (val_projects) — Phase 2 Module 1 merged that entity into this
     one, so every project can now carry them. All are optional so existing
     callers that only pass the original five positional fields keep working.
+
+    `created_by` (RBF-001 Fix 2) must likewise come from the authenticated
+    TenantContext, never client input. `updated_by`/`updated_at` are seeded
+    to the same actor/timestamp as creation — a fresh row has no separate
+    "last updated" event yet.
     """
     conn = get_connection()
     cur = conn.execute(
         """INSERT INTO projects
            (name, equipment_name, manufacturer, department, validation_type,
             company_id, owner, approver, target_date, risk_category, status, model,
-            location, protocol_number, report_number)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            location, protocol_number, report_number, created_by, updated_by, updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
         (name, equipment_name, manufacturer, department, validation_type,
          company_id, owner, approver, target_date, risk_category, status, model,
-         location, protocol_number, report_number),
+         location, protocol_number, report_number, created_by, created_by),
     )
     conn.commit()
     project = dict(conn.execute(
@@ -595,12 +649,17 @@ def get_project(project_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def update_project(project_id: int, data: dict) -> dict | None:
+def update_project(project_id: int, data: dict, *, updated_by: str = "") -> dict | None:
     """
     Update a project's mutable fields, including the Validation-Workspace
     fields merged in by Phase 2 Module 1 (owner/approver/target_date/
     risk_category/status/model/location/protocol_number/report_number).
     Replaces the old, now-retired PUT /val-projects/<id> (workspace.py).
+
+    `updated_by` (RBF-001 Fix 2) must come from the authenticated
+    TenantContext, never client input — same non-spoofable-actor principle
+    as `created_by`/`company_id` elsewhere in this module. `updated_at` is
+    always refreshed to the current time on every update.
     """
     conn = get_connection()
     existing = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
@@ -617,7 +676,7 @@ def update_project(project_id: int, data: dict) -> dict | None:
         """UPDATE projects SET
            name=?, equipment_name=?, manufacturer=?, department=?, validation_type=?,
            owner=?, approver=?, target_date=?, risk_category=?, status=?, model=?,
-           location=?, protocol_number=?, report_number=?
+           location=?, protocol_number=?, report_number=?, updated_by=?, updated_at=CURRENT_TIMESTAMP
            WHERE id=?""",
         (
             _field("name"), _field("equipment_name"), _field("manufacturer"),
@@ -625,7 +684,7 @@ def update_project(project_id: int, data: dict) -> dict | None:
             _field("approver"), data.get("target_date", existing.get("target_date")) or None,
             _field("risk_category"), _field("status") or "In Progress",
             _field("model"), _field("location"), _field("protocol_number"),
-            _field("report_number"), project_id,
+            _field("report_number"), updated_by, project_id,
         ),
     )
     conn.commit()
@@ -979,20 +1038,26 @@ KB_FOLDERS = [
 def create_kb_document(title: str, folder: str, tags: str, doc_version: str,
                        effective_date: str | None, review_date: str | None,
                        original_name: str, stored_filename: str,
-                       file_type: str, file_size: int, *, company_id: str) -> dict:
+                       file_type: str, file_size: int, *, company_id: str,
+                       created_by: str = "") -> dict:
     """Insert a new KB document row and return the full row dict.
 
     `company_id` must be the caller's authenticated tenant
     (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py.
+    `created_by` (RBF-001 Fix 2) is likewise authenticated-only.
+    `updated_by`/`updated_at` are seeded to the same actor/timestamp as
+    creation.
     """
     conn = get_connection()
     cur = conn.execute(
         """INSERT INTO kb_documents
            (title, folder, tags, doc_version, effective_date, review_date,
-            original_name, stored_filename, file_type, file_size, company_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            original_name, stored_filename, file_type, file_size, company_id,
+            created_by, updated_by, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
         (title, folder, tags, doc_version, effective_date or None,
-         review_date or None, original_name, stored_filename, file_type, file_size, company_id),
+         review_date or None, original_name, stored_filename, file_type, file_size, company_id,
+         created_by, created_by),
     )
     conn.commit()
     row = dict(conn.execute(
@@ -1032,19 +1097,24 @@ def get_kb_document_by_source(source_type: str, source_id: int, company_id: str)
 
 def update_kb_document_file(kb_id: int, *, title: str, doc_version: str,
                             effective_date: str | None, original_name: str,
-                            stored_filename: str, file_type: str, file_size: int) -> dict:
+                            stored_filename: str, file_type: str, file_size: int,
+                            updated_by: str = "") -> dict:
     """Point an existing KB document at a newly re-published file (a new
     effective version of the same governed record) — services/kb_sync.py's
     upsert path. Does not touch folder/tags/company_id/source_type/
-    source_id, which stay as originally set."""
+    source_id, which stay as originally set.
+
+    `updated_by` (RBF-001 Fix 2) must come from the authenticated
+    TenantContext. `updated_at` is always refreshed to the current time."""
     conn = get_connection()
     conn.execute(
         """UPDATE kb_documents
            SET title = ?, doc_version = ?, effective_date = ?, original_name = ?,
-               stored_filename = ?, file_type = ?, file_size = ?
+               stored_filename = ?, file_type = ?, file_size = ?, updated_by = ?,
+               updated_at = CURRENT_TIMESTAMP
            WHERE id = ?""",
         (title, doc_version, effective_date or None, original_name,
-         stored_filename, file_type, file_size, kb_id),
+         stored_filename, file_type, file_size, updated_by, kb_id),
     )
     conn.commit()
     row = dict(conn.execute("SELECT * FROM kb_documents WHERE id = ?", (kb_id,)).fetchone())
@@ -1121,7 +1191,8 @@ def get_kb_documents(company_id: str | None = None, folder: str | None = None, t
                    original_name, file_type, file_size, word_count, page_count,
                    extraction_status, upload_date, extraction_progress_current,
                    extraction_progress_total, extraction_engine, quality_score,
-                   pages_failed, error_message, postgres_id, company_id
+                   pages_failed, error_message, postgres_id, company_id,
+                   created_by, updated_by, updated_at
             FROM kb_documents {where} ORDER BY upload_date DESC""",
         params,
     ).fetchall()

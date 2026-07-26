@@ -24,6 +24,7 @@ const modalSaveBtn     = document.getElementById("modal-save");
 // ── Modal open / close ────────────────────────────────────────────────────────
 
 function openModal() {
+  if (window.PharmaAuth && !window.PharmaAuth.requireCompanyContext()) return;
   modalForm.reset();
   modal.classList.add("open");
   modalOverlay.classList.add("open");

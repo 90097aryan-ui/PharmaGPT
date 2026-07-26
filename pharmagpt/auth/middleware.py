@@ -63,6 +63,7 @@ context only ever affects which company_id a read/list route sees.
 """
 
 import dataclasses
+import logging
 from datetime import datetime, timezone
 
 from flask import Flask, g, jsonify, request, session
@@ -70,6 +71,19 @@ from flask import Flask, g, jsonify, request, session
 from pharmagpt.auth.context import AuthenticationError, resolve_tenant_context
 from pharmagpt.auth.decorators import extract_bearer_token
 from pharmagpt.services.supabase_client import get_authenticated_client
+
+logger = logging.getLogger(__name__)
+
+
+class AssumedContextCheckError(Exception):
+    """Raised when verifying an Assume Company Context grant fails due to an
+    unexpected/transient error (network blip, Postgres timeout, etc.) — as
+    opposed to a legitimate revoke/expiry. RBF-001 Fix 1: this case must
+    never be treated the same as a revoked grant. The caller must preserve
+    the existing session (never pop assumed_company_id/break_glass_id) and
+    surface a retryable error instead of silently reverting the Super Admin
+    to standing (no-company) access."""
+
 
 EXEMPT_PATHS = frozenset({
     "/",
@@ -101,10 +115,29 @@ def apply_assumed_company_context(tenant, access_token: str):
     """Return `tenant` unchanged unless it's a Super Admin with an active
     Assume Company Context grant recorded in this session — in which case
     return a *new* TenantContext (never mutate — frozen dataclass) with
-    company_id overridden to the assumed company. Clears stale session keys
-    if the grant has expired or been revoked, so the request continues as
-    the real (standing, company_id=None) Super Admin identity rather than
-    erroring mid-session."""
+    company_id overridden to the assumed company. Clears the session keys
+    only when the grant is genuinely revoked/expired/missing, so the request
+    continues as the real (standing, company_id=None) Super Admin identity.
+
+    RBF-001 Fix 1 (P0 — Silent Company Context Loss): this function used to
+    catch *any* exception from the break_glass_access lookup (network blip,
+    Postgres timeout, RLS hiccup) and treat it identically to "row is
+    missing/revoked/expired" — silently popping the session and reverting a
+    Super Admin to standing (no-company) access mid-session, with no warning
+    and no way to distinguish it from a real revoke. Verified live: the
+    grant was still valid and unexpired in the database when this fired.
+
+    Now the three cases are handled distinctly:
+      A. Valid, active grant                → apply assumed company_id.
+      B. Grant row found but revoked/expired,
+         or no such grant row exists at all → pop session, revert to real
+         identity (unchanged from before — this is the legitimate path).
+      C. The verification query itself raised
+         an unexpected exception              → log full details (user_id,
+         company_id, exception, timestamp), leave the session untouched, and
+         raise AssumedContextCheckError so the caller returns a controlled
+         5xx instead of silently discarding the assumed context.
+    """
     if tenant.role != "super_admin":
         return tenant
 
@@ -123,8 +156,19 @@ def apply_assumed_company_context(tenant, access_token: str):
             .execute()
         )
         row = result.data if result else None
-    except Exception:
-        row = None
+    except Exception as exc:
+        logger.error(
+            "Assume Company Context verification failed (transient error — "
+            "session preserved, not revoked): user_id=%s company_id=%s "
+            "break_glass_id=%s timestamp=%s exception=%r",
+            tenant.user_id, assumed_company_id, break_glass_id,
+            datetime.now(timezone.utc).isoformat(), exc,
+            exc_info=True,
+        )
+        raise AssumedContextCheckError(
+            "Could not verify your Assume Company Context grant right now. "
+            "Your session was preserved — please retry."
+        ) from exc
 
     if not _grant_is_active(row):
         session.pop("assumed_company_id", None)
@@ -149,7 +193,10 @@ def register_auth_middleware(app: Flask) -> None:
                 g.tenant = resolve_tenant_context(access_token)
             except AuthenticationError as exc:
                 return jsonify({"error": str(exc)}), 401
-            g.tenant = apply_assumed_company_context(g.tenant, access_token)
+            try:
+                g.tenant = apply_assumed_company_context(g.tenant, access_token)
+            except AssumedContextCheckError as exc:
+                return jsonify({"error": str(exc)}), 500
             # Keep the session-cookie fallback in sync with whatever token
             # the frontend is actively using, so it's never stale for a
             # subsequent header-less navigation (e.g. a download link).
@@ -169,5 +216,8 @@ def register_auth_middleware(app: Flask) -> None:
             session.pop("access_token", None)
             return jsonify({"error": str(exc)}), 401
 
-        g.tenant = apply_assumed_company_context(g.tenant, cookie_token)
+        try:
+            g.tenant = apply_assumed_company_context(g.tenant, cookie_token)
+        except AssumedContextCheckError as exc:
+            return jsonify({"error": str(exc)}), 500
         return None

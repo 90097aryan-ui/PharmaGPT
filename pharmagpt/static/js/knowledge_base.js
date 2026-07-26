@@ -372,6 +372,7 @@
   // ── Upload modal ───────────────────────────────────────────────────────────
 
   function openKBUploadModal() {
+    if (window.PharmaAuth && !window.PharmaAuth.requireCompanyContext()) return;
     document.getElementById('kb-upload-modal')?.classList.add('open');
     document.getElementById('kb-modal-overlay')?.classList.add('open');
     const sel = document.getElementById('kb-folder-select');

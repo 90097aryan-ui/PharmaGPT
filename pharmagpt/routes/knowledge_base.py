@@ -150,6 +150,7 @@ def kb_upload_document():
         file_type=extension,
         file_size=file_size,
         company_id=g.tenant.company_id,
+        created_by=g.tenant.display_name or g.tenant.email,
     )
 
     db.mark_kb_pending(kb_doc["id"])

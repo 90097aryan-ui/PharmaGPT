@@ -120,6 +120,7 @@ async function qmsDevLoadList(filters = {}) {
 // ── Create wizard ───────────────────────────────────────────────────────────
 
 function qmsDevOpenNew() {
+  if (window.PharmaAuth && !window.PharmaAuth.requireCompanyContext()) return;
   const meta = window.QMS_META || { deviation_types: [], deviation_categories: [] };
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay open";

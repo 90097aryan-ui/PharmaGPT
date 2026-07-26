@@ -117,6 +117,7 @@ async function qmsCapaLoadList(filters = {}) {
 // ── Create wizard ───────────────────────────────────────────────────────────
 
 function qmsCapaOpenNew() {
+  if (window.PharmaAuth && !window.PharmaAuth.requireCompanyContext()) return;
   const meta = window.QMS_META || { capa_sources: [] };
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay open";

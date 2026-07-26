@@ -24,10 +24,25 @@ def test_create_project_logs_audit_entry(client):
 
 
 def test_update_project_logs_audit_entry(client):
+    """RBF-001 Fix 2: a status-changing update now emits both the generic
+    'Project details updated' entry (full field diff, unchanged behavior)
+    and a distinct 'Project status changed' entry (old/new status only)."""
     project = _create_project(client)
     client.put(f"/projects/{project['id']}", json={
         "name": "HPLC IQ", "equipment_name": "Agilent HPLC 1260", "manufacturer": "Agilent",
         "department": "QC", "validation_type": "IQ/OQ/PQ", "status": "Completed",
+    })
+    entries = client.get(f"/qms/project/{project['id']}/audit-trail").get_json()
+    assert [e["action"] for e in entries] == [
+        "Project created", "Project details updated", "Project status changed",
+    ]
+
+
+def test_update_project_without_status_change_does_not_log_status_changed(client):
+    project = _create_project(client)
+    client.put(f"/projects/{project['id']}", json={
+        "name": "HPLC IQ — renamed", "equipment_name": "Agilent HPLC 1260", "manufacturer": "Agilent",
+        "department": "QC", "validation_type": "IQ/OQ/PQ",
     })
     entries = client.get(f"/qms/project/{project['id']}/audit-trail").get_json()
     assert [e["action"] for e in entries] == ["Project created", "Project details updated"]

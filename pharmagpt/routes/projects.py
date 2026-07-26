@@ -139,6 +139,7 @@ def create_project():
         location=data.get("location", "").strip(),
         protocol_number=data.get("protocol_number", "").strip(),
         report_number=data.get("report_number", "").strip(),
+        created_by=g.tenant.display_name or g.tenant.email,
     )
     audit.log("project", project["id"], "Project created", new=project)
     _dual_write_create(project)
@@ -179,8 +180,12 @@ def update_project(project_id):
     if not existing:
         return jsonify({"error": "Project not found"}), 404
     data    = request.get_json() or {}
-    updated = db.update_project(project_id, data)
+    actor   = g.tenant.display_name or g.tenant.email
+    updated = db.update_project(project_id, data, updated_by=actor)
     audit.log("project", project_id, "Project details updated", old=existing, new=updated)
+    if data.get("status") and existing.get("status") != updated.get("status"):
+        audit.log("project", project_id, "Project status changed",
+                   old={"status": existing.get("status")}, new={"status": updated.get("status")})
     _dual_write_update(updated)
     return jsonify(updated)
 

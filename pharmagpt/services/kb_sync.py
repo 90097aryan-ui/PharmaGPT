@@ -30,14 +30,25 @@ change here).
 import logging
 import os
 
+from flask import g
 from werkzeug.utils import secure_filename
 
+from pharmagpt import audit
 from pharmagpt import database as db
 from pharmagpt import documents as doc_utils
 from pharmagpt.services.doc_exporter import markdown_to_docx
 from pharmagpt.services.document_processor import process_document_async
 
 logger = logging.getLogger(__name__)
+
+
+def _current_actor() -> str:
+    """Non-spoofable actor for the auto-publish path (RBF-001 Fix 2) — this
+    module is always called from within an approval route's request context
+    (see module docstring), so g.tenant is available exactly like every
+    other authenticated mutation in this codebase."""
+    tenant = getattr(g, "tenant", None)
+    return (tenant.display_name or tenant.email) if tenant else "system"
 
 # Maps a record's own doc_type/protocol_type to the existing KB folder it
 # belongs in (db.KB_FOLDERS) — not a new taxonomy, just a routing table onto
@@ -111,7 +122,10 @@ def publish_to_kb(*, source_type: str, source_id: int, company_id: str,
         db.create_kb_version(
             existing["id"], existing.get("doc_version", ""),
             "Superseded by re-publish", version_filename,
+            changed_by=_current_actor(),
         )
+        audit.log("kb_document", existing["id"], "Version created",
+                   detail=f"Superseded version {existing.get('doc_version', '')}")
     stored_filename = doc_utils._resolve_collision(upload_dir, base_name)
     file_path = os.path.join(upload_dir, stored_filename)
     with open(file_path, "wb") as f:
@@ -122,18 +136,23 @@ def publish_to_kb(*, source_type: str, source_id: int, company_id: str,
         db.update_kb_document_file(
             existing["id"], title=title, doc_version=version, effective_date=effective_date,
             original_name=base_name, stored_filename=stored_filename,
-            file_type="docx", file_size=file_size,
+            file_type="docx", file_size=file_size, updated_by=_current_actor(),
         )
         kb_id = existing["id"]
+        audit.log("kb_document", kb_id, "Updated", old=existing,
+                   new={"title": title, "doc_version": version, "original_name": base_name})
     else:
         kb_doc = db.create_kb_document(
             title=title, folder=_folder_for(doc_type), tags=f"auto-published,{doc_type}".strip(","),
             doc_version=version, effective_date=effective_date, review_date=None,
             original_name=base_name, stored_filename=stored_filename,
             file_type="docx", file_size=file_size, company_id=company_id,
+            created_by=_current_actor(),
         )
         db.set_kb_document_source(kb_doc["id"], source_type, source_id)
         kb_id = kb_doc["id"]
+        audit.log("kb_document", kb_id, "Uploaded",
+                   new={"title": title, "original_name": base_name, "source_type": source_type})
 
     db.mark_kb_pending(kb_id)
     process_document_async("kb", kb_id, file_path, "docx")

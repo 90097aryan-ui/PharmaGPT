@@ -62,6 +62,47 @@
     setTimeout(() => toast.remove(), 4000);
   }
 
+  // ── Assume Company Context gate ───────────────────────────────────────
+  // Super Admin has no standing access to tenant content (Deviation, CAPA,
+  // Change Control, Projects, Validation, Knowledge Base, ...) by design —
+  // PLATFORM_ARCHITECTURE.md §7/§13.2. Every module's "create" entry point
+  // calls PharmaAuth.requireCompanyContext() before opening its form, so a
+  // Super Admin without an active Assume Company Context grant is stopped
+  // up front with one explanatory modal instead of reaching the backend's
+  // 403 with no context.
+  const NO_STANDING_ACCESS_ERROR = "Super Admin has no standing access to tenant content";
+
+  function showNoCompanyContextModal() {
+    if (el("no-company-context-modal")) return;
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay open";
+    overlay.id = "no-company-context-modal";
+    overlay.innerHTML = `
+      <div class="modal open">
+        <div class="modal-header">
+          <h2>Company Context Required</h2>
+          <button class="modal-close" onclick="document.getElementById('no-company-context-modal').remove()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p>Please assume a company before creating tenant records.</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-primary" onclick="document.getElementById('no-company-context-modal').remove()">OK</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+  }
+
+  function requireCompanyContext() {
+    const user = session && session.user;
+    if (user && user.role === "super_admin" && !user.assumed_company_id) {
+      showNoCompanyContextModal();
+      return false;
+    }
+    return true;
+  }
+
   // ── Public API (used by static/js/*.js modules that want it, e.g. a
   // future "logged in as" display; nothing else currently depends on it) ──
   window.PharmaAuth = {
@@ -70,6 +111,7 @@
     getAccessToken: () => (session && session.access_token) || null,
     logout: () => logout(),
     showToast: showGlobalToast,
+    requireCompanyContext: requireCompanyContext,
   };
 
   // ── fetch() patch: attach the bearer token to same-origin requests, and
@@ -97,7 +139,12 @@
           .clone()
           .json()
           .then(function (body) {
-            showGlobalToast((body && body.error) || "You don't have permission to do that.");
+            const message = (body && body.error) || "You don't have permission to do that.";
+            // Every tenant-module create flow now surfaces this exact error
+            // itself (module-level catch block / inline status), now that
+            // requireCompanyContext() gates the action before the form even
+            // opens — toasting it here too would duplicate that message.
+            if (message !== NO_STANDING_ACCESS_ERROR) showGlobalToast(message);
           })
           .catch(function () {
             showGlobalToast("You don't have permission to do that.");

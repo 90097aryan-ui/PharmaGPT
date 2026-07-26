@@ -441,8 +441,24 @@ async function initQMSDashboard() {
       </div>
     `;
   } catch (e) {
-    if (window.PharmaUI) window.PharmaUI.errorState(body, { message: e.message, onRetry: initQMSDashboard });
-    else body.innerHTML = `<div class="qms-empty"><p>Failed to load QMS dashboard: ${e.message}</p></div>`;
+    // RBF-001 (Dashboard UX): a Super Admin with no assumed company gets
+    // this exact 403 on every tenant-scoped read, including this dashboard.
+    // Showing the raw backend string with no next step forced them to
+    // guess. Reuses the existing Assume Company Context modal/button
+    // (admin_assume_context.js) — no new modal, no duplicate UI.
+    if (e.message === "Super Admin has no standing access to tenant content" && window.PharmaUI) {
+      window.PharmaUI.emptyState(body, {
+        icon: "building-2",
+        title: "Company Context Required",
+        message: "Please assume a company before accessing tenant content.",
+        actionLabel: "Assume Company",
+        onAction: () => document.getElementById("btn-assume-context")?.click(),
+      });
+    } else if (window.PharmaUI) {
+      window.PharmaUI.errorState(body, { message: e.message, onRetry: initQMSDashboard });
+    } else {
+      body.innerHTML = `<div class="qms-empty"><p>Failed to load QMS dashboard: ${e.message}</p></div>`;
+    }
   }
 }
 window.initQMSDashboard = initQMSDashboard;

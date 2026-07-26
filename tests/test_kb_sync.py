@@ -185,3 +185,47 @@ def test_republish_snapshots_the_outgoing_version_instead_of_discarding_it(clien
     versions = db.get_kb_versions(kb_row["id"])
     assert len(versions) == 1
     assert versions[0]["stored_filename"]
+
+
+# ── RBF-001 Fix 2: creator attribution + audit trail for auto-published KB ──
+
+def test_auto_published_kb_document_has_creator_attribution(client):
+    doc = client.post("/qms/documents", json={"title": "Attributed SOP", "doc_type": "SOP"}).get_json()
+    client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP"})
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+
+    kb_row = _kb_rows_for("document", doc["id"])[0]
+    assert kb_row["created_by"] == "Test User"  # conftest's fake authenticated tenant
+    assert kb_row["updated_by"] == "Test User"
+
+
+def test_auto_publish_logs_uploaded_audit_entry(client):
+    doc = client.post("/qms/documents", json={"title": "Audited SOP", "doc_type": "SOP"}).get_json()
+    client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP"})
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+
+    kb_row = _kb_rows_for("document", doc["id"])[0]
+    entries = client.get(f"/qms/kb_document/{kb_row['id']}/audit-trail").get_json()
+    assert [e["action"] for e in entries] == ["Uploaded"]
+    assert entries[0]["performed_by"] == "Test User"
+
+
+def test_republish_logs_version_created_and_updated_audit_entries(client):
+    doc = client.post("/qms/documents", json={"title": "Republished SOP", "doc_type": "SOP"}).get_json()
+    client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v1"})
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    kb_row = _kb_rows_for("document", doc["id"])[0]
+
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Rejected"})
+    client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v2 — revised"})
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
+    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+
+    entries = client.get(f"/qms/kb_document/{kb_row['id']}/audit-trail").get_json()
+    assert [e["action"] for e in entries] == ["Uploaded", "Version created", "Updated"]
+
+    updated_row = db.get_kb_document(kb_row["id"])
+    assert updated_row["updated_by"] == "Test User"
