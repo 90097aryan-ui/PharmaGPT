@@ -1,0 +1,41 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   investigation_case.css — Investigation Case component (architecture
+   refactor: Workflow vs. Investigation separation).
+
+   Reuses global primitives (.qms-section-card, .qms-stats-grid, .qms-table,
+   .qms-panel-item, .form-grid, .btn-primary/.btn-secondary, .badge) already
+   loaded by qms.css / style.css — this file only adds the Investigation
+   Case's own sub-tab strip, visually distinct from the outer deviation
+   tabs (.qms-tabs) so Workflow vs. Investigation read as different concepts
+   (redesign spec Part 10).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.ic-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px;
+  margin-bottom: 16px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.ic-tab {
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.ic-tab:hover  { background: var(--surface); color: var(--navy); }
+.ic-tab.active { background: var(--surface); color: var(--accent); box-shadow: var(--shadow); }
+
+.ic-tab-body { padding-bottom: 8px; }

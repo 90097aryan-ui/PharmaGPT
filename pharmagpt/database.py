@@ -373,6 +373,25 @@ def init_db() -> None:
     conn.executescript(QMS_SCHEMA)
     conn.commit()
 
+    # ── Workflow Engine (Phase 1: Deviation Investigation Redesign) ──────────
+    # Defensive: covers any DB that already ran an earlier draft of this
+    # table (CREATE TABLE IF NOT EXISTS above is a no-op once the table
+    # exists, so a missing column needs its own ALTER).
+    _add_column_if_missing(conn, "qms_workflow_instance_steps", "eligible_roles", "TEXT NOT NULL DEFAULT ''")
+    conn.commit()
+
+    # ── Investigation Case Phase 2 (Investigation Tasks / Evidence / ─────────
+    # Interviews / Summary capability additions) ──────────────────────────────
+    # Additive columns only — qms_investigation_tasks itself is a brand new
+    # table created by QMS_SCHEMA above (CREATE TABLE IF NOT EXISTS), no
+    # migration needed for it.
+    _add_column_if_missing(conn, "qms_investigation_evidence", "source", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "qms_investigation_evidence", "version", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "qms_investigation_interviews", "notes", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "qms_investigation_interviews", "attachment_id", "INTEGER DEFAULT NULL")
+    _add_column_if_missing(conn, "qms_investigation_summary", "open_questions_json", "TEXT DEFAULT '[]'")
+    conn.commit()
+
     # ── Phase 3.5 dual-write bookkeeping (docs/PHASE3_EXECUTION_PLAN.md) ──────
     _add_column_if_missing(conn, "qms_deviations", "postgres_id", "TEXT DEFAULT NULL")
     _add_column_if_missing(conn, "qms_capas", "postgres_id", "TEXT DEFAULT NULL")

@@ -45,7 +45,7 @@ def create_deviation(data: dict, *, company_id: str) -> dict:
             data.get("initiated_by", ""),
             data.get("description", ""),
             data.get("immediate_action", ""),
-            data.get("status", "Initiated"),
+            data.get("status", "Draft"),
             data.get("risk_level", ""),
             json.dumps(data.get("form_data", {})),
             company_id,
@@ -160,7 +160,7 @@ def get_dashboard_stats(company_id: str) -> dict:
     stats = {"total": len(rows), "open": 0, "closed": 0, "by_type": {}, "by_category": {}, "by_status": {}}
     for r in rows:
         d = dict(r)
-        status = d.get("status", "Initiated")
+        status = d.get("status", "Draft")
         stats["by_status"][status] = stats["by_status"].get(status, 0) + 1
         if status in ("Closed", "Rejected"):
             stats["closed"] += 1

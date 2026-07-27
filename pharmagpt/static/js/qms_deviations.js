@@ -247,7 +247,7 @@ async function qmsDevOpenDetail(id) {
       </div>
       <div class="qms-body">
         <div class="qms-tabs" id="qms-dev-tabs">
-          ${["overview", "investigation", "impact", "capa", "attachments", "comments", "audit", "approval"]
+          ${["overview", "lifecycle", "investigation", "impact", "capa", "attachments", "comments", "audit"]
             .map(t => `<button class="qms-tab ${t === qmsDevActiveTab ? "active" : ""}" onclick="qmsDevSwitchTab('${t}')">${qmsDevTabLabel(t)}</button>`).join("")}
         </div>
         <div id="qms-dev-tab-body"></div>
@@ -272,15 +272,14 @@ function qmsDevMetaHTML(dev) {
 
 function qmsDevTabLabel(t) {
   return {
-    overview: "Overview", investigation: "Investigation", impact: "Impact Assessment",
-    capa: "CAPA Links", attachments: "Attachments", comments: "Comments",
-    audit: "Audit Trail", approval: "Approval",
+    overview: "Overview", lifecycle: "Lifecycle", investigation: "Investigation Case", impact: "Impact Assessment",
+    capa: "CAPA Links", attachments: "Attachments", comments: "Comments", audit: "Audit Trail",
   }[t] || t;
 }
 
 async function qmsDevSwitchTab(tab) {
   qmsDevActiveTab = tab;
-  const order = ["overview", "investigation", "impact", "capa", "attachments", "comments", "audit", "approval"];
+  const order = ["overview", "lifecycle", "investigation", "impact", "capa", "attachments", "comments", "audit"];
   document.querySelectorAll("#qms-dev-tabs .qms-tab").forEach((b, i) => b.classList.toggle("active", order[i] === tab));
   const dev = await qmsFetch(`/qms/deviations/${qmsDevCurrentId}`);
   qmsDevRenderTab(dev);
@@ -310,8 +309,22 @@ function qmsDevRenderTab(dev) {
         </div>
       </div>
     `;
+  } else if (qmsDevActiveTab === "lifecycle") {
+    qmsDevRenderLifecycleTab(dev);
   } else if (qmsDevActiveTab === "investigation") {
-    qmsDevRenderInvestigation(id);
+    if (!dev.investigation_unlocked) {
+      el.innerHTML = `
+        <div class="qms-section-card" style="text-align:center;padding:40px 20px">
+          <div style="font-size:32px;margin-bottom:8px">🔒</div>
+          <h3>Investigation Case Locked</h3>
+          <p style="font-size:12.5px;color:var(--text-muted)">Reason: ${dev.lock_reason || "Waiting for QA Approval"}</p>
+          <p style="font-size:12px;color:var(--text-muted);margin-top:8px">
+            Complete the pending approval step on the <a href="#" onclick="qmsDevSwitchTab('lifecycle');return false;">Lifecycle</a> tab to unlock this tab.
+          </p>
+        </div>`;
+    } else {
+      qmsDevRenderInvestigationCase(id);
+    }
   } else if (qmsDevActiveTab === "impact") {
     qmsDevRenderImpact(id);
   } else if (qmsDevActiveTab === "capa") {
@@ -325,9 +338,6 @@ function qmsDevRenderTab(dev) {
   } else if (qmsDevActiveTab === "audit") {
     el.innerHTML = `<div id="qms-audit-deviation-${id}"></div>`;
     qmsRenderAuditTrail(`qms-audit-deviation-${id}`, "deviation", id);
-  } else if (qmsDevActiveTab === "approval") {
-    el.innerHTML = `<div id="qms-approval-deviation-${id}"></div>`;
-    qmsDevRenderApprovalTab(id);
   }
 }
 
@@ -351,99 +361,21 @@ async function qmsDevSaveOverview(id) {
 }
 window.qmsDevSaveOverview = qmsDevSaveOverview;
 
-// ── Investigation tab: AI Investigation Assistant ─────────────────────────────
+// ── Investigation Case tab: mounts the reusable investigation_case.js component ──
+// The Investigation Case (evidence, SOP review, interviews, timeline, AI
+// Assistant, root cause, risk, attachments, summary) is a separate concern
+// from the Lifecycle/Workflow tab — see investigation_case.js. This module
+// only mounts it once unlocked; it owns no investigation UI of its own.
 
-async function qmsDevRenderInvestigation(id) {
+function qmsDevRenderInvestigationCase(id) {
   const el = document.getElementById("qms-dev-tab-body");
-  el.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading investigation…</div>`;
-  const inv = await qmsFetch(`/qms/deviations/${id}/investigation`);
-  const fb = (inv && inv.fishbone_data) || {};
-  const fw = (inv && inv.five_why_data) || [];
-  const tl = (inv && inv.timeline_data) || [];
-
-  el.innerHTML = `
-    <div class="qms-section-card">
-      <h3>AI Investigation Assistant</h3>
-      <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px">
-        Generates a Fishbone (Ishikawa) analysis, 5-Why chain, investigation timeline, and root cause
-        determination using the PharmaGPT regulatory persona.
-      </p>
-      <button class="btn-primary" id="qms-dev-investigate-btn" onclick="qmsDevRunInvestigation(${id})"><span class=\'icon\' data-lucide=\'sparkles\'></span> Run AI Investigation</button>
-    </div>
-
-    ${(inv && inv.root_cause_statement) ? `
-      <div class="qms-section-card">
-        <h3>Root Cause Determination</h3>
-        <div class="form-grid">
-          <div class="form-field"><label>Category</label><input type="text" id="qms-inv-rc-category" value="${inv.root_cause_category || ""}" /></div>
-          <div class="form-field span-2"><label>Root Cause Statement</label><textarea id="qms-inv-rc-statement">${inv.root_cause_statement || ""}</textarea></div>
-        </div>
-        <div class="qms-form-actions">
-          <button class="btn-primary" onclick="qmsDevSaveRootCause(${id})">Save</button>
-        </div>
-      </div>
-
-      <div class="qms-section-card">
-        <h3>Fishbone (Ishikawa) Analysis</h3>
-        <div class="form-grid cols-3">
-          ${["man", "machine", "method", "material", "measurement", "environment"].map(cat => `
-            <div class="form-field">
-              <label>${cat}</label>
-              <div style="font-size:12.5px">${(fb[cat] || []).length ? "<ul style='margin:0;padding-left:16px'>" + fb[cat].map(i => `<li>${i}</li>`).join("") + "</ul>" : "<em>None identified</em>"}</div>
-            </div>
-          `).join("")}
-        </div>
-      </div>
-
-      <div class="qms-section-card">
-        <h3>Five-Why Analysis</h3>
-        ${fw.length ? `
-          <table class="qms-table">
-            <thead><tr><th style="width:60px">#</th><th>Question</th><th>Answer</th></tr></thead>
-            <tbody>${fw.map((w, i) => `<tr><td>Why ${i + 1}</td><td>${w.question || ""}</td><td>${w.answer || ""}</td></tr>`).join("")}</tbody>
-          </table>` : `<p style="font-size:12.5px;color:var(--text-muted)">No 5-Why analysis recorded.</p>`}
-      </div>
-
-      <div class="qms-section-card">
-        <h3>Timeline</h3>
-        ${tl.length ? `
-          <table class="qms-table">
-            <thead><tr><th>Date/Time</th><th>Event</th></tr></thead>
-            <tbody>${tl.map(t => `<tr><td>${t.datetime || ""}</td><td>${t.event || ""}</td></tr>`).join("")}</tbody>
-          </table>` : `<p style="font-size:12.5px;color:var(--text-muted)">No timeline recorded.</p>`}
-      </div>
-    ` : ""}
-  `;
-}
-
-async function qmsDevRunInvestigation(id) {
-  const btn = document.getElementById("qms-dev-investigate-btn");
-  if (btn) { btn.disabled = true; btn.textContent = "Running AI investigation…"; }
-  qmsToast("Running AI Investigation Assistant…");
-  try {
-    await qmsPostJSON(`/qms/deviations/${id}/investigate`, {});
-    qmsToast("Investigation complete");
-    qmsDevRenderInvestigation(id);
-  } catch (e) {
-    qmsToast("Investigation failed: " + e.message);
- if (btn) { btn.disabled = false; btn.textContent = "Run AI Investigation"; }
+  el.innerHTML = `<div id="qms-investigation-case-deviation-${id}"></div>`;
+  if (window.InvestigationCase) {
+    window.InvestigationCase.mount(`qms-investigation-case-deviation-${id}`, "deviation", id, "/qms/deviations");
+  } else {
+    el.innerHTML = `<div class="qms-empty"><p>Investigation Case component failed to load.</p></div>`;
   }
 }
-window.qmsDevRunInvestigation = qmsDevRunInvestigation;
-
-async function qmsDevSaveRootCause(id) {
-  const data = {
-    root_cause_category: document.getElementById("qms-inv-rc-category").value.trim(),
-    root_cause_statement: document.getElementById("qms-inv-rc-statement").value.trim(),
-  };
-  try {
-    await qmsPutJSON(`/qms/deviations/${id}/investigation`, data);
-    qmsToast("Root cause saved");
-  } catch (e) {
-    qmsToast("Save failed: " + e.message);
-  }
-}
-window.qmsDevSaveRootCause = qmsDevSaveRootCause;
 
 // ── Impact assessment tab ──────────────────────────────────────────────────────
 
@@ -602,23 +534,210 @@ async function qmsDevCreateCapaFromSuggestion(id) {
 }
 window.qmsDevCreateCapaFromSuggestion = qmsDevCreateCapaFromSuggestion;
 
-// ── Approval / status transition ──────────────────────────────────────────────
+// ── Workflow tab: gated, named-approver investigation lifecycle ──────────────
+// Replaces the old free action-dropdown approval tab. Buttons shown here are
+// context-sensitive: only the current step is actionable, and only for the
+// user actually entitled to act on it (a named approver for an 'approval'
+// step, or any user whose role is eligible for an 'activity' step) — see
+// services/workflow_engine.py::decide_step for the server-side enforcement
+// this UI mirrors.
 
-async function qmsDevRenderApprovalTab(id) {
-  const actions = [
-    "Investigation Started", "Root Cause Identified", "Impact Assessed", "Risk Assessed",
-    "CAPA Assigned", "Submitted for QA Review", "Approved", "Rejected", "Closed",
-  ];
-  qmsRenderApproval(`qms-approval-deviation-${id}`, "deviation", id, actions, `/qms/deviations/${id}/approval`,
-    () => qmsDevRefreshApprovalTab(id));
+const QMS_DEV_STEP_BUTTON_LABELS = {
+  evidence_collection: "Investigation Complete — Submit for CAPA Review",  // step_key kept from V1 for engine compat; displays as "Investigation"
+  effectiveness_check: "Mark Effectiveness Check Complete",
+  closed: "Close Deviation",
+};
+
+// High-level lifecycle shown in the Lifecycle tab (architecture refactor
+// §2/§10) — "Review" and "CAPA" each group several individual approval
+// steps (unchanged from the underlying workflow) under one phase label.
+const QMS_DEV_LIFECYCLE_PHASES = ["Draft", "Submitted", "Review", "Investigation", "CAPA", "Effectiveness Check", "Closure"];
+
+async function qmsDevRenderLifecycleTab(dev) {
+  const id = dev.id;
+  const el = document.getElementById("qms-dev-tab-body");
+  el.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading lifecycle…</div>`;
+  let wf;
+  try {
+    wf = await qmsFetch(`/qms/deviations/${id}/workflow`);
+  } catch (e) {
+    el.innerHTML = `<div class="qms-empty"><p>Failed to load lifecycle: ${e.message}</p></div>`;
+    return;
+  }
+
+  if (!wf.instance) {
+    el.innerHTML = `
+      <div class="qms-section-card">
+        <h3>Draft</h3>
+        <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px">
+          This deviation has not been submitted yet. Submitting starts the Review gate (Initiator Manager
+          Review → QA Manager Review → QA Approval) — the Investigation Case stays locked until QA Approval clears.
+        </p>
+        <button class="btn-primary" onclick="qmsDevSubmitForReview(${id})">Submit for Review</button>
+      </div>`;
+    return;
+  }
+
+  const user = (window.PharmaAuth && window.PharmaAuth.getUser()) || {};
+  const currentPhase = wf.current_phase || "Draft";
+
+  // Group steps by phase, preserving step_order within each phase.
+  const stepsByPhase = {};
+  for (const s of wf.steps) {
+    (stepsByPhase[s.phase] = stepsByPhase[s.phase] || []).push(s);
+  }
+
+  el.innerHTML = `
+    <div class="qms-section-card">
+      <h3>Lifecycle</h3>
+      <div class="qms-lifecycle-track">
+        ${QMS_DEV_LIFECYCLE_PHASES.map(p => `
+          <span class="qms-lifecycle-phase ${p === currentPhase ? "active" : ""} ${QMS_DEV_LIFECYCLE_PHASES.indexOf(p) < QMS_DEV_LIFECYCLE_PHASES.indexOf(currentPhase) ? "done" : ""}">${p}</span>
+        `).join("<span class=\"qms-lifecycle-arrow\">→</span>")}
+      </div>
+      <div class="qms-detail-meta" style="margin-top:12px">
+        <span>Progress: ${wf.progress_pct}%</span>
+        <span>Assigned To: ${(wf.assigned_to || []).join(", ") || "—"}</span>
+        <span>Pending Since: ${wf.pending_since ? new Date(wf.pending_since).toLocaleDateString() : "—"}</span>
+        <span>Remaining Steps: ${wf.remaining_steps.length}</span>
+      </div>
+    </div>
+
+    ${QMS_DEV_LIFECYCLE_PHASES.filter(p => stepsByPhase[p]).map(phase => {
+      const steps = stepsByPhase[phase];
+      const completed = steps.filter(s => s.status === "approved").length;
+      const header = steps.length > 1 ? `${phase} (${completed} of ${steps.length} Complete)` : phase;
+      return `
+        <div class="qms-section-card">
+          <h3>${header}</h3>
+          <div class="qms-workflow-stepper">
+            ${steps.map(s => qmsDevWorkflowStepHTML(id, s, wf.instance, user)).join("")}
+          </div>
+        </div>
+      `;
+    }).join("")}
+  `;
+}
+window.qmsDevRenderLifecycleTab = qmsDevRenderLifecycleTab;
+
+function qmsDevWorkflowStepHTML(id, step, instance, user) {
+  const isCurrent = instance.status === "in_progress" && step.step_order === instance.current_step_order;
+  const isPast = step.step_order < instance.current_step_order || step.status !== "pending";
+  const stateClass = step.status === "approved" ? "success" : step.status === "rejected" ? "critical"
+    : step.status === "returned" ? "warning" : isCurrent ? "info" : "";
+
+  let body = "";
+  if (step.status !== "pending") {
+    body = `<div class="qms-panel-item-meta">${qmsBadge(step.status)} by ${step.decided_by || "—"} on ${step.decided_at || "—"}${step.comments ? ` — "${step.comments}"` : ""}</div>`;
+  } else if (isCurrent) {
+    body = qmsDevWorkflowActionHTML(id, step, user);
+  } else {
+    body = `<div class="qms-panel-item-meta">Not yet reached</div>`;
+  }
+
+  return `
+    <div class="qms-stat-card ${stateClass}" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong>${step.step_order}. ${step.step_name}</strong>
+        ${step.step_type === "approval" ? qmsDevApproversBadge(step.approvers) : ""}
+      </div>
+      ${body}
+    </div>
+  `;
 }
 
-async function qmsDevRefreshApprovalTab(id) {
+function qmsDevApproversBadge(approvers) {
+  if (!approvers || !approvers.length) return `<span class="qms-panel-item-meta">No approver assigned</span>`;
+  return `<span class="qms-panel-item-meta">Approver(s): ${approvers.map(a => a.display_name || a.user_id).join(", ")}</span>`;
+}
+
+function qmsDevWorkflowActionHTML(id, step, user) {
+  const formId = `qms-wf-action-${id}-${step.step_order}`;
+  if (step.step_type === "approval") {
+    const approvers = step.approvers || [];
+    if (!approvers.length) {
+      return `
+        <div class="form-grid" style="margin-top:8px">
+          <div class="form-field"><label>Approver User ID</label><input type="text" id="${formId}-uid" placeholder="Supabase user id" /></div>
+          <div class="form-field"><label>Display Name</label><input type="text" id="${formId}-name" placeholder="Full name" /></div>
+        </div>
+        <div class="qms-form-actions">
+          <button class="btn-secondary" onclick="qmsDevAssignApprover(${id}, ${step.step_order}, '${formId}')">Assign Approver</button>
+        </div>
+        <p style="font-size:11.5px;color:var(--text-muted);margin-top:4px">Awaiting approver assignment — this step cannot be decided until at least one approver is assigned.</p>
+      `;
+    }
+    const isApprover = approvers.some(a => a.user_id === user.user_id);
+    if (!isApprover) {
+      return `<div class="qms-panel-item-meta">Waiting for ${approvers.map(a => a.display_name || a.user_id).join(" or ")} to decide.</div>`;
+    }
+    return `
+      <div class="form-field" style="margin-top:8px"><label>Comments</label><input type="text" id="${formId}-comments" placeholder="Optional comments" /></div>
+      <div class="qms-form-actions">
+        <button class="btn-primary" onclick="qmsDevDecide(${id}, ${step.step_order}, 'approve', '${formId}')">Approve</button>
+        <button class="btn-secondary" onclick="qmsDevDecide(${id}, ${step.step_order}, 'reject', '${formId}')">Reject</button>
+        ${step.step_key === "qa_review" ? `<button class="btn-secondary" onclick="qmsDevDecide(${id}, ${step.step_order}, 'return', '${formId}')">Return for Investigation</button>` : ""}
+      </div>
+    `;
+  }
+
+  // activity step
+  if (!user.role || !(step.eligible_roles || "").split(",").includes(user.role)) {
+    return `<div class="qms-panel-item-meta">Waiting for a user with an eligible role to advance this step.</div>`;
+  }
+  const label = QMS_DEV_STEP_BUTTON_LABELS[step.step_key] || `Complete "${step.step_name}"`;
+  return `
+    <div class="qms-form-actions" style="margin-top:8px">
+      <button class="btn-primary" onclick="qmsDevDecide(${id}, ${step.step_order}, 'advance', null)">${label}</button>
+    </div>
+  `;
+}
+
+async function qmsDevRefreshCurrentView(id) {
   const dev = await qmsFetch(`/qms/deviations/${id}`);
   const metaEl = document.getElementById("qms-dev-meta");
   if (metaEl) metaEl.innerHTML = qmsDevMetaHTML(dev);
-  qmsDevRenderApprovalTab(id);
+  qmsDevRenderTab(dev);
 }
+
+async function qmsDevSubmitForReview(id) {
+  try {
+    await qmsPostJSON(`/qms/deviations/${id}/workflow/start`, {});
+    qmsToast("Submitted for review");
+    qmsDevRefreshCurrentView(id);
+  } catch (e) {
+    qmsToast("Failed to submit: " + e.message);
+  }
+}
+window.qmsDevSubmitForReview = qmsDevSubmitForReview;
+
+async function qmsDevAssignApprover(id, stepOrder, formId) {
+  const user_id = document.getElementById(`${formId}-uid`).value.trim();
+  const display_name = document.getElementById(`${formId}-name`).value.trim();
+  if (!user_id) { qmsToast("Approver User ID is required"); return; }
+  try {
+    await qmsPostJSON(`/qms/deviations/${id}/workflow/steps/${stepOrder}/assign`, {
+      approvers: [{ user_id, display_name }],
+    });
+    qmsToast("Approver assigned");
+    qmsDevRefreshCurrentView(id);
+  } catch (e) {
+    qmsToast("Failed to assign approver: " + e.message);
+  }
+}
+window.qmsDevAssignApprover = qmsDevAssignApprover;
+
+async function qmsDevDecide(id, stepOrder, decision, formId) {
+  const comments = formId && document.getElementById(`${formId}-comments`) ? document.getElementById(`${formId}-comments`).value.trim() : "";
+  try {
+    await qmsPostJSON(`/qms/deviations/${id}/workflow/steps/${stepOrder}/decide`, { decision, comments });
+    qmsToast("Recorded");
+    qmsDevRefreshCurrentView(id);
+  } catch (e) {
+    qmsToast("Failed: " + e.message);
+  }
+}
+window.qmsDevDecide = qmsDevDecide;
 
 // ── Print / Export ──────────────────────────────────────────────────────────
 

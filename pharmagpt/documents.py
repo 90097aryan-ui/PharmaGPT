@@ -40,10 +40,17 @@ MIME_TYPES = {
     "txt":  "text/plain",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    # Investigation Case Evidence (Phase 2 Part 2 — Photos, Videos, CSV exports).
+    "csv":  "text/csv",
+    "jpg":  "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png":  "image/png",
+    "mp4":  "video/mp4",
+    "mov":  "video/quicktime",
 }
 
 # File types that browsers can display inline — others trigger a forced download.
-VIEWABLE_IN_BROWSER = {"pdf", "txt"}
+VIEWABLE_IN_BROWSER = {"pdf", "txt", "jpg", "jpeg", "png", "mp4", "mov"}
 
 
 def get_mime_type(extension: str) -> str:

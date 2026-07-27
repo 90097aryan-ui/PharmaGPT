@@ -39,6 +39,22 @@
 
 .qms-view { background: var(--bg); }
 
+/* #qms-deviations-body is <main class="qms-view">'s only child, itself a
+   flex item in <main>'s column flex layout — without flex:1/min-height:0 it
+   sizes to its content instead of <main>'s bounded height, so a tall
+   deviation detail view got clipped by <main>'s overflow:hidden instead of
+   scrolling (the "need to browser-zoom-out" bug this view's redesign is
+   fixing). flex:1 + min-height:0 lets .qms-page-header (flex-shrink:0) and
+   .qms-body (flex:1; overflow-y:auto, both already defined below) actually
+   split the available height, so .qms-body becomes the one scrolling
+   region — independent of the .sidebar's own overflow-y:auto scroll. */
+#qms-deviations-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 .qms-page-header {
   display: flex;
   align-items: center;
@@ -248,11 +264,56 @@
   color: var(--text-muted);
 }
 
+/* ── Lifecycle tab: phase track ────────────────────────────────────────────
+   Architecture refactor — "Review"/"CAPA" group several individual approval
+   steps under one phase label here; the steps themselves are unchanged. */
+.qms-lifecycle-track {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.qms-lifecycle-phase {
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.qms-lifecycle-phase.done {
+  background: var(--success-bg, #e6f4ea);
+  border-color: var(--success, #2e7d32);
+  color: var(--success, #2e7d32);
+}
+
+.qms-lifecycle-phase.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.qms-lifecycle-arrow {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .qms-tabs {
   display: flex;
   gap: 2px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 18px;
+  /* .qms-body (the scroll container these tabs live in) already scrolls
+     independently via its own overflow-y: auto — sticking the tabs to its
+     top keeps them reachable without the page needing a browser zoom-out
+     to see both tabs and content at once. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface);
 }
 
 .qms-tab {

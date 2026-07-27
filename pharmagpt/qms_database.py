@@ -228,7 +228,7 @@ QMS_SCHEMA = """
         initiated_by          TEXT    DEFAULT '',
         description           TEXT    DEFAULT '',
         immediate_action      TEXT    DEFAULT '',
-        status                TEXT    DEFAULT 'Initiated',  -- Initiated, Under Investigation, Root Cause Identified, Impact Assessed, Risk Assessed, CAPA Assigned, QA Review, Approved, Closed, Rejected
+        status                TEXT    DEFAULT 'Draft',  -- see QMS_META.deviation_statuses (Phase 1 workflow redesign)
         risk_level            TEXT    DEFAULT '',
         qa_reviewer           TEXT    DEFAULT '',
         approver              TEXT    DEFAULT '',
@@ -341,6 +341,333 @@ QMS_SCHEMA = """
         created_at      TEXT    DEFAULT (datetime('now')),
         FOREIGN KEY (cc_id) REFERENCES qms_change_controls(id) ON DELETE CASCADE
     );
+
+    -- ── Workflow Engine (Phase 1: Deviation Investigation Redesign) ─────────
+    -- Generic, cross-module multi-step approval engine. A `qms_workflow_
+    -- templates` row is a named, ordered workflow definition (module-scoped,
+    -- e.g. module='deviation'); `qms_workflow_template_steps` are its ordered
+    -- steps, each either step_type='approval' (only a user_id explicitly
+    -- assigned to that step's instance may decide it — see
+    -- qms_workflow_step_approvers) or step_type='activity' (any user whose
+    -- role is in eligible_roles may advance it, no named assignment needed).
+    -- `qms_workflow_instances`/`_instance_steps` are the per-record run of a
+    -- template; a record can have more than one instance over its lifetime
+    -- (e.g. a fresh instance on resubmission after rejection), so history is
+    -- never overwritten. Reusable as-is by CAPA/Change Control/SOP later —
+    -- adding another module only needs a new template + step rows, no schema
+    -- change. See services/workflow_engine.py.
+
+    CREATE TABLE IF NOT EXISTS qms_workflow_templates (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        workflow_key    TEXT    NOT NULL UNIQUE,
+        name            TEXT    NOT NULL DEFAULT '',
+        module          TEXT    NOT NULL DEFAULT '',
+        is_active       INTEGER NOT NULL DEFAULT 1,
+        created_at      TEXT    DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS qms_workflow_template_steps (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id     INTEGER NOT NULL,
+        step_order      INTEGER NOT NULL,
+        step_key        TEXT    NOT NULL,
+        step_name       TEXT    NOT NULL DEFAULT '',
+        step_type       TEXT    NOT NULL DEFAULT 'activity',  -- approval | activity
+        eligible_roles  TEXT    NOT NULL DEFAULT '',          -- CSV of platform roles
+        gate_status     TEXT    NOT NULL DEFAULT '',          -- record status set on completion
+        UNIQUE (template_id, step_order),
+        UNIQUE (template_id, step_key),
+        FOREIGN KEY (template_id) REFERENCES qms_workflow_templates(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_wf_template_steps ON qms_workflow_template_steps(template_id, step_order);
+
+    CREATE TABLE IF NOT EXISTS qms_workflow_instances (
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id         INTEGER NOT NULL,
+        record_type         TEXT    NOT NULL,
+        record_id           INTEGER NOT NULL,
+        company_id          TEXT    DEFAULT '',
+        status              TEXT    NOT NULL DEFAULT 'in_progress',  -- in_progress | completed | rejected
+        current_step_order  INTEGER NOT NULL DEFAULT 1,
+        started_at          TEXT    DEFAULT (datetime('now')),
+        completed_at        TEXT    DEFAULT '',
+        FOREIGN KEY (template_id) REFERENCES qms_workflow_templates(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_wf_instances_record ON qms_workflow_instances(record_type, record_id);
+
+    CREATE TABLE IF NOT EXISTS qms_workflow_instance_steps (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        instance_id       INTEGER NOT NULL,
+        template_step_id  INTEGER NOT NULL,
+        step_order        INTEGER NOT NULL,
+        step_key          TEXT    NOT NULL DEFAULT '',
+        step_name         TEXT    NOT NULL DEFAULT '',
+        step_type         TEXT    NOT NULL DEFAULT 'activity',
+        eligible_roles    TEXT    NOT NULL DEFAULT '',
+        gate_status       TEXT    NOT NULL DEFAULT '',
+        status            TEXT    NOT NULL DEFAULT 'pending',  -- pending | in_progress | approved | rejected | returned | skipped
+        decided_by        TEXT    DEFAULT '',
+        decided_at        TEXT    DEFAULT '',
+        comments          TEXT    DEFAULT '',
+        FOREIGN KEY (instance_id) REFERENCES qms_workflow_instances(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_wf_instance_steps ON qms_workflow_instance_steps(instance_id, step_order);
+
+    CREATE TABLE IF NOT EXISTS qms_workflow_step_approvers (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        instance_step_id   INTEGER NOT NULL,
+        user_id            TEXT    NOT NULL,
+        display_name       TEXT    DEFAULT '',
+        created_at         TEXT    DEFAULT (datetime('now')),
+        FOREIGN KEY (instance_step_id) REFERENCES qms_workflow_instance_steps(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_wf_step_approvers ON qms_workflow_step_approvers(instance_step_id);
+
+    -- Seed the Deviation Investigation workflow template (idempotent —
+    -- workflow_key/step_key are UNIQUE, so re-running executescript on an
+    -- already-migrated DB is a no-op). Step 1 ("submitted") is completed
+    -- automatically by workflow_engine.start_instance() the moment a
+    -- deviation is submitted for review, so it needs no named approver.
+    -- Steps 3/4/5 are the pre-investigation approval gate (Initiator Manager
+    -- Review -> QA Manager Review -> QA Approval); the Investigation tab
+    -- stays locked until step 5 ("qa_approval") is approved. Steps 6-11 are
+    -- Phase 1 status placeholders for the Phase 2/3 evidence workspace and AI
+    -- engine; steps 12/13 are the closing approval gate.
+    INSERT OR IGNORE INTO qms_workflow_templates (workflow_key, name, module)
+        VALUES ('DEVIATION_INVESTIGATION_V1', 'Deviation Investigation Workflow', 'deviation');
+
+    INSERT OR IGNORE INTO qms_workflow_template_steps
+        (template_id, step_order, step_key, step_name, step_type, eligible_roles, gate_status)
+    SELECT t.id, s.step_order, s.step_key, s.step_name, s.step_type, s.eligible_roles, s.gate_status
+    FROM qms_workflow_templates t
+    JOIN (
+        SELECT 1  AS step_order, 'submitted'            AS step_key, 'Submitted for Review'      AS step_name, 'activity' AS step_type, 'user,reviewer_qa,company_admin' AS eligible_roles, 'Submitted for Review'      AS gate_status
+        UNION ALL SELECT 2,  'initiator_mgr_review', 'Initiator Manager Review', 'approval', 'reviewer_qa,company_admin', 'Initiator Manager Review'
+        UNION ALL SELECT 3,  'qa_mgr_review',         'QA Manager Review',        'approval', 'reviewer_qa,company_admin', 'QA Manager Review'
+        UNION ALL SELECT 4,  'qa_approval',           'QA Approval',              'approval', 'company_admin',             'QA Approval'
+        UNION ALL SELECT 5,  'investigation_open',    'Investigation Open',       'activity', 'reviewer_qa,company_admin', 'Investigation Open'
+        UNION ALL SELECT 6,  'evidence_collection',   'Evidence Collection',      'activity', 'reviewer_qa,company_admin', 'Evidence Collection'
+        UNION ALL SELECT 7,  'document_review',       'Document Review',          'activity', 'reviewer_qa,company_admin', 'Document Review'
+        UNION ALL SELECT 8,  'interviews',            'Personnel Interviews',     'activity', 'reviewer_qa,company_admin', 'Personnel Interviews'
+        UNION ALL SELECT 9,  'ai_analysis',           'AI Evidence Analysis',     'activity', 'reviewer_qa,company_admin', 'AI Evidence Analysis'
+        UNION ALL SELECT 10, 'root_cause',            'Root Cause Confirmation', 'activity', 'reviewer_qa,company_admin', 'Root Cause Confirmation'
+        UNION ALL SELECT 11, 'capa_recommendation',   'CAPA Recommendation',     'activity', 'reviewer_qa,company_admin', 'CAPA Recommendation'
+        UNION ALL SELECT 12, 'qa_review',             'QA Review',               'approval', 'company_admin',             'QA Review'
+        UNION ALL SELECT 13, 'final_approval',        'Final Approval',          'approval', 'company_admin',             'Final Approval'
+        UNION ALL SELECT 14, 'effectiveness_check',   'Effectiveness Check',     'activity', 'reviewer_qa,company_admin', 'Effectiveness Check'
+        UNION ALL SELECT 15, 'closed',                'Deviation Closure',       'activity', 'company_admin',             'Closed'
+    ) s
+    WHERE t.workflow_key = 'DEVIATION_INVESTIGATION_V1';
+
+    -- ── Architecture refactor: Workflow / Investigation separation ───────────
+    -- DEVIATION_INVESTIGATION_V1 (above) interleaved lifecycle/approval steps
+    -- with investigation-activity steps in one 15-step list. This template
+    -- replaces it for *new* deviations with a high-level lifecycle only —
+    -- the same 5 approval gates (named-approver enforcement, audit trail,
+    -- engine code all unchanged), but every investigation activity (evidence,
+    -- SOP review, interviews, timeline, AI, root cause, CAPA recommendation)
+    -- is removed as a workflow step and lives instead in the new
+    -- qms_investigation_* tables / services/investigation_engine.py,
+    -- reachable freely (no step-advance required) once the Investigation
+    -- Case unlocks at step 4 ("qa_approval") — same unlock step_key as V1.
+    --
+    -- "Review" (steps 2-4) and "CAPA" (steps 6-7) each group multiple
+    -- sequential named-approval steps under one gate_status/display phase —
+    -- this is a *presentation* grouping (qms_deviations.py enriches the
+    -- workflow response with a phase label per step); the 5 approval steps
+    -- underneath are unchanged in kind from V1's initiator_mgr_review/
+    -- qa_mgr_review/qa_approval/qa_review/final_approval.
+    --
+    -- V1 is kept, not dropped — any instance already running against it
+    -- keeps working exactly as before.
+    --
+    -- NOTE on step 5's step_key: workflow_engine.py::decide_step()'s 'return'
+    -- decision (from 'qa_review') hardcodes its return-target lookup as
+    -- step_key == 'evidence_collection' (carried over unmodified from V1,
+    -- per the instruction not to touch the engine). step_key is an internal
+    -- identifier, never shown to users (step_name/gate_status = the
+    -- user-facing "Investigation" label are unaffected), so step 5 keeps
+    -- that exact step_key here purely so "Return for Investigation" keeps
+    -- working against this template without changing engine code.
+    INSERT OR IGNORE INTO qms_workflow_templates (workflow_key, name, module)
+        VALUES ('DEVIATION_LIFECYCLE_V2', 'Deviation Lifecycle', 'deviation');
+
+    INSERT OR IGNORE INTO qms_workflow_template_steps
+        (template_id, step_order, step_key, step_name, step_type, eligible_roles, gate_status)
+    SELECT t.id, s.step_order, s.step_key, s.step_name, s.step_type, s.eligible_roles, s.gate_status
+    FROM qms_workflow_templates t
+    JOIN (
+        SELECT 1 AS step_order, 'submitted'            AS step_key, 'Submitted'               AS step_name, 'activity' AS step_type, 'user,reviewer_qa,company_admin' AS eligible_roles, 'Submitted'          AS gate_status
+        UNION ALL SELECT 2, 'initiator_mgr_review', 'Initiator Manager Review', 'approval', 'reviewer_qa,company_admin', 'Review'
+        UNION ALL SELECT 3, 'qa_mgr_review',         'QA Manager Review',        'approval', 'reviewer_qa,company_admin', 'Review'
+        UNION ALL SELECT 4, 'qa_approval',           'QA Approval',              'approval', 'company_admin',             'Review'
+        UNION ALL SELECT 5, 'evidence_collection',   'Investigation',           'activity', 'reviewer_qa,company_admin', 'Investigation'
+        UNION ALL SELECT 6, 'qa_review',             'QA Review',               'approval', 'company_admin',             'CAPA'
+        UNION ALL SELECT 7, 'final_approval',        'Final Approval',          'approval', 'company_admin',             'CAPA'
+        UNION ALL SELECT 8, 'effectiveness_check',   'Effectiveness Check',     'activity', 'reviewer_qa,company_admin', 'Effectiveness Check'
+        UNION ALL SELECT 9, 'closed',                'Closure',                 'activity', 'company_admin',             'Closed'
+    ) s
+    WHERE t.workflow_key = 'DEVIATION_LIFECYCLE_V2';
+
+    -- ── Investigation Engine (new, record_type-agnostic) ─────────────────────
+    -- Polymorphic on (record_type, record_id), exactly like qms_attachments/
+    -- qms_comments above — so CAPA/Complaint/OOS/OOT/Audit Finding/Supplier/
+    -- Validation investigations can reuse these tables later with just a new
+    -- record_type string, no schema change. Owned/queried only through
+    -- services/investigation_engine.py + qms_investigation_database.py;
+    -- routes live on each business module's own blueprint (e.g.
+    -- routes/qms_deviations.py's /investigation/* sub-routes), never a
+    -- standalone Investigation blueprint.
+
+    CREATE TABLE IF NOT EXISTS qms_investigation_evidence (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        record_type     TEXT    NOT NULL,
+        record_id       INTEGER NOT NULL,
+        category        TEXT    NOT NULL DEFAULT '',  -- BMR, BPR, SOP, Calibration, PM, Cleaning, Environmental, Training, Validation, Change Control, CAPA, Deviation History, Photo, Video, Other
+        attachment_id   INTEGER,                       -- FK to qms_attachments (actual file storage reused, not duplicated)
+        description     TEXT    DEFAULT '',
+        review_status   TEXT    NOT NULL DEFAULT 'Pending',  -- Reviewed, Pending, Not Applicable, Flagged
+        reviewed_by     TEXT    DEFAULT '',
+        reviewed_at     TEXT    DEFAULT '',
+        notes           TEXT    DEFAULT '',
+        created_at      TEXT    DEFAULT (datetime('now')),
+        FOREIGN KEY (attachment_id) REFERENCES qms_attachments(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_inv_evidence_record ON qms_investigation_evidence(record_type, record_id);
+
+    CREATE TABLE IF NOT EXISTS qms_investigation_sop_review (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        record_type       TEXT    NOT NULL,
+        record_id         INTEGER NOT NULL,
+        doc_reference     TEXT    NOT NULL DEFAULT '',  -- SOP/doc number or title
+        version           TEXT    DEFAULT '',
+        effective_date    TEXT    DEFAULT '',
+        relevant_section  TEXT    DEFAULT '',
+        review_status     TEXT    NOT NULL DEFAULT 'Pending',  -- Reviewed, Not Applicable, Requires Clarification, Pending
+        reviewed_by       TEXT    DEFAULT '',
+        reviewed_at       TEXT    DEFAULT '',
+        notes             TEXT    DEFAULT '',
+        created_at        TEXT    DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_inv_sop_review_record ON qms_investigation_sop_review(record_type, record_id);
+
+    CREATE TABLE IF NOT EXISTS qms_investigation_interviews (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        record_type       TEXT    NOT NULL,
+        record_id         INTEGER NOT NULL,
+        interviewee_name  TEXT    NOT NULL DEFAULT '',
+        interviewee_role  TEXT    DEFAULT '',  -- Operator, Supervisor, Engineering, QA, Maintenance, Warehouse, Validation, Microbiology, Store
+        interview_date    TEXT    DEFAULT '',
+        questions_json    TEXT    DEFAULT '[]',
+        answers_json      TEXT    DEFAULT '[]',
+        observation       TEXT    DEFAULT '',
+        status            TEXT    NOT NULL DEFAULT 'Scheduled',  -- Scheduled, Completed, Pending
+        signature         TEXT    DEFAULT '',
+        created_at        TEXT    DEFAULT (datetime('now')),
+        updated_at        TEXT    DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_inv_interviews_record ON qms_investigation_interviews(record_type, record_id);
+
+    CREATE TABLE IF NOT EXISTS qms_investigation_timeline_events (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        record_type     TEXT    NOT NULL,
+        record_id       INTEGER NOT NULL,
+        event_type      TEXT    NOT NULL DEFAULT '',  -- Batch, Machine, Operator, Maintenance, Alarm, Deviation, Sampling, Testing
+        event_datetime  TEXT    DEFAULT '',
+        description     TEXT    DEFAULT '',
+        source          TEXT    DEFAULT '',  -- manual | ai_suggested
+        created_at      TEXT    DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_inv_timeline_record ON qms_investigation_timeline_events(record_type, record_id);
+
+    -- Append-only AI run log — replaces the old mutable ai_investigation_data
+    -- blob so every run is preserved, re-runnable any number of times, never
+    -- gates a workflow step. mode distinguishes the two AI entry points:
+    -- 'assistant' (interactive, ad-hoc) vs 'report_generation' (formal
+    -- write-up). token_usage_json is nullable ("when available").
+    CREATE TABLE IF NOT EXISTS qms_investigation_ai_runs (
+        id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+        record_type            TEXT    NOT NULL,
+        record_id              INTEGER NOT NULL,
+        mode                   TEXT    NOT NULL DEFAULT 'assistant',  -- assistant | report_generation
+        run_type               TEXT    NOT NULL DEFAULT '',           -- evidence_analysis, root_cause_suggestion, timeline_analysis, capa_suggestion, full_report
+        prompt_version         TEXT    DEFAULT '',
+        model                  TEXT    DEFAULT '',
+        input_snapshot_json    TEXT    DEFAULT '{}',
+        output_json            TEXT    DEFAULT '{}',
+        evidence_references_json TEXT  DEFAULT '[]',
+        confidence             REAL,
+        processing_duration_ms INTEGER,
+        token_usage_json       TEXT,   -- nullable
+        generated_by           TEXT    DEFAULT '',
+        created_at             TEXT    DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_inv_ai_runs_record ON qms_investigation_ai_runs(record_type, record_id);
+
+    -- Three-tier root cause (Possible -> Probable -> Confirmed); AI output
+    -- (possible_cause when possible_cause_source='ai') is always kept
+    -- separate from the investigator's own probable_cause/confirmed_root_cause.
+    CREATE TABLE IF NOT EXISTS qms_investigation_root_cause (
+        id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+        record_type                 TEXT    NOT NULL,
+        record_id                   INTEGER NOT NULL,
+        possible_cause               TEXT    DEFAULT '',
+        possible_cause_source        TEXT    DEFAULT '',  -- ai | manual
+        probable_cause               TEXT    DEFAULT '',
+        probable_cause_rationale     TEXT    DEFAULT '',
+        supporting_evidence_refs_json TEXT   DEFAULT '[]',
+        confidence_level             TEXT    DEFAULT '',
+        alternative_causes_json      TEXT    DEFAULT '[]',
+        confirmed_root_cause         TEXT    DEFAULT '',
+        confirmed_by                 TEXT    DEFAULT '',
+        confirmed_at                 TEXT    DEFAULT '',
+        created_at                   TEXT    DEFAULT (datetime('now')),
+        updated_at                   TEXT    DEFAULT (datetime('now')),
+        UNIQUE (record_type, record_id)
+    );
+
+    -- Finalized handoff into CAPA — replaces the old ad-hoc "suggest CAPA
+    -- content" one-shot AI call with a real, auditable record.
+    CREATE TABLE IF NOT EXISTS qms_investigation_summary (
+        id                            INTEGER PRIMARY KEY AUTOINCREMENT,
+        record_type                   TEXT    NOT NULL,
+        record_id                     INTEGER NOT NULL,
+        summary_text                  TEXT    DEFAULT '',
+        key_findings_json              TEXT    DEFAULT '[]',
+        root_cause_ref                 TEXT    DEFAULT '',
+        recommended_capa_actions_json  TEXT    DEFAULT '[]',
+        finalized_by                   TEXT    DEFAULT '',
+        finalized_at                   TEXT    DEFAULT '',
+        created_at                     TEXT    DEFAULT (datetime('now')),
+        updated_at                     TEXT    DEFAULT (datetime('now')),
+        UNIQUE (record_type, record_id)
+    );
+
+    -- Investigation Tasks (Phase 2 Part 1) — investigative activities, NOT
+    -- workflow steps and NOT CAPA actions. Completing a task never advances
+    -- the Workflow Engine; it's tracked here purely so the investigator can
+    -- assign/monitor the legwork of an investigation. Same polymorphic
+    -- (record_type, record_id) pattern as every other Investigation table.
+    CREATE TABLE IF NOT EXISTS qms_investigation_tasks (
+        id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+        record_type             TEXT    NOT NULL,
+        record_id               INTEGER NOT NULL,
+        title                   TEXT    NOT NULL DEFAULT '',
+        description             TEXT    DEFAULT '',
+        assigned_user           TEXT    DEFAULT '',
+        department              TEXT    DEFAULT '',
+        priority                TEXT    DEFAULT 'Medium',   -- Low, Medium, High, Critical
+        due_date                TEXT    DEFAULT '',
+        status                  TEXT    NOT NULL DEFAULT 'Pending',  -- Pending, In Progress, Completed, Cancelled
+        completion_date         TEXT    DEFAULT '',
+        evidence_attachment_id  INTEGER,                     -- FK to qms_attachments (reused, not duplicated)
+        comments                TEXT    DEFAULT '',
+        created_by              TEXT    DEFAULT '',
+        created_at              TEXT    DEFAULT (datetime('now')),
+        updated_at              TEXT    DEFAULT (datetime('now')),
+        FOREIGN KEY (evidence_attachment_id) REFERENCES qms_attachments(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_inv_tasks_record ON qms_investigation_tasks(record_type, record_id);
 """
 
 
@@ -546,9 +873,25 @@ QMS_META = {
     "document_statuses": ["Draft", "Under Review", "Pending Approval", "Effective", "Under Revision", "Obsolete"],
     "deviation_types": ["Minor", "Major", "Critical", "Market"],
     "deviation_categories": ["Manufacturing", "Laboratory", "Engineering", "Validation"],
+    # Phase 1 workflow redesign (services/workflow_engine.py,
+    # DEVIATION_INVESTIGATION_V1 template) — replaces the old flat
+    # Initiated/Under Investigation/.../Approved/Closed list with the gated,
+    # named-approver 17-stage investigation lifecycle. "Rejected" and
+    # "Returned for Investigation" are workflow side-statuses, not steps.
+    # Architecture refactor (Workflow vs. Investigation separation): new
+    # deviations run against DEVIATION_LIFECYCLE_V2, whose status vocabulary
+    # is this high-level lifecycle only — "Review" and "CAPA" each cover
+    # several individual approval steps (see routes/qms_deviations.py
+    # PHASE_GROUPS), and investigation activity no longer produces its own
+    # status values (it lives in the Investigation Case, gated only by
+    # whether it's unlocked, never by a workflow step). Deviations still
+    # running against the retired DEVIATION_INVESTIGATION_V1 template may
+    # carry its older, more granular status strings (e.g. "Evidence
+    # Collection", "CAPA Recommendation") until they reach Closed/Rejected —
+    # not listed here since that template no longer accepts new instances.
     "deviation_statuses": [
-        "Initiated", "Under Investigation", "Root Cause Identified", "Impact Assessed",
-        "Risk Assessed", "CAPA Assigned", "QA Review", "Approved", "Closed", "Rejected",
+        "Draft", "Submitted", "Review", "Investigation", "CAPA",
+        "Effectiveness Check", "Closed", "Rejected", "Returned for Investigation",
     ],
     "capa_sources": ["Deviation", "Audit", "Complaint", "Internal Review", "Management Review", "Other"],
     "capa_statuses": [

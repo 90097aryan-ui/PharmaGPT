@@ -109,8 +109,10 @@ UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER") or os.path.join(os.path.dirname(__fil
 # Maximum upload size in bytes (50 MB)
 MAX_FILE_SIZE = 50 * 1024 * 1024
 
-# File types users are allowed to upload
-ALLOWED_EXTENSIONS = {"pdf", "docx", "xlsx", "txt"}
+# File types users are allowed to upload. csv/jpg/jpeg/png/mp4/mov added for
+# Investigation Case Evidence (Phase 2 Part 2 — Photos, Videos, CSV exports);
+# additive only, every existing upload path keeps working unchanged.
+ALLOWED_EXTENSIONS = {"pdf", "docx", "xlsx", "txt", "csv", "jpg", "jpeg", "png", "mp4", "mov"}
 
 # ── Document extraction engine settings ───────────────────────────────────────
 # See pharmagpt/services/document_processor.py and services/extraction/ for

@@ -319,28 +319,73 @@ def test_company_admin_can_delete_project(client):
     assert db.get_project(project["id"]) is None
 
 
-def test_user_role_cannot_submit_deviation_approval(client):
-    deviation = _create_deviation(client, ADMIN_A)
+def _reach_qa_approval(client, deviation_id, approver_tenant):
+    """Drive a deviation through the Initiator Manager Review -> QA Manager
+    Review -> QA Approval gate, naming `approver_tenant` as the approver for
+    all three steps (all eligible for reviewer_qa/company_admin)."""
+    with _as(approver_tenant):
+        client.post(f"/qms/deviations/{deviation_id}/workflow/start", headers=AUTH_HEADERS)
+        for step_order in (2, 3, 4):
+            client.post(
+                f"/qms/deviations/{deviation_id}/workflow/steps/{step_order}/assign",
+                json={"approvers": [{"user_id": approver_tenant.user_id, "display_name": approver_tenant.display_name}]},
+                headers=AUTH_HEADERS,
+            )
+            client.post(
+                f"/qms/deviations/{deviation_id}/workflow/steps/{step_order}/decide",
+                json={"decision": "approve"}, headers=AUTH_HEADERS,
+            )
 
+
+def test_user_role_cannot_advance_workflow_activity_step(client):
+    deviation = _create_deviation(client, ADMIN_A)
+    _reach_qa_approval(client, deviation["id"], ADMIN_A)
+
+    # Step 5 (Investigation Open) is an activity step eligible to
+    # reviewer_qa/company_admin only — a plain 'user' may not advance it.
     with _as(USER_A):
         resp = client.post(
-            f"/qms/deviations/{deviation['id']}/approval",
-            json={"action": "Investigation Started"}, headers=AUTH_HEADERS,
+            f"/qms/deviations/{deviation['id']}/workflow/steps/5/decide",
+            json={"decision": "advance"}, headers=AUTH_HEADERS,
         )
 
     assert resp.status_code == 403
 
 
-def test_reviewer_qa_can_submit_deviation_approval(client):
+def test_reviewer_qa_can_advance_eligible_workflow_activity_step(client):
     deviation = _create_deviation(client, ADMIN_A)
+    _reach_qa_approval(client, deviation["id"], ADMIN_A)
 
     with _as(REVIEWER_A):
         resp = client.post(
-            f"/qms/deviations/{deviation['id']}/approval",
-            json={"action": "Investigation Started"}, headers=AUTH_HEADERS,
+            f"/qms/deviations/{deviation['id']}/workflow/steps/5/decide",
+            json={"decision": "advance"}, headers=AUTH_HEADERS,
         )
 
-    assert resp.status_code == 201
+    assert resp.status_code == 200
+
+
+def test_reviewer_qa_not_named_as_approver_cannot_decide_approval_step(client):
+    """RBAC for approval steps is per-record and per-named-approver, not
+    just per-role — see PHASE1_INVESTIGATION_PLAN.md: any reviewer_qa/
+    company_admin could decide any deviation's approval under the old free
+    action->status map; the redesign requires being the *assigned* approver."""
+    deviation = _create_deviation(client, ADMIN_A)
+    with _as(ADMIN_A):
+        client.post(f"/qms/deviations/{deviation['id']}/workflow/start", headers=AUTH_HEADERS)
+        client.post(
+            f"/qms/deviations/{deviation['id']}/workflow/steps/2/assign",
+            json={"approvers": [{"user_id": ADMIN_A.user_id, "display_name": ADMIN_A.display_name}]},
+            headers=AUTH_HEADERS,
+        )
+
+    with _as(REVIEWER_A):
+        resp = client.post(
+            f"/qms/deviations/{deviation['id']}/workflow/steps/2/decide",
+            json={"decision": "approve"}, headers=AUTH_HEADERS,
+        )
+
+    assert resp.status_code == 403
 
 
 def test_user_role_cannot_delete_kb_document(client):
@@ -362,16 +407,23 @@ def test_user_role_cannot_delete_kb_document(client):
 
 # ── 3. E-signature spoofing ───────────────────────────────────────────────────
 
-def test_approval_performed_by_cannot_be_spoofed_by_client(client):
+def test_workflow_decide_identity_cannot_be_spoofed_by_client(client):
     """A caller claiming to be someone else in the request body must be
-    ignored — the audit trail must record the authenticated identity."""
+    ignored — the decided_by field must record the authenticated identity."""
     deviation = _create_deviation(client, ADMIN_A)
+    with _as(ADMIN_A):
+        client.post(f"/qms/deviations/{deviation['id']}/workflow/start", headers=AUTH_HEADERS)
+        client.post(
+            f"/qms/deviations/{deviation['id']}/workflow/steps/2/assign",
+            json={"approvers": [{"user_id": REVIEWER_A.user_id, "display_name": REVIEWER_A.display_name}]},
+            headers=AUTH_HEADERS,
+        )
 
     with _as(REVIEWER_A):
         resp = client.post(
-            f"/qms/deviations/{deviation['id']}/approval",
+            f"/qms/deviations/{deviation['id']}/workflow/steps/2/decide",
             json={
-                "action": "Investigation Started",
+                "decision": "approve",
                 "performed_by": "Fake CEO",
                 "role": "super_admin",
                 "electronic_sig": "not-a-real-signature",
@@ -379,31 +431,35 @@ def test_approval_performed_by_cannot_be_spoofed_by_client(client):
             headers=AUTH_HEADERS,
         )
 
-    assert resp.status_code == 201
-    entry = resp.get_json()
-    assert entry["performed_by"] == "Rita Reviewer"
-    assert entry["role"] == "reviewer_qa"
-    assert entry["electronic_sig"] == "Rita Reviewer"
-
-    trail = qmsdb.get_approval_trail("deviation", deviation["id"])
-    assert all(e["performed_by"] == "Rita Reviewer" for e in trail)
-    assert not any(e["performed_by"] == "Fake CEO" for e in trail)
+    assert resp.status_code == 200
+    state = resp.get_json()
+    step2 = next(s for s in state["steps"] if s["step_order"] == 2)
+    assert step2["decided_by"] == "Rita Reviewer"
+    assert step2["decided_by"] != "Fake CEO"
 
 
-def test_approval_audit_entry_also_uses_authenticated_identity(client):
+def test_workflow_audit_entry_also_uses_authenticated_identity(client):
     deviation = _create_deviation(client, ADMIN_A)
+    with _as(ADMIN_A):
+        client.post(f"/qms/deviations/{deviation['id']}/workflow/start", headers=AUTH_HEADERS)
+        client.post(
+            f"/qms/deviations/{deviation['id']}/workflow/steps/2/assign",
+            json={"approvers": [{"user_id": REVIEWER_A.user_id, "display_name": REVIEWER_A.display_name}]},
+            headers=AUTH_HEADERS,
+        )
 
     with _as(REVIEWER_A):
         client.post(
-            f"/qms/deviations/{deviation['id']}/approval",
-            json={"action": "Investigation Started", "performed_by": "Fake CEO"},
+            f"/qms/deviations/{deviation['id']}/workflow/steps/2/decide",
+            json={"decision": "approve", "performed_by": "Fake CEO"},
             headers=AUTH_HEADERS,
         )
 
     audit = qmsdb.get_audit_trail("deviation", deviation["id"])
-    approval_entries = [a for a in audit if a["action"] == "Investigation Started"]
+    approval_entries = [a for a in audit if "Approved" in a["action"]]
     assert approval_entries
     assert all(a["performed_by"] == "Rita Reviewer" for a in approval_entries)
+    assert not any(a["performed_by"] == "Fake CEO" for a in audit)
 
 
 def test_risk_assessment_approval_performed_by_cannot_be_spoofed(client):

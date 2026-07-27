@@ -31,6 +31,7 @@ def mock_gemini(monkeypatch):
     import pharmagpt.services.qms_deviation_service as dev_svc
     import pharmagpt.services.qms_capa_service as capa_svc
     import pharmagpt.services.qms_change_control_service as cc_svc
+    import pharmagpt.services.investigation_engine as inv_engine
     import pharmagpt.routes.qms_documents as doc_routes
 
     def _fake_call_gemini(prompt, temperature=0.3):
@@ -40,7 +41,7 @@ def mock_gemini(monkeypatch):
         yield "# Generated Title\n"
         yield "Some generated markdown content."
 
-    for mod in (shared, doc_svc, dev_svc, capa_svc, cc_svc):
+    for mod in (shared, doc_svc, dev_svc, capa_svc, cc_svc, inv_engine):
         monkeypatch.setattr(mod, "call_gemini", _fake_call_gemini)
     monkeypatch.setattr(shared, "stream_gemini", _fake_stream_gemini)
     monkeypatch.setattr(doc_routes, "stream_gemini", _fake_stream_gemini)
@@ -174,11 +175,30 @@ def test_document_docx_export(client):
 
 # ── Deviation Management ─────────────────────────────────────────────────────
 
+_FIXED_USER_ID = "00000000-0000-0000-0000-000000000001"  # tests/conftest.py::_TEST_TENANT.user_id
+
+
+def _dev_reach_qa_approval(client, did):
+    """Drive a deviation from Draft through the Initiator Manager Review ->
+    QA Manager Review -> QA Approval gate, using the fixture's single fixed
+    tenant (role=company_admin) as the named approver for every step —
+    that role is eligible for all three per DEVIATION_LIFECYCLE_V2 (steps
+    2/3/4, displayed as the "Review" phase)."""
+    r = client.post(f"/qms/deviations/{did}/workflow/start")
+    assert r.status_code == 201, r.get_json()
+    for step_order in (2, 3, 4):
+        r = client.post(f"/qms/deviations/{did}/workflow/steps/{step_order}/assign",
+                         json={"approvers": [{"user_id": _FIXED_USER_ID, "display_name": "Test User"}]})
+        assert r.status_code == 200, r.get_json()
+        r = client.post(f"/qms/deviations/{did}/workflow/steps/{step_order}/decide", json={"decision": "approve"})
+        assert r.status_code == 200, r.get_json()
+
+
 def test_deviation_crud_lifecycle(client):
     r = client.post("/qms/deviations", json={"title": "Temp excursion", "deviation_type": "Major"})
     assert r.status_code == 201
     dev = r.get_json()
-    assert dev["status"] == "Initiated"
+    assert dev["status"] == "Draft"
     did = dev["id"]
 
     assert client.get("/qms/deviations").status_code == 200
@@ -189,25 +209,142 @@ def test_deviation_crud_lifecycle(client):
     assert r.status_code == 200
 
 
-def test_deviation_investigation_ai_route(client, mock_gemini, monkeypatch):
-    import pharmagpt.services.qms_deviation_service as dev_svc
+def test_deviation_investigation_case_locked_until_qa_approval(client, mock_gemini):
+    dev = client.post("/qms/deviations", json={"title": "Dev"}).get_json()
+    r = client.post(f"/qms/deviations/{dev['id']}/investigation/ai/assistant", json={})
+    assert r.status_code == 423
+    r = client.post(f"/qms/deviations/{dev['id']}/investigation/evidence", json={"category": "BMR"})
+    assert r.status_code == 423
+    assert client.get(f"/qms/deviations/{dev['id']}").get_json()["investigation_unlocked"] is False
+
+
+def test_deviation_investigation_ai_assistant_and_report(client, mock_gemini, monkeypatch):
+    import pharmagpt.services.investigation_engine as inv_engine
     canned = json.dumps({
-        "fishbone_data": {"man": ["fatigue"], "machine": [], "method": [], "material": [], "measurement": [], "environment": []},
-        "five_why_data": [{"question": "Why?", "answer": "Because"}],
-        "timeline_data": [{"datetime": "T0", "event": "Discovered"}],
-        "root_cause_category": "Human Error",
-        "root_cause_statement": "Operator fatigue led to missed step",
+        "analysis": "Evidence points to a maintenance gap", "possible_causes": [{"cause": "Loose connection", "confidence": 0.7}],
+        "missing_evidence": [], "recommended_next_steps": ["Review PM records"],
     })
-    monkeypatch.setattr(dev_svc, "call_gemini", lambda prompt, temperature=0.3: canned)
+    monkeypatch.setattr(inv_engine, "call_gemini", lambda prompt, temperature=0.3: canned)
 
     dev = client.post("/qms/deviations", json={"title": "Dev"}).get_json()
-    r = client.post(f"/qms/deviations/{dev['id']}/investigate")
-    assert r.status_code == 200
-    inv = r.get_json()
-    assert inv["root_cause_statement"] == "Operator fatigue led to missed step"
+    _dev_reach_qa_approval(client, dev["id"])
+    assert client.get(f"/qms/deviations/{dev['id']}").get_json()["investigation_unlocked"] is True
+    # QA Approval just cleared -> the record now sits at the next step, Investigation.
+    assert client.get(f"/qms/deviations/{dev['id']}").get_json()["status"] == "Investigation"
 
-    # Status should auto-transition from Initiated to Under Investigation
-    assert client.get(f"/qms/deviations/{dev['id']}").get_json()["status"] == "Under Investigation"
+    r = client.post(f"/qms/deviations/{dev['id']}/investigation/ai/assistant", json={"question": "What happened?"})
+    assert r.status_code == 201
+    run = r.get_json()
+    assert run["mode"] == "assistant"
+    assert run["output"]["analysis"] == "Evidence points to a maintenance gap"
+    assert run["model"]
+    assert run["prompt_version"]
+
+    r = client.post(f"/qms/deviations/{dev['id']}/investigation/ai/report", json={})
+    assert r.status_code == 201
+    assert r.get_json()["mode"] == "report_generation"
+
+    history = client.get(f"/qms/deviations/{dev['id']}/investigation/ai/history").get_json()
+    assert len(history) == 2
+    assistant_only = client.get(f"/qms/deviations/{dev['id']}/investigation/ai/history?mode=assistant").get_json()
+    assert len(assistant_only) == 1
+
+
+def test_deviation_investigation_tasks_lock_and_crud(client, mock_gemini):
+    dev = client.post("/qms/deviations", json={"title": "Dev"}).get_json()
+    did = dev["id"]
+
+    # Locked before qa_approval — same 423 pattern as evidence/interviews.
+    r = client.post(f"/qms/deviations/{did}/investigation/tasks", json={"title": "Pull batch record"})
+    assert r.status_code == 423
+
+    _dev_reach_qa_approval(client, did)
+
+    r = client.post(f"/qms/deviations/{did}/investigation/tasks", json={
+        "title": "Pull batch record", "assigned_user": "J. Doe", "department": "QA", "priority": "High",
+    })
+    assert r.status_code == 201
+    task = r.get_json()
+    assert task["status"] == "Pending"
+
+    listed = client.get(f"/qms/deviations/{did}/investigation/tasks").get_json()
+    assert len(listed) == 1
+
+    r = client.put(f"/qms/deviations/{did}/investigation/tasks/{task['id']}", json={"status": "Completed"})
+    assert r.status_code == 200
+    updated = r.get_json()
+    assert updated["status"] == "Completed"
+    assert updated["completion_date"]
+
+    # Audit trail rolls up to the deviation, same as evidence/interviews.
+    audit = client.get(f"/qms/deviation/{did}/audit-trail").get_json()
+    actions = [a["action"] for a in audit]
+    assert "Investigation task added" in actions
+    assert "Investigation task updated" in actions
+
+
+def test_deviation_investigation_tasks_tenant_and_record_scoping(client, mock_gemini):
+    dev1 = client.post("/qms/deviations", json={"title": "Dev1"}).get_json()
+    dev2 = client.post("/qms/deviations", json={"title": "Dev2"}).get_json()
+    _dev_reach_qa_approval(client, dev1["id"])
+    _dev_reach_qa_approval(client, dev2["id"])
+
+    task = client.post(f"/qms/deviations/{dev1['id']}/investigation/tasks", json={"title": "x"}).get_json()
+
+    # A task belonging to dev1 cannot be updated through dev2's URL.
+    r = client.put(f"/qms/deviations/{dev2['id']}/investigation/tasks/{task['id']}", json={"status": "Completed"})
+    assert r.status_code == 404
+
+    # Nonexistent deviation entirely.
+    r = client.get("/qms/deviations/999999/investigation/tasks")
+    assert r.status_code == 404
+
+
+def test_deviation_investigation_knowledge_base(client, mock_gemini, monkeypatch):
+    import pharmagpt.routes.qms_deviations as dev_routes
+    from pharmagpt.services.retrieval_engine import RetrievalResult
+
+    def _fake_retrieve_context(**kwargs):
+        return RetrievalResult(
+            context_text="...", chunks=[], found=True, query_terms=["deviation"],
+            sources=[{"id": 1, "name": "SOP-QA-014 Cleaning Validation", "doc_type": "KB - SOP"}],
+        )
+    monkeypatch.setattr(dev_routes.retrieval_engine, "retrieve_context", _fake_retrieve_context)
+
+    dev = client.post("/qms/deviations", json={"title": "Dev", "product": "Amoxicillin"}).get_json()
+    did = dev["id"]
+    _dev_reach_qa_approval(client, did)
+
+    r = client.get(f"/qms/deviations/{did}/investigation/knowledge-base")
+    assert r.status_code == 200
+    kb = r.get_json()
+    assert kb["kb_suggestions"] == [{"doc_reference": "SOP-QA-014 Cleaning Validation", "source_type": "KB - SOP"}]
+    assert kb["previous_deviations"] == []  # only dev itself exists, excluded from its own suggestions
+    assert kb["previous_capas"] == []
+    assert kb["equipment_history"] == []
+
+    r = client.post(f"/qms/deviations/{did}/investigation/knowledge-base/accept-sop",
+                     json={"doc_reference": "SOP-QA-014 Cleaning Validation"})
+    assert r.status_code == 201
+    entry = r.get_json()
+    assert entry["doc_reference"] == "SOP-QA-014 Cleaning Validation"
+    assert entry["notes"] == "Auto-retrieved from Knowledge Base"
+    assert len(client.get(f"/qms/deviations/{did}/investigation/sop-review").get_json()) == 1
+
+
+def test_deviation_investigation_knowledge_base_finds_related_deviations(client, mock_gemini, monkeypatch):
+    import pharmagpt.routes.qms_deviations as dev_routes
+    from pharmagpt.services.retrieval_engine import RetrievalResult
+
+    monkeypatch.setattr(dev_routes.retrieval_engine, "retrieve_context",
+                         lambda **kwargs: RetrievalResult(context_text="", chunks=[], sources=[], found=False, query_terms=[]))
+
+    dev1 = client.post("/qms/deviations", json={"title": "Dev1", "product": "Amoxicillin"}).get_json()
+    dev2 = client.post("/qms/deviations", json={"title": "Dev2", "product": "Amoxicillin"}).get_json()
+    _dev_reach_qa_approval(client, dev2["id"])
+
+    kb = client.get(f"/qms/deviations/{dev2['id']}/investigation/knowledge-base").get_json()
+    assert [d["id"] for d in kb["previous_deviations"]] == [dev1["id"]]
 
 
 def test_deviation_impact_and_capa_link(client, mock_gemini):
@@ -219,7 +356,6 @@ def test_deviation_impact_and_capa_link(client, mock_gemini):
     capa = client.post("/qms/capa", json={"title": "CAPA", "capa_source": "Deviation"}).get_json()
     r = client.post(f"/qms/deviations/{dev['id']}/link-capa", json={"capa_id": capa["id"]})
     assert r.status_code == 201
-    assert client.get(f"/qms/deviations/{dev['id']}").get_json()["status"] == "CAPA Assigned"
 
     linked = client.get(f"/qms/deviations/{dev['id']}/capas").get_json()
     assert linked[0]["id"] == capa["id"]
@@ -228,15 +364,46 @@ def test_deviation_impact_and_capa_link(client, mock_gemini):
     assert reverse[0]["id"] == dev["id"]
 
 
-def test_deviation_approval_status_map(client):
+def test_deviation_workflow_named_approver_gate_end_to_end(client):
     dev = client.post("/qms/deviations", json={"title": "Dev"}).get_json()
     did = dev["id"]
 
-    client.post(f"/qms/deviations/{did}/approval", json={"action": "Investigation Started", "performed_by": "A"})
-    assert client.get(f"/qms/deviations/{did}").get_json()["status"] == "Under Investigation"
+    # Draft has no workflow instance yet.
+    wf = client.get(f"/qms/deviations/{did}/workflow").get_json()
+    assert wf["instance"] is None
+    assert wf["current_phase"] == "Draft"
 
-    client.post(f"/qms/deviations/{did}/approval", json={"action": "Closed", "performed_by": "B"})
-    assert client.get(f"/qms/deviations/{did}").get_json()["status"] == "Closed"
+    _dev_reach_qa_approval(client, did)
+    assert client.get(f"/qms/deviations/{did}").get_json()["status"] == "Investigation"
+    wf = client.get(f"/qms/deviations/{did}/workflow").get_json()
+    assert wf["current_phase"] == "Investigation"
+    assert wf["progress_pct"] == round(100 * 4 / 9)
+
+    # Step 5 ("Investigation") is a single activity step under DEVIATION_LIFECYCLE_V2 —
+    # the investigator declares the investigation complete and moves to CAPA.
+    r = client.post(f"/qms/deviations/{did}/workflow/steps/5/decide", json={"decision": "advance"})
+    assert r.status_code == 200, r.get_json()
+    assert client.get(f"/qms/deviations/{did}").get_json()["status"] == "CAPA"
+
+    # QA Review (6) and Final Approval (7) are named-approval gates grouped under "CAPA".
+    for step_order in (6, 7):
+        client.post(f"/qms/deviations/{did}/workflow/steps/{step_order}/assign",
+                    json={"approvers": [{"user_id": _FIXED_USER_ID, "display_name": "Test User"}]})
+        r = client.post(f"/qms/deviations/{did}/workflow/steps/{step_order}/decide", json={"decision": "approve"})
+        assert r.status_code == 200, r.get_json()
+
+    r = client.post(f"/qms/deviations/{did}/workflow/steps/8/decide", json={"decision": "advance"})
+    assert r.status_code == 200
+    assert client.get(f"/qms/deviations/{did}").get_json()["status"] == "Effectiveness Check"
+
+    r = client.post(f"/qms/deviations/{did}/workflow/steps/9/decide", json={"decision": "advance"})
+    assert r.status_code == 200
+    final = client.get(f"/qms/deviations/{did}").get_json()
+    assert final["status"] == "Closed"
+
+    # Closed deviations are immutable, same guarantee as before this refactor.
+    r = client.put(f"/qms/deviations/{did}", json={"risk_level": "High"})
+    assert r.status_code == 409
 
 
 def test_deviation_docx_export(client):

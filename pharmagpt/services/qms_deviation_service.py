@@ -1,37 +1,23 @@
 """
 services/qms_deviation_service.py — Business logic for the Deviation Management module.
 
-Handles the AI Investigation Assistant (fishbone, 5-Why, timeline, root cause),
-AI impact-assessment suggestions, AI CAPA seed suggestions, and the markdown
-report builder used for DOCX export — following risk_service.py's structure.
+Handles AI impact-assessment suggestions, AI CAPA seed suggestions, and the
+markdown report builder used for DOCX export — following risk_service.py's
+structure. The AI Investigation Assistant/Report Generation and root cause
+determination moved to services/investigation_engine.py (architecture
+refactor: Workflow vs. Investigation separation) — this file no longer owns
+that logic; `ddb.get_investigation`/`upsert_investigation`
+(qms_deviation_investigation) are kept read-only as the pre-refactor
+investigation record, not written to by any route anymore.
 """
 
 from __future__ import annotations
 
 from pharmagpt import qms_deviation_database as ddb
-from pharmagpt import qms_database as qmsdb
 from pharmagpt.prompts import qms_deviation_prompt as dp
+from pharmagpt.services import investigation_engine as inv
+from pharmagpt.services import workflow_engine as wfe
 from pharmagpt.services.qms_shared import call_gemini, parse_json_response
-
-
-def ai_run_investigation(deviation_id: int) -> dict:
-    """Run the AI Investigation Assistant and persist fishbone/5-Why/timeline/root cause."""
-    deviation = ddb.get_deviation(deviation_id)
-    if not deviation:
-        return {"error": "Deviation not found"}
-
-    prompt = dp.build_investigation_prompt(deviation)
-    response_text = call_gemini(prompt, temperature=0.3)
-    data = parse_json_response(response_text, default={
-        "fishbone_data": {}, "five_why_data": [], "timeline_data": [],
-        "root_cause_category": "", "root_cause_statement": "AI investigation could not parse response",
-    })
-
-    investigation = ddb.upsert_investigation(deviation_id, data)
-    ddb.update_deviation(deviation_id, {"ai_investigation_data": data})
-    if deviation.get("status") == "Initiated":
-        ddb.update_deviation(deviation_id, {"status": "Under Investigation"})
-    return investigation
 
 
 def ai_suggest_impact(deviation_id: int) -> list[dict]:
@@ -46,16 +32,37 @@ def ai_suggest_impact(deviation_id: int) -> list[dict]:
 
 
 def ai_suggest_capa(deviation_id: int) -> dict:
-    """Suggest CAPA seed content (problem statement, root cause, actions) for this deviation."""
+    """Suggest CAPA seed content (problem statement, root cause, actions) for
+    this deviation. Prefers the investigator's finalized Investigation
+    Summary (services/investigation_engine.py, the formal CAPA handoff —
+    architecture refactor refinement #7) when one exists; falls back to an
+    ad-hoc AI suggestion otherwise, same as before the refactor."""
     deviation = ddb.get_deviation(deviation_id)
     if not deviation:
         return {"error": "Deviation not found"}
+
+    summary = inv.get_summary("deviation", deviation_id)
+    if summary and summary.get("finalized_at"):
+        root_cause = inv.get_root_cause("deviation", deviation_id) or {}
+        return {
+            "problem_statement": summary.get("summary_text", ""),
+            "root_cause": root_cause.get("confirmed_root_cause") or root_cause.get("probable_cause", ""),
+            "corrective_actions": [
+                {"description": a} if isinstance(a, str) else a
+                for a in summary.get("recommended_capa_actions", [])
+            ],
+            "preventive_actions": [],
+            "source": "investigation_summary",
+        }
+
     investigation = ddb.get_investigation(deviation_id)
     prompt = dp.build_capa_suggestion_prompt(deviation, investigation)
     response_text = call_gemini(prompt, temperature=0.3)
-    return parse_json_response(response_text, default={
+    result = parse_json_response(response_text, default={
         "problem_statement": "", "root_cause": "", "corrective_actions": [], "preventive_actions": [],
     })
+    result["source"] = "ai_suggestion"
+    return result
 
 
 def generate_report_markdown(deviation_id: int) -> str:
@@ -64,10 +71,15 @@ def generate_report_markdown(deviation_id: int) -> str:
     if not deviation:
         return "# Error: Deviation not found"
 
-    investigation = ddb.get_investigation(deviation_id)
     impacts = ddb.get_impacts(deviation_id)
     linked_capas = ddb.get_linked_capas(deviation_id)
-    approvals = qmsdb.get_approval_trail("deviation", deviation_id)
+    workflow_steps = [
+        s for s in wfe.get_instance_state("deviation", deviation_id)["steps"]
+        if s["status"] in ("approved", "rejected", "returned")
+    ]
+    root_cause = inv.get_root_cause("deviation", deviation_id)
+    summary = inv.get_summary("deviation", deviation_id)
+    dashboard = inv.get_dashboard("deviation", deviation_id)
 
     md = []
     md.append("# Deviation Report")
@@ -99,40 +111,36 @@ def generate_report_markdown(deviation_id: int) -> str:
         md.append(deviation["immediate_action"])
         md.append("")
 
-    if investigation:
-        md.append("## 3. Investigation")
+    if root_cause or summary or dashboard.get("evidence_score") is not None:
+        md.append("## 3. Investigation Case")
         md.append("")
-        fb = investigation.get("fishbone_data", {})
-        if fb:
-            md.append("### 3.1 Fishbone (Ishikawa) Analysis")
-            for category in ("man", "machine", "method", "material", "measurement", "environment"):
-                items = fb.get(category, [])
-                if items:
-                    md.append(f"**{category.title()}:**")
-                    for item in items:
-                        md.append(f"- {item}")
+        md.append(
+            f"**Evidence Score:** {dashboard['evidence_score']}% ({dashboard['evidence_score_basis']}) — "
+            f"Document completeness {dashboard['document_completeness_pct']}%, "
+            f"Interviews {dashboard['interviews_completed']}/{dashboard['interviews_total']}, "
+            f"Timeline completeness {dashboard['timeline_completeness_pct']}%"
+        )
+        md.append("")
+        if root_cause:
+            md.append("### 3.1 Root Cause")
+            if root_cause.get("possible_cause"):
+                md.append(f"**Possible Cause** ({root_cause.get('possible_cause_source', '')}): {root_cause['possible_cause']}")
+            if root_cause.get("probable_cause"):
+                md.append(f"**Probable Cause:** {root_cause['probable_cause']}")
+                if root_cause.get("probable_cause_rationale"):
+                    md.append(f"  _Rationale: {root_cause['probable_cause_rationale']}_")
+            if root_cause.get("confirmed_root_cause"):
+                md.append(f"**Confirmed Root Cause:** {root_cause['confirmed_root_cause']} "
+                           f"(confirmed by {root_cause.get('confirmed_by', '')} on {root_cause.get('confirmed_at', '')})")
             md.append("")
-        fw = investigation.get("five_why_data", [])
-        if fw:
-            md.append("### 3.2 Five-Why Analysis")
-            md.append("| Why # | Question | Answer |")
-            md.append("|-------|----------|--------|")
-            for i, entry in enumerate(fw, 1):
-                md.append(f"| Why {i} | {entry.get('question', '')} | {entry.get('answer', '')} |")
-            md.append("")
-        tl = investigation.get("timeline_data", [])
-        if tl:
-            md.append("### 3.3 Timeline")
-            md.append("| Date/Time | Event |")
-            md.append("|-----------|-------|")
-            for entry in tl:
-                md.append(f"| {entry.get('datetime', '')} | {entry.get('event', '')} |")
-            md.append("")
-        if investigation.get("root_cause_statement"):
-            md.append("### 3.4 Root Cause Determination")
-            md.append(f"**Category:** {investigation.get('root_cause_category', '')}")
-            md.append("")
-            md.append(f"**Root Cause Statement:** {investigation['root_cause_statement']}")
+        if summary and summary.get("finalized_at"):
+            md.append("### 3.2 Investigation Summary (finalized CAPA handoff)")
+            md.append(summary.get("summary_text", ""))
+            if summary.get("key_findings"):
+                md.append("")
+                md.append("**Key Findings:**")
+                for f in summary["key_findings"]:
+                    md.append(f"- {f}")
             md.append("")
 
     if impacts:
@@ -151,12 +159,12 @@ def generate_report_markdown(deviation_id: int) -> str:
             md.append(f"| {c.get('capa_number', '')} | {c.get('title', '')} | {c.get('status', '')} |")
         md.append("")
 
-    if approvals:
-        md.append("## 6. QA Review & Approval Trail")
-        md.append("| # | Action | Performed By | Role | Comments | Timestamp |")
-        md.append("|---|--------|---------------|------|----------|-----------|")
-        for i, a in enumerate(approvals, 1):
-            md.append(f"| {i} | {a.get('action', '')} | {a.get('performed_by', '')} | {a.get('role', '')} | {a.get('comments', '')} | {a.get('created_at', '')} |")
+    if workflow_steps:
+        md.append("## 6. Workflow / Approval Trail")
+        md.append("| # | Step | Outcome | Decided By | Comments | Timestamp |")
+        md.append("|---|------|---------|------------|----------|-----------|")
+        for i, s in enumerate(workflow_steps, 1):
+            md.append(f"| {i} | {s.get('step_name', '')} | {s.get('status', '')} | {s.get('decided_by', '')} | {s.get('comments', '')} | {s.get('decided_at', '')} |")
         md.append("")
 
     md.append("## 7. Regulatory References")

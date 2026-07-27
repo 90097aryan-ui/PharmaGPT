@@ -199,7 +199,7 @@ def upload_attachment(record_type, record_id):
 
     extension = get_extension(file.filename)
     if extension not in ALLOWED_EXTENSIONS:
-        return jsonify({"error": "File type not allowed. Accepted: PDF, DOCX, XLSX, TXT"}), 400
+        return jsonify({"error": "File type not allowed. Accepted: PDF, DOCX, XLSX, TXT, CSV, JPG, JPEG, PNG, MP4, MOV"}), 400
 
     upload_dir = _qms_upload_dir(record_type, record_id)
     safe_name = _resolve_collision(upload_dir, secure_filename(file.filename))

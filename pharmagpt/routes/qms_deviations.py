@@ -1,23 +1,53 @@
 """
 routes/qms_deviations.py — Deviation Management module API endpoints.
 
-Attachments/comments/audit-trail/approval-trail reads are served by
-routes/qms_common.py (record_type='deviation'); this file owns the approval
-POST because it maps each action to a Deviation Management status transition
-(Initiated → Under Investigation → Root Cause Identified → Impact Assessed →
-Risk Assessed → CAPA Assigned → QA Review → Approved → Closed).
+Attachments/comments/audit-trail reads are served by routes/qms_common.py
+(record_type='deviation'). Approval/status-transition is a gated,
+named-approver **Workflow** (services/workflow_engine.py, unchanged since
+Phase 1) over a high-level lifecycle only — architecture refactor,
+PHASE1_REFACTOR_PLAN.md: Draft -> Submitted -> Review (Initiator Manager
+Review -> QA Manager Review -> QA Approval) -> Investigation -> CAPA (QA
+Review -> Final Approval) -> Effectiveness Check -> Closure, with a
+Rejected/Returned-for-Investigation side path. "Review" and "CAPA" are
+UI-only groupings (see PHASE_GROUPS below) over unchanged individual
+approval steps — the workflow engine itself was not modified.
+
+Investigation activities (evidence, SOP review, interviews, timeline, AI
+assistance, root cause, the CAPA-handoff summary) are a separate concern —
+the **Investigation Case** — served by this same blueprint's
+`/investigation/*` sub-routes, which are thin wrappers delegating to
+services/investigation_engine.py (a reusable service, not its own exposed
+API surface). The Investigation Case unlocks once the 'qa_approval' step is
+approved and has no workflow transitions of its own — every sub-tab is
+freely navigable and re-runnable.
 
 Routes
 ------
 GET    /qms/deviations                       list deviations (filterable, keyword search)
 POST   /qms/deviations                       create deviation (auto deviation_number)
-GET    /qms/deviations/<id>                  get one deviation
+GET    /qms/deviations/<id>                  get one deviation (includes investigation_unlocked/lock_reason)
 PUT    /qms/deviations/<id>                  update deviation fields
 DELETE /qms/deviations/<id>                  delete deviation
 
-POST   /qms/deviations/<id>/investigate      AI Investigation Assistant (fishbone/5-Why/timeline/root cause)
-GET    /qms/deviations/<id>/investigation    get investigation record
-PUT    /qms/deviations/<id>/investigation    manually edit investigation record
+GET    /qms/deviations/<id>/workflow                       lifecycle state: instance + steps + phase grouping + dashboard fields
+POST   /qms/deviations/<id>/workflow/start                 submit for review (instantiates the workflow)
+POST   /qms/deviations/<id>/workflow/steps/<order>/assign   assign named approver(s) to an approval step
+POST   /qms/deviations/<id>/workflow/steps/<order>/decide   approve / reject / return / advance the current step
+
+GET/POST /qms/deviations/<id>/investigation/evidence            Investigation Case — evidence/documents
+GET/POST /qms/deviations/<id>/investigation/sop-review          Investigation Case — applicable SOP review
+GET/POST /qms/deviations/<id>/investigation/interviews          Investigation Case — personnel interviews
+GET/POST /qms/deviations/<id>/investigation/timeline            Investigation Case — timeline builder
+POST     /qms/deviations/<id>/investigation/ai/assistant        Investigation Case — AI Assistant (interactive)
+POST     /qms/deviations/<id>/investigation/ai/report           Investigation Case — AI Report Generation
+GET      /qms/deviations/<id>/investigation/ai/history          Investigation Case — every AI run, both modes
+GET/PUT  /qms/deviations/<id>/investigation/root-cause          Investigation Case — Possible/Probable/Confirmed root cause
+GET/PUT  /qms/deviations/<id>/investigation/summary             Investigation Case — finalized CAPA handoff
+GET      /qms/deviations/<id>/investigation/dashboard           Investigation Case — rules-based Evidence Dashboard
+GET/POST /qms/deviations/<id>/investigation/tasks                Investigation Case — investigation tasks
+PUT      /qms/deviations/<id>/investigation/tasks/<task_id>      Investigation Case — update a task
+GET      /qms/deviations/<id>/investigation/knowledge-base       Investigation Case — KB/previous-record suggestions (read-only)
+POST     /qms/deviations/<id>/investigation/knowledge-base/accept-sop  Investigation Case — accept a KB suggestion into SOP review
 
 POST   /qms/deviations/<id>/suggest-impact   AI-suggested impact assessment entries (not persisted)
 GET    /qms/deviations/<id>/impact           list impact assessment entries
@@ -26,8 +56,6 @@ POST   /qms/deviations/<id>/impact           add impact assessment entry
 POST   /qms/deviations/<id>/suggest-capa     AI-suggested CAPA seed content (not persisted)
 POST   /qms/deviations/<id>/link-capa        link this deviation to an existing/new CAPA
 GET    /qms/deviations/<id>/capas            list linked CAPAs
-
-POST   /qms/deviations/<id>/approval         status transition + e-signature entry
 
 GET    /qms/deviations/<id>/report           markdown report (preview / print)
 POST   /qms/deviations/<id>/export/docx      DOCX export
@@ -41,17 +69,39 @@ from flask import Blueprint, g, jsonify, request, send_file
 from pharmagpt import audit
 from pharmagpt import config
 from pharmagpt import database as db
+from pharmagpt import equipment_database as equipdb
 from pharmagpt import qms_deviation_database as ddb
 from pharmagpt import qms_capa_database as cdb
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import qms_repo
+from pharmagpt.services import investigation_engine as inv
 from pharmagpt.services import qms_deviation_service as svc
+from pharmagpt.services import retrieval_engine
+from pharmagpt.services import workflow_engine as wfe
 
 bp = Blueprint("qms_deviations", __name__, url_prefix="/qms/deviations")
 logger = logging.getLogger(__name__)
 RECORD_TYPE = "deviation"
+WORKFLOW_KEY = "DEVIATION_LIFECYCLE_V2"
+UNLOCK_STEP_KEY = "qa_approval"
+
+# UI-only lifecycle grouping over DEVIATION_LIFECYCLE_V2's individual steps
+# (architecture refactor §2/§4) — the underlying approval steps, their named
+# approvers, and their audit trail are completely unchanged; this only
+# controls what phase label the Lifecycle tab shows.
+PHASE_GROUPS = {
+    "submitted": "Submitted",
+    "initiator_mgr_review": "Review",
+    "qa_mgr_review": "Review",
+    "qa_approval": "Review",
+    "evidence_collection": "Investigation",  # step_key kept from V1 for engine compat; displays as "Investigation"
+    "qa_review": "CAPA",
+    "final_approval": "CAPA",
+    "effectiveness_check": "Effectiveness Check",
+    "closed": "Closure",
+}
 
 
 # ── Phase 3.5 dual-write (docs/PHASE3_EXECUTION_PLAN.md) ───────────────────────
@@ -150,11 +200,18 @@ def create_deviation():
     return jsonify(deviation), 201
 
 
+def _investigation_lock(did: int) -> tuple[bool, str]:
+    return wfe.is_unlocked(RECORD_TYPE, did, UNLOCK_STEP_KEY)
+
+
 @bp.route("/<int:did>", methods=["GET"])
 def get_deviation(did):
     d = tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id)
     if not d:
         return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(did)
+    d["investigation_unlocked"] = unlocked
+    d["lock_reason"] = reason
     return jsonify(d)
 
 
@@ -189,31 +246,335 @@ def delete_deviation(did):
     return jsonify({"deleted": True})
 
 
-# ── AI Investigation Assistant ────────────────────────────────────────────────
+# ── Investigation Case (services/investigation_engine.py) ───────────────────
+# Thin wrappers only: check the record exists + resolve the lock, then
+# delegate to the engine with record_type="deviation". Every mutating engine
+# call gets `unlocked` explicitly — the engine itself refuses to write if
+# False, so this check can't be silently skipped by a future route.
 
-@bp.route("/<int:did>/investigate", methods=["POST"])
-def run_investigation(did):
-    if not tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id):
+def _investigation_context(deviation: dict) -> dict:
+    """Generic context dict handed to the record-type-agnostic AI prompts —
+    see prompts/investigation_prompt.py."""
+    return {
+        "Deviation Number": deviation.get("deviation_number", ""),
+        "Title": deviation.get("title", ""),
+        "Type": deviation.get("deviation_type", ""),
+        "Category": deviation.get("deviation_category", ""),
+        "Department": deviation.get("department", ""),
+        "Product": deviation.get("product", ""),
+        "Batch/Lot": deviation.get("batch_lot", ""),
+        "Description": deviation.get("description", ""),
+        "Immediate Action Taken": deviation.get("immediate_action", ""),
+    }
+
+
+@bp.route("/<int:did>/investigation/evidence", methods=["GET"])
+def list_investigation_evidence(did):
+    if not _record_scoped_or_404(did):
         return jsonify({"error": "Not found"}), 404
-    investigation = svc.ai_run_investigation(did)
-    audit.log("deviation", did, "AI investigation run")
-    return jsonify(investigation)
+    return jsonify(inv.get_evidence(RECORD_TYPE, did))
 
 
-@bp.route("/<int:did>/investigation", methods=["GET"])
-def get_investigation(did):
-    if not tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id):
+@bp.route("/<int:did>/investigation/evidence", methods=["POST"])
+def add_investigation_evidence(did):
+    if not _record_scoped_or_404(did):
         return jsonify({"error": "Not found"}), 404
-    investigation = ddb.get_investigation(did)
-    return jsonify(investigation or {})
+    unlocked, reason = _investigation_lock(did)
+    try:
+        entry = inv.add_evidence(RECORD_TYPE, did, request.get_json() or {}, unlocked=unlocked)
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("deviation", did, "Investigation evidence added", detail=entry.get("category", ""))
+    return jsonify(entry), 201
 
 
-@bp.route("/<int:did>/investigation", methods=["PUT"])
-def update_investigation(did):
-    if not tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id):
+@bp.route("/<int:did>/investigation/sop-review", methods=["GET"])
+def list_investigation_sop_reviews(did):
+    if not _record_scoped_or_404(did):
         return jsonify({"error": "Not found"}), 404
+    return jsonify(inv.get_sop_reviews(RECORD_TYPE, did))
+
+
+@bp.route("/<int:did>/investigation/sop-review", methods=["POST"])
+def add_investigation_sop_review(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(did)
+    try:
+        entry = inv.add_sop_review(RECORD_TYPE, did, request.get_json() or {}, unlocked=unlocked)
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("deviation", did, "SOP review entry added", detail=entry.get("doc_reference", ""))
+    return jsonify(entry), 201
+
+
+@bp.route("/<int:did>/investigation/interviews", methods=["GET"])
+def list_investigation_interviews(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(inv.get_interviews(RECORD_TYPE, did))
+
+
+@bp.route("/<int:did>/investigation/interviews", methods=["POST"])
+def add_investigation_interview(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(did)
+    try:
+        entry = inv.add_interview(RECORD_TYPE, did, request.get_json() or {}, unlocked=unlocked)
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("deviation", did, "Interview recorded", detail=entry.get("interviewee_name", ""))
+    return jsonify(entry), 201
+
+
+@bp.route("/<int:did>/investigation/timeline", methods=["GET"])
+def list_investigation_timeline(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(inv.get_timeline_events(RECORD_TYPE, did))
+
+
+@bp.route("/<int:did>/investigation/timeline", methods=["POST"])
+def add_investigation_timeline_event(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(did)
+    try:
+        entry = inv.add_timeline_event(RECORD_TYPE, did, request.get_json() or {}, unlocked=unlocked)
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("deviation", did, "Timeline event added", detail=entry.get("event_type", ""))
+    return jsonify(entry), 201
+
+
+@bp.route("/<int:did>/investigation/ai/assistant", methods=["POST"])
+def run_investigation_ai_assistant(did):
+    deviation = _record_scoped_or_404(did)
+    if not deviation:
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(did)
+    sig = tenancy.signing_identity(g.tenant)
     data = request.get_json() or {}
-    return jsonify(ddb.upsert_investigation(did, data))
+    try:
+        run = inv.run_ai_assistant(
+            RECORD_TYPE, did, _investigation_context(deviation), question=data.get("question", ""),
+            generated_by=sig["performed_by"], unlocked=unlocked,
+        )
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("deviation", did, "AI Investigation Assistant run")
+    return jsonify(run), 201
+
+
+@bp.route("/<int:did>/investigation/ai/report", methods=["POST"])
+def run_investigation_ai_report(did):
+    deviation = _record_scoped_or_404(did)
+    if not deviation:
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(did)
+    sig = tenancy.signing_identity(g.tenant)
+    investigation_data = {
+        "interviews": inv.get_interviews(RECORD_TYPE, did),
+        "timeline": inv.get_timeline_events(RECORD_TYPE, did),
+        "root_cause": inv.get_root_cause(RECORD_TYPE, did),
+    }
+    try:
+        run = inv.run_ai_report(
+            RECORD_TYPE, did, _investigation_context(deviation), investigation_data,
+            generated_by=sig["performed_by"], unlocked=unlocked,
+        )
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("deviation", did, "AI Investigation Report generated")
+    return jsonify(run), 201
+
+
+@bp.route("/<int:did>/investigation/ai/history", methods=["GET"])
+def get_investigation_ai_history(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(inv.get_ai_history(RECORD_TYPE, did, request.args.get("mode")))
+
+
+@bp.route("/<int:did>/investigation/root-cause", methods=["GET"])
+def get_investigation_root_cause(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(inv.get_root_cause(RECORD_TYPE, did) or {})
+
+
+@bp.route("/<int:did>/investigation/root-cause", methods=["PUT"])
+def save_investigation_root_cause(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(did)
+    try:
+        entry = inv.save_root_cause(RECORD_TYPE, did, request.get_json() or {}, unlocked=unlocked)
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("deviation", did, "Root cause updated")
+    return jsonify(entry)
+
+
+@bp.route("/<int:did>/investigation/summary", methods=["GET"])
+def get_investigation_summary(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(inv.get_summary(RECORD_TYPE, did) or {})
+
+
+@bp.route("/<int:did>/investigation/summary", methods=["PUT"])
+def save_investigation_summary(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(did)
+    sig = tenancy.signing_identity(g.tenant)
+    try:
+        entry = inv.finalize_summary(
+            RECORD_TYPE, did, request.get_json() or {}, finalized_by=sig["performed_by"], unlocked=unlocked,
+        )
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("deviation", did, "Investigation Summary finalized")
+    return jsonify(entry)
+
+
+@bp.route("/<int:did>/investigation/dashboard", methods=["GET"])
+def get_investigation_dashboard(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(inv.get_dashboard(RECORD_TYPE, did))
+
+
+# ── Investigation Tasks (Phase 2 Part 1) ─────────────────────────────────────
+# Investigative activities, not Workflow steps or CAPA actions — same
+# lock/423 + audit-trail pattern as every other investigation sub-route
+# above. "Evidence Attachment" reuses the existing attachments endpoint
+# (routes/qms_common.py, record_type="deviation") rather than a dedicated
+# per-task upload route — the investigator uploads once against the
+# deviation and links the returned attachment_id here.
+
+@bp.route("/<int:did>/investigation/tasks", methods=["GET"])
+def list_investigation_tasks(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(inv.get_tasks(RECORD_TYPE, did))
+
+
+@bp.route("/<int:did>/investigation/tasks", methods=["POST"])
+def add_investigation_task(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(did)
+    data = request.get_json() or {}
+    data["created_by"] = tenancy.signing_identity(g.tenant)["performed_by"]
+    try:
+        entry = inv.add_task(RECORD_TYPE, did, data, unlocked=unlocked)
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("deviation", did, "Investigation task added", detail=entry.get("title", ""))
+    return jsonify(entry), 201
+
+
+@bp.route("/<int:did>/investigation/tasks/<int:task_id>", methods=["PUT"])
+def update_investigation_task(did, task_id):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    existing = inv.get_task_scoped(task_id, RECORD_TYPE, did)
+    if not existing:
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(did)
+    try:
+        entry = inv.update_task(task_id, request.get_json() or {}, unlocked=unlocked)
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("deviation", did, "Investigation task updated", old=existing, new=entry)
+    return jsonify(entry)
+
+
+# ── Knowledge Base Integration (Phase 2 Part 3) ──────────────────────────────
+# Read-only, deterministic retrieval — reuses services/retrieval_engine.py
+# (already used by routes/validation.py, no new retrieval logic) for KB
+# document suggestions, and existing list functions for previous
+# deviations/CAPAs/equipment history. Nothing here is persisted until the
+# investigator explicitly accepts a suggestion via accept-sop, which writes
+# through the existing inv.add_sop_review() — no new table.
+
+def _related_records(deviation: dict, did: int) -> dict:
+    company_id = g.tenant.company_id
+    product = (deviation.get("product") or "").strip().lower()
+    equipment = (deviation.get("equipment") or "").strip().lower()
+    department = (deviation.get("department") or "").strip().lower()
+
+    def _matches(other: dict) -> bool:
+        if other["id"] == did:
+            return False
+        return bool(
+            (product and (other.get("product") or "").strip().lower() == product)
+            or (equipment and (other.get("equipment") or "").strip().lower() == equipment)
+            or (department and (other.get("department") or "").strip().lower() == department)
+        )
+
+    previous_deviations = [d for d in ddb.get_all_deviations(company_id) if _matches(d)][:5]
+    previous_capas = [c for c in cdb.get_all_capas(company_id) if _matches(c)][:5]
+
+    equipment_history = []
+    if deviation.get("equipment"):
+        equipment_history = equipdb.search_equipment(deviation["equipment"], company_id)[:5]
+
+    return {
+        "previous_deviations": previous_deviations,
+        "previous_capas": previous_capas,
+        "equipment_history": equipment_history,
+    }
+
+
+@bp.route("/<int:did>/investigation/knowledge-base", methods=["GET"])
+def get_investigation_knowledge_base(did):
+    deviation = _record_scoped_or_404(did)
+    if not deviation:
+        return jsonify({"error": "Not found"}), 404
+
+    result = retrieval_engine.retrieve_context(
+        document_type="Deviation",
+        project_id=deviation.get("project_id") or 0,
+        equipment_name=deviation.get("equipment", ""),
+        questionnaire=_investigation_context(deviation),
+        max_chunks=10,
+    )
+    # RetrievalResult.sources rows are {"id", "name", "doc_type"} (retrieval_engine.py
+    # retrieve_context()'s deduplicated source list) — doc_type is one of the
+    # SOURCE_KB_* constants (e.g. "KB - SOP", "KB - Validation Protocol").
+    kb_suggestions = [
+        {"doc_reference": s.get("name", ""), "source_type": s.get("doc_type", "")}
+        for s in (result.sources if result.found else [])
+    ]
+
+    payload = {"kb_suggestions": kb_suggestions}
+    payload.update(_related_records(deviation, did))
+    return jsonify(payload)
+
+
+@bp.route("/<int:did>/investigation/knowledge-base/accept-sop", methods=["POST"])
+def accept_investigation_kb_suggestion(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(did)
+    data = request.get_json() or {}
+    body = {
+        "doc_reference": data.get("doc_reference", ""),
+        "version": data.get("version", ""),
+        "relevant_section": data.get("relevant_section", ""),
+        "notes": data.get("notes") or "Auto-retrieved from Knowledge Base",
+    }
+    try:
+        entry = inv.add_sop_review(RECORD_TYPE, did, body, unlocked=unlocked)
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("deviation", did, "SOP review entry added from Knowledge Base suggestion",
+               detail=entry.get("doc_reference", ""))
+    return jsonify(entry), 201
 
 
 # ── Impact assessment ────────────────────────────────────────────────────────
@@ -260,7 +621,6 @@ def link_capa(did):
     if not capa:
         return jsonify({"error": "Valid capa_id is required"}), 400
     link = ddb.link_capa(did, capa_id)
-    ddb.update_deviation(did, {"status": "CAPA Assigned"})
     qmsdb.add_audit_entry("deviation", did, "Linked to CAPA", detail=capa.get("capa_number", ""))
     return jsonify(link), 201
 
@@ -272,59 +632,118 @@ def get_linked_capas(did):
     return jsonify(ddb.get_linked_capas(did))
 
 
-# ── Approval / status transition ──────────────────────────────────────────────
+# ── Workflow: named-approver, gated investigation lifecycle ──────────────────
+# Replaces the old free action->status map (any company_admin/reviewer_qa
+# could fire any action on any deviation) with services/workflow_engine.py:
+# only a user explicitly assigned to an approval step may decide it.
 
-_STATUS_MAP = {
-    "Investigation Started": "Under Investigation",
-    "Root Cause Identified": "Root Cause Identified",
-    "Impact Assessed": "Impact Assessed",
-    "Risk Assessed": "Risk Assessed",
-    "CAPA Assigned": "CAPA Assigned",
-    "Submitted for QA Review": "QA Review",
-    "Approved": "Approved",
-    "Rejected": "Initiated",
-    "Closed": "Closed",
-}
+def _record_scoped_or_404(did):
+    return tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id)
 
 
-@bp.route("/<int:did>/approval", methods=["POST"])
-@require_role("company_admin", "reviewer_qa")
-def submit_approval(did):
-    deviation = tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id)
+def _enrich_workflow_state(state: dict) -> dict:
+    """Add the Lifecycle tab's dashboard fields (architecture refactor §2/§9)
+    on top of workflow_engine's raw instance/steps — presentation only,
+    computed here rather than in workflow_engine.py so the engine itself
+    stays untouched. 'Due Date'/'Overdue' are not tracked (no due-date field
+    on qms_deviations) — omitted rather than fabricated."""
+    steps = state.get("steps") or []
+    for s in steps:
+        s["phase"] = PHASE_GROUPS.get(s["step_key"], s["step_key"])
+
+    instance = state.get("instance")
+    if not instance:
+        state["current_phase"] = "Draft"
+        state["progress_pct"] = 0
+        state["remaining_steps"] = []
+        state["assigned_to"] = []
+        state["pending_since"] = None
+        return state
+
+    if instance["status"] == "rejected":
+        state["current_phase"] = "Rejected"
+    else:
+        current = next((s for s in steps if s["step_order"] == instance["current_step_order"]), None)
+        state["current_phase"] = current["phase"] if current else "Closure"
+
+    total = len(steps)
+    completed = sum(1 for s in steps if s["status"] == "approved")
+    state["progress_pct"] = round(100 * completed / total) if total else 0
+    state["remaining_steps"] = [s["step_name"] for s in steps if s["status"] == "pending"]
+
+    current = next((s for s in steps if s["step_order"] == instance["current_step_order"]), None)
+    if current and current["step_type"] == "approval":
+        state["assigned_to"] = [a.get("display_name") or a["user_id"] for a in current.get("approvers", [])]
+    elif current:
+        state["assigned_to"] = [f"Any {r}" for r in (current.get("eligible_roles") or "").split(",") if r]
+    else:
+        state["assigned_to"] = []
+
+    previous = next((s for s in steps if s["step_order"] == instance["current_step_order"] - 1), None)
+    state["pending_since"] = (previous or {}).get("decided_at") or instance.get("started_at")
+    return state
+
+
+@bp.route("/<int:did>/workflow", methods=["GET"])
+def get_workflow(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(_enrich_workflow_state(wfe.get_instance_state(RECORD_TYPE, did)))
+
+
+@bp.route("/<int:did>/workflow/start", methods=["POST"])
+def start_workflow(did):
+    deviation = _record_scoped_or_404(did)
+    if not deviation:
+        return jsonify({"error": "Not found"}), 404
+    sig = tenancy.signing_identity(g.tenant)
+    try:
+        state = wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, did, g.tenant.company_id, sig["performed_by"])
+    except wfe.WorkflowError as e:
+        audit.log_failure("deviation", did, "Workflow start blocked", reason=str(e))
+        return jsonify({"error": str(e)}), 409
+    return jsonify(state), 201
+
+
+@bp.route("/<int:did>/workflow/steps/<int:step_order>/assign", methods=["POST"])
+def assign_workflow_step(did, step_order):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json() or {}
+    approvers = data.get("approvers") or []
+    if not isinstance(approvers, list) or not all(a.get("user_id") for a in approvers):
+        return jsonify({"error": "approvers must be a non-empty list of {user_id, display_name}"}), 400
+    try:
+        state = wfe.assign_approvers(RECORD_TYPE, did, step_order, approvers)
+    except wfe.WorkflowError as e:
+        return jsonify({"error": str(e)}), 409
+    return jsonify(state)
+
+
+@bp.route("/<int:did>/workflow/steps/<int:step_order>/decide", methods=["POST"])
+def decide_workflow_step(did, step_order):
+    deviation = _record_scoped_or_404(did)
     if not deviation:
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
-    action_name = data.get("action", "")
-    if not action_name:
-        return jsonify({"error": "Action is required"}), 400
-
-    if deviation["status"] == "Closed":
-        audit.log_failure("deviation", did, f"Approval action blocked ({action_name}) — record is Closed",
-                           reason="Closed deviations are immutable")
-        return jsonify({"error": "This deviation is Closed and cannot accept further actions"}), 409
+    decision = data.get("decision", "")
+    if decision not in ("approve", "reject", "return", "advance"):
+        return jsonify({"error": "decision must be one of approve/reject/return/advance"}), 400
 
     sig = tenancy.signing_identity(g.tenant)
-
-    updates = {}
-    if action_name in _STATUS_MAP:
-        updates["status"] = _STATUS_MAP[action_name]
-    if action_name == "Closed":
-        updates["closure_date"] = data.get("closure_date", "")
-    if action_name == "Submitted for QA Review":
-        updates["qa_reviewer"] = sig["performed_by"]
-    if action_name == "Approved":
-        updates["approver"] = sig["performed_by"]
-    if updates:
-        ddb.update_deviation(did, updates)
-
-    entry = qmsdb.add_approval_entry(
-        "deviation", did, action_name,
-        sig["performed_by"], sig["role"],
-        data.get("comments", ""), sig["electronic_sig"],
-    )
-    audit.log("deviation", did, action_name, old={"status": deviation["status"]},
-              new=updates or None, reason=data.get("comments", ""))
-    return jsonify(entry), 201
+    try:
+        state = wfe.decide_step(
+            RECORD_TYPE, did, step_order, decision,
+            user_id=g.tenant.user_id, role=g.tenant.role,
+            performed_by=sig["performed_by"], comments=data.get("comments", ""),
+        )
+    except wfe.WorkflowPermissionError as e:
+        audit.log_failure("deviation", did, f"Workflow decision blocked ({decision})", reason=str(e))
+        return jsonify({"error": str(e)}), 403
+    except wfe.WorkflowError as e:
+        audit.log_failure("deviation", did, f"Workflow decision blocked ({decision})", reason=str(e))
+        return jsonify({"error": str(e)}), 409
+    return jsonify(state)
 
 
 # ── Report / Export ────────────────────────────────────────────────────────────

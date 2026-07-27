@@ -81,7 +81,7 @@ def test_create_deviation_generates_number(db_path):
 
     dev = ddb.create_deviation({"title": "Temp excursion", "deviation_type": "Major"}, company_id="test-company-1")
     assert dev["deviation_number"].startswith("DEV-")
-    assert dev["status"] == "Initiated"
+    assert dev["status"] == "Draft"
 
 
 def test_deviation_investigation_upsert_and_json_fields(db_path):
