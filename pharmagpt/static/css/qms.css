@@ -37,7 +37,24 @@
 
 /* ── Page shell ─────────────────────────────────────────────────────────── */
 
-.qms-view { background: var(--bg); }
+/* Centralizes the flex/overflow layout every QMS/Risk top-level <main> needs
+   to participate correctly in the app shell's single-scroll-region chain
+   (body/.app-body flex+overflow:hidden -> one <main> at a time -> one inner
+   .qms-body/.risk-body scroll region). Previously this exact declaration was
+   duplicated as an inline style on every individual <main>, which is easy to
+   forget on a new view (see the #qms-deviations-body fix below, once needed
+   for exactly that reason) — centralizing it here fixes that class of bug
+   at the source instead of per-view. display:none is the default (hidden);
+   the show/hide toggle functions (showView/showRiskView/showAllRiskViews)
+   still set element.style.display directly, which as an inline style always
+   wins over this class rule — no JS change needed for this centralization. */
+.qms-view {
+  display: none;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  background: var(--bg);
+}
 
 /* #qms-deviations-body is <main class="qms-view">'s only child, itself a
    flex item in <main>'s column flex layout — without flex:1/min-height:0 it

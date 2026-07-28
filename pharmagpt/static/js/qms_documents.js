@@ -230,7 +230,7 @@ async function qmsDocOpenDetail(id) {
       </div>
       <div class="qms-body">
         <div class="qms-tabs" id="qms-doc-tabs">
-          ${["overview", "content", "versions", "training", "distribution", "attachments", "comments", "audit", "approval"]
+          ${["overview", "workflow", "content", "versions", "training", "distribution", "attachments", "comments", "audit", "approval"]
             .map(t => `<button class="qms-tab ${t === qmsDocActiveTab ? "active" : ""}" onclick="qmsDocSwitchTab('${t}')">${qmsDocTabLabel(t)}</button>`).join("")}
         </div>
         <div id="qms-doc-tab-body"></div>
@@ -246,7 +246,7 @@ window.qmsDocOpenDetail = qmsDocOpenDetail;
 
 function qmsDocTabLabel(t) {
   return {
-    overview: "Overview", content: "Content / AI Draft", versions: "Version History",
+    overview: "Overview", workflow: "Workflow", content: "Content / AI Draft", versions: "Version History",
     training: "Training", distribution: "Distribution", attachments: "Attachments",
     comments: "Comments", audit: "Audit Trail", approval: "Approval",
   }[t] || t;
@@ -255,7 +255,7 @@ function qmsDocTabLabel(t) {
 async function qmsDocSwitchTab(tab) {
   qmsDocActiveTab = tab;
   document.querySelectorAll("#qms-doc-tabs .qms-tab").forEach(b => b.classList.remove("active"));
-  const idx = ["overview", "content", "versions", "training", "distribution", "attachments", "comments", "audit", "approval"].indexOf(tab);
+  const idx = ["overview", "workflow", "content", "versions", "training", "distribution", "attachments", "comments", "audit", "approval"].indexOf(tab);
   const btns = document.querySelectorAll("#qms-doc-tabs .qms-tab");
   if (btns[idx]) btns[idx].classList.add("active");
   const doc = await qmsFetch(`/qms/documents/${qmsDocCurrentId}`);
@@ -307,6 +307,9 @@ function qmsDocRenderTab(doc) {
     if (doc.ai_review_data && doc.ai_review_data.overall_score) {
       qmsDocRenderReview(doc.ai_review_data);
     }
+  } else if (qmsDocActiveTab === "workflow") {
+    el.innerHTML = `<div id="qms-workflow-document-${id}"></div>`;
+    renderWorkflowPanel(`qms-workflow-document-${id}`, "document", "/qms/documents", id);
   } else if (qmsDocActiveTab === "versions") {
     qmsDocRenderVersions(id);
   } else if (qmsDocActiveTab === "training") {

@@ -45,17 +45,21 @@ from flask import Blueprint, g, jsonify, request, Response, stream_with_context,
 from pharmagpt import audit
 from pharmagpt import qms_document_database as qdb
 from pharmagpt import qms_database as qmsdb
+from pharmagpt import qms_workflow_database as wfdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
 from pharmagpt.services import kb_sync
 from pharmagpt.services import lifecycle_engine
 from pharmagpt.services import qms_document_service as svc
+from pharmagpt.services import workflow_engine as wfe
 from pharmagpt.services.qms_shared import stream_gemini
 from pharmagpt.prompts import qms_document_prompt as qp
 
 logger = logging.getLogger(__name__)
 
 bp = Blueprint("qms_documents", __name__, url_prefix="/qms/documents")
+RECORD_TYPE = "document"
+WORKFLOW_KEY = "DOCUMENT_WORKFLOW_V1"
 
 
 # ── Documents ─────────────────────────────────────────────────────────────────
@@ -257,7 +261,74 @@ def update_training(tid):
     return jsonify(entry)
 
 
-# ── Approval / status transition ──────────────────────────────────────────────
+# ── Workflow: named-approver, gated Document Control lifecycle ───────────────
+# Same engine as routes/qms_deviations.py — see services/workflow_engine.py.
+
+def _record_scoped_or_404(did):
+    return tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
+
+
+@bp.route("/<int:did>/workflow", methods=["GET"])
+def get_workflow(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(wfe.get_instance_state(RECORD_TYPE, did))
+
+
+@bp.route("/<int:did>/workflow/start", methods=["POST"])
+def start_workflow(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    sig = tenancy.signing_identity(g.tenant)
+    try:
+        state = wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, did, g.tenant.company_id, sig["performed_by"])
+    except wfe.WorkflowError as e:
+        audit.log_failure("document", did, "Workflow start blocked", reason=str(e))
+        return jsonify({"error": str(e)}), 409
+    return jsonify(state), 201
+
+
+@bp.route("/<int:did>/workflow/steps/<int:step_order>/assign", methods=["POST"])
+def assign_workflow_step(did, step_order):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json() or {}
+    approvers = data.get("approvers") or []
+    if not isinstance(approvers, list) or not all(a.get("user_id") for a in approvers):
+        return jsonify({"error": "approvers must be a non-empty list of {user_id, display_name}"}), 400
+    try:
+        state = wfe.assign_approvers(RECORD_TYPE, did, step_order, approvers)
+    except wfe.WorkflowError as e:
+        return jsonify({"error": str(e)}), 409
+    return jsonify(state)
+
+
+@bp.route("/<int:did>/workflow/steps/<int:step_order>/decide", methods=["POST"])
+def decide_workflow_step(did, step_order):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json() or {}
+    decision = data.get("decision", "")
+    if decision not in ("approve", "reject", "advance"):
+        return jsonify({"error": "decision must be one of approve/reject/advance"}), 400
+
+    sig = tenancy.signing_identity(g.tenant)
+    try:
+        state = wfe.decide_step(
+            RECORD_TYPE, did, step_order, decision,
+            user_id=g.tenant.user_id, role=g.tenant.role,
+            performed_by=sig["performed_by"], comments=data.get("comments", ""),
+        )
+    except wfe.WorkflowPermissionError as e:
+        audit.log_failure("document", did, f"Workflow decision blocked ({decision})", reason=str(e))
+        return jsonify({"error": str(e)}), 403
+    except wfe.WorkflowError as e:
+        audit.log_failure("document", did, f"Workflow decision blocked ({decision})", reason=str(e))
+        return jsonify({"error": str(e)}), 409
+    return jsonify(state)
+
+
+# ── Approval / status transition (legacy compatibility wrapper) ──────────────
 
 _STATUS_MAP = {
     "Submitted for Review": "Under Review",
@@ -269,10 +340,25 @@ _STATUS_MAP = {
     "Made Obsolete": "Obsolete",
 }
 
+# These two actions only ever apply to an already-Effective document, i.e.
+# after the approval workflow instance has already completed — they're
+# post-effective archival transitions, not part of the Draft->Effective
+# approval gate the Workflow Engine enforces, so they're applied directly
+# (exactly as before), same as routes/qms_documents.py always did.
+_POST_EFFECTIVE_ACTIONS = {"Made Obsolete", "Send for Revision"}
+
 
 @bp.route("/<int:did>/approval", methods=["POST"])
 @require_role("company_admin", "reviewer_qa")
 def submit_approval(did):
+    """Legacy-URL compatibility wrapper (kept for backward compatibility
+    during deployment — see docs/plan). Same URL, request shape, and
+    response shape as before. Actions that gate the initial Draft->Effective
+    approval sequence now decide the document's current Workflow Engine step
+    instead of writing `status` directly (one call advances exactly one
+    step — see the identical rationale in routes/qms_capa.py's
+    submit_approval); the two post-Effective archival actions are unchanged.
+    Safe to retire once the frontend only calls /workflow/steps/<order>/decide."""
     document = tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
     if not document:
         return jsonify({"error": "Not found"}), 404
@@ -280,33 +366,59 @@ def submit_approval(did):
     action_name = data.get("action", "")
     if not action_name:
         return jsonify({"error": "Action is required"}), 400
+    if action_name not in _STATUS_MAP:
+        return jsonify({"error": f"Unknown action '{action_name}'"}), 400
 
-    if action_name in _STATUS_MAP:
+    sig = tenancy.signing_identity(g.tenant)
+    comments = data.get("comments", "")
+
+    if action_name in _POST_EFFECTIVE_ACTIONS:
         new_status = _STATUS_MAP[action_name]
         try:
             lifecycle_engine.validate_transition("QMS_DOCUMENT", document["status"], new_status)
         except lifecycle_engine.InvalidTransitionError as exc:
             return jsonify({"error": str(exc)}), 409
-
         updates = {"status": new_status}
-        if new_status == "Effective" and not document.get("effective_date"):
-            from datetime import date
-            updates["effective_date"] = date.today().isoformat()
         if new_status == "Obsolete" and not document.get("superseded_date"):
             from datetime import date
             updates["superseded_date"] = date.today().isoformat()
         document = qdb.update_document(did, updates)
-        if new_status == "Effective" and (document.get("content") or "").strip():
-            _publish_effective_document_to_kb(document)
+    else:
+        try:
+            if not wfdb.get_active_instance(RECORD_TYPE, did):
+                wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, did, g.tenant.company_id, sig["performed_by"])
+            state = wfe.get_instance_state(RECORD_TYPE, did)
+            instance = state["instance"]
+            if not instance or instance["status"] != "in_progress":
+                return jsonify({"error": "No active workflow step to act on"}), 409
+            step = next(s for s in state["steps"] if s["step_order"] == instance["current_step_order"])
+            if action_name == "Rejected":
+                if step["step_type"] != "approval":
+                    return jsonify({"error": f"'{step['step_name']}' cannot be rejected directly"}), 409
+                decision = "reject"
+            else:
+                decision = "approve" if step["step_type"] == "approval" else "advance"
+            if step["step_type"] == "approval":
+                approver_ids = {a["user_id"] for a in step.get("approvers", [])}
+                if g.tenant.user_id not in approver_ids:
+                    wfe.assign_approvers(RECORD_TYPE, did, step["step_order"],
+                                          [{"user_id": g.tenant.user_id, "display_name": sig["performed_by"]}])
+            wfe.decide_step(RECORD_TYPE, did, step["step_order"], decision,
+                             user_id=g.tenant.user_id, role=g.tenant.role,
+                             performed_by=sig["performed_by"], comments=comments)
+        except (wfe.WorkflowPermissionError, wfe.WorkflowError) as e:
+            audit.log_failure("document", did, f"Approval action blocked ({action_name})", reason=str(e))
+            return jsonify({"error": str(e)}), 409
+        document = qdb.get_document(did)
+        if document.get("status") == "Effective" and not document.get("effective_date"):
+            from datetime import date
+            document = qdb.update_document(did, {"effective_date": date.today().isoformat()})
 
-    sig = tenancy.signing_identity(g.tenant)
     entry = qmsdb.add_approval_entry(
         "document", did, action_name,
         sig["performed_by"], sig["role"],
-        data.get("comments", ""), sig["electronic_sig"],
+        comments, sig["electronic_sig"],
     )
-    audit.log("document", did, action_name, new={"status": document.get("status")},
-              reason=data.get("comments", ""))
     return jsonify(entry), 201
 
 

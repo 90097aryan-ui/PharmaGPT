@@ -19,9 +19,11 @@
   border-radius: var(--radius);
   padding: 6px;
   margin-bottom: 16px;
-  position: sticky;
-  top: 0;
-  z-index: 2;
+  /* Not sticky: .ic-tabs is nested one level inside the outer .qms-tabs
+     (qms.css), which is already position:sticky within the same .qms-body
+     scroll region — two nested sticky headers at the same top:0 compete
+     instead of stacking, hiding part of the outer tab bar. Only the
+     outermost tab strip in a given scroll context should stick. */
 }
 
 .ic-tab {

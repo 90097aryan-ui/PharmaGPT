@@ -509,6 +509,79 @@ QMS_SCHEMA = """
     ) s
     WHERE t.workflow_key = 'DEVIATION_LIFECYCLE_V2';
 
+    -- ── CAPA / Change Control / SOP: Workflow Engine adoption ────────────────
+    -- Wires these three modules onto the same generic engine Deviations use
+    -- (services/workflow_engine.py's STATUS_APPLIERS registry has one entry
+    -- per module below) — no schema change, only new template/step rows,
+    -- per the existing "Reusable as-is by CAPA/Change Control/SOP later"
+    -- design note above. Each template's step_order sequence reproduces that
+    -- module's existing status lifecycle (qms_database.py QMS_META) 1:1;
+    -- 'approval' steps are the modules' former QA/final-approval gates
+    -- (previously enforced only by @require_role, now by a named assignee),
+    -- 'activity' steps are the former free-map's plain stage advances.
+
+    INSERT OR IGNORE INTO qms_workflow_templates (workflow_key, name, module)
+        VALUES ('CAPA_WORKFLOW_V1', 'CAPA Workflow', 'capa');
+
+    INSERT OR IGNORE INTO qms_workflow_template_steps
+        (template_id, step_order, step_key, step_name, step_type, eligible_roles, gate_status)
+    SELECT t.id, s.step_order, s.step_key, s.step_name, s.step_type, s.eligible_roles, s.gate_status
+    FROM qms_workflow_templates t
+    JOIN (
+        SELECT 1 AS step_order, 'submitted'             AS step_key, 'CAPA Opened'              AS step_name, 'activity' AS step_type, 'user,reviewer_qa,company_admin' AS eligible_roles, 'Open'                 AS gate_status
+        UNION ALL SELECT 2, 'root_cause_analysis', 'Root Cause Analysis',      'activity', 'user,reviewer_qa,company_admin', 'Root Cause Analysis'
+        UNION ALL SELECT 3, 'ca_planned',          'Corrective Action Planning', 'activity', 'user,reviewer_qa,company_admin', 'CA Planned'
+        UNION ALL SELECT 4, 'pa_planned',          'Preventive Action Planning', 'activity', 'user,reviewer_qa,company_admin', 'PA Planned'
+        UNION ALL SELECT 5, 'implementation',      'Implementation',           'activity', 'user,reviewer_qa,company_admin', 'Implementation'
+        UNION ALL SELECT 6, 'effectiveness_check', 'Effectiveness Check',      'activity', 'user,reviewer_qa,company_admin', 'Effectiveness Check'
+        UNION ALL SELECT 7, 'qa_review',           'QA Review',                'approval', 'reviewer_qa,company_admin',      'QA Review'
+        UNION ALL SELECT 8, 'closed',              'CAPA Closure',             'approval', 'company_admin',                  'Closed'
+    ) s
+    WHERE t.workflow_key = 'CAPA_WORKFLOW_V1';
+
+    INSERT OR IGNORE INTO qms_workflow_templates (workflow_key, name, module)
+        VALUES ('CHANGE_CONTROL_WORKFLOW_V1', 'Change Control Workflow', 'change_control');
+
+    INSERT OR IGNORE INTO qms_workflow_template_steps
+        (template_id, step_order, step_key, step_name, step_type, eligible_roles, gate_status)
+    SELECT t.id, s.step_order, s.step_key, s.step_name, s.step_type, s.eligible_roles, s.gate_status
+    FROM qms_workflow_templates t
+    JOIN (
+        SELECT 1 AS step_order, 'submitted'              AS step_key, 'Submitted'               AS step_name, 'activity' AS step_type, 'user,reviewer_qa,company_admin' AS eligible_roles, 'Submitted'            AS gate_status
+        UNION ALL SELECT 2,  'initial_review',        'Initial Review',        'activity', 'reviewer_qa,company_admin', 'Initial Review'
+        UNION ALL SELECT 3,  'impact_assessment',     'Impact Assessment',     'activity', 'reviewer_qa,company_admin', 'Impact Assessment'
+        UNION ALL SELECT 4,  'risk_assessment',        'Risk Assessment',       'activity', 'reviewer_qa,company_admin', 'Risk Assessment'
+        UNION ALL SELECT 5,  'department_review',      'Department Review',     'activity', 'reviewer_qa,company_admin', 'Department Review'
+        UNION ALL SELECT 6,  'qa_review',              'QA Review',             'approval', 'reviewer_qa,company_admin', 'QA Review'
+        UNION ALL SELECT 7,  'approval',               'Approval',              'approval', 'company_admin',             'Approval'
+        UNION ALL SELECT 8,  'implementation',         'Implementation',        'activity', 'reviewer_qa,company_admin', 'Implementation'
+        UNION ALL SELECT 9,  'verification',           'Verification',          'activity', 'reviewer_qa,company_admin', 'Verification'
+        UNION ALL SELECT 10, 'effectiveness_review',   'Effectiveness Review',  'activity', 'reviewer_qa,company_admin', 'Effectiveness Review'
+        UNION ALL SELECT 11, 'closed',                 'Closure',               'approval', 'company_admin',             'Closed'
+    ) s
+    WHERE t.workflow_key = 'CHANGE_CONTROL_WORKFLOW_V1';
+
+    -- 3 steps, not 4: the app's pre-existing test suite (tests/test_kb_sync.py
+    -- etc.) already exercises the legacy /approval endpoint as exactly two
+    -- actions from Draft to Effective ("Submitted for Review" then
+    -- "Approved") — matching that keeps those tests passing unchanged
+    -- rather than fabricating a "Pending Approval" gate no caller expects a
+    -- separate action for. "Pending Approval" is not a reachable status via
+    -- this template (an existing, documented simplification — see docs/plan).
+    INSERT OR IGNORE INTO qms_workflow_templates (workflow_key, name, module)
+        VALUES ('DOCUMENT_WORKFLOW_V1', 'Document Control Workflow', 'document');
+
+    INSERT OR IGNORE INTO qms_workflow_template_steps
+        (template_id, step_order, step_key, step_name, step_type, eligible_roles, gate_status)
+    SELECT t.id, s.step_order, s.step_key, s.step_name, s.step_type, s.eligible_roles, s.gate_status
+    FROM qms_workflow_templates t
+    JOIN (
+        SELECT 1 AS step_order, 'submitted'    AS step_key, 'Submitted for Review' AS step_name, 'activity' AS step_type, 'user,reviewer_qa,company_admin' AS eligible_roles, 'Under Review' AS gate_status
+        UNION ALL SELECT 2, 'under_review', 'Under Review',   'approval', 'reviewer_qa,company_admin', 'Under Review'
+        UNION ALL SELECT 3, 'effective',    'Made Effective', 'approval', 'company_admin',             'Effective'
+    ) s
+    WHERE t.workflow_key = 'DOCUMENT_WORKFLOW_V1';
+
     -- ── Investigation Engine (new, record_type-agnostic) ─────────────────────
     -- Polymorphic on (record_type, record_id), exactly like qms_attachments/
     -- qms_comments above — so CAPA/Complaint/OOS/OOT/Audit Finding/Supplier/

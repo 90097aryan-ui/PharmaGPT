@@ -179,3 +179,69 @@ def get_step_approvers(instance_step_id: int) -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ── Universal Workflow Inbox (Problem 1/7) ───────────────────────────────────
+# Purely additive, record_type-agnostic reads for the Inbox: only
+# record_type/record_id + step/instance metadata, no module-specific fields.
+# Module-aware display data (title, record number, route) is resolved
+# separately by services/workflow_registry.py.
+
+def list_my_pending_steps(company_id: str, user_id: str, role: str) -> list[dict]:
+    """Every in-progress workflow instance's *current* step, across all
+    record_types, where the caller may act on it right now: a named
+    approver (approval steps) or holding an eligible role (activity steps).
+    """
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT i.record_type, i.record_id, i.id AS instance_id,
+               s.id AS step_id, s.step_order, s.step_key, s.step_name,
+               s.step_type, s.status,
+               COALESCE(
+                   (SELECT MAX(decided_at) FROM qms_workflow_instance_steps
+                    WHERE instance_id = i.id AND step_order < i.current_step_order
+                      AND decided_at != ''),
+                   i.started_at
+               ) AS pending_since
+        FROM qms_workflow_instances i
+        JOIN qms_workflow_instance_steps s
+          ON s.instance_id = i.id AND s.step_order = i.current_step_order
+        WHERE i.status = 'in_progress'
+          AND i.company_id = ?
+          AND (
+              (s.step_type = 'approval' AND EXISTS (
+                  SELECT 1 FROM qms_workflow_step_approvers a
+                  WHERE a.instance_step_id = s.id AND a.user_id = ?
+              ))
+              OR
+              (s.step_type = 'activity' AND (',' || s.eligible_roles || ',') LIKE ('%,' || ? || ',%'))
+          )
+        ORDER BY pending_since ASC
+        """,
+        (company_id, user_id, role),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def list_recent_decisions(company_id: str, performed_by: str, limit: int = 10) -> list[dict]:
+    """Steps this user has decided (any instance status), most recent
+    first. Matched by `decided_by` (the signing identity's display name) —
+    the only identity recorded on a step; there is no decided_by_user_id
+    column (see qms_workflow_instance_steps schema)."""
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT i.record_type, i.record_id, s.step_order, s.step_key, s.step_name,
+               s.status, s.decided_at, s.decided_by, s.comments
+        FROM qms_workflow_instance_steps s
+        JOIN qms_workflow_instances i ON i.id = s.instance_id
+        WHERE i.company_id = ? AND s.decided_by = ? AND s.decided_at != ''
+        ORDER BY s.decided_at DESC
+        LIMIT ?
+        """,
+        (company_id, performed_by, limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

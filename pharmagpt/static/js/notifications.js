@@ -36,18 +36,31 @@
   function openQual(id) { if (window.showView) window.showView("view-qual"); if (window.qualShowDetail) window.qualShowDetail(id); }
   function openRisk(id) { if (window.openAssessment) window.openAssessment(id); }
 
+  function openWorkflowItem(module, recordId) {
+    if (window.wfInboxReview) window.wfInboxReview(module, recordId);
+  }
+
   async function fetchAll() {
-    const [qmsDash, pendingDocs, ursReview, qualReview, riskReview] = await Promise.all([
+    const [qmsDash, pendingDocs, ursReview, qualReview, riskReview, workflowInbox] = await Promise.all([
       fetch("/qms/dashboard").then(safeJson).catch(() => null),
       fetch("/qms/documents?status=pending_approval").then(safeJson).catch(() => null),
       fetch("/urs/?status=under_review").then(safeJson).catch(() => null),
       fetch("/qual/?status=under_review").then(safeJson).catch(() => null),
       fetch("/risk/assessments?status=in_review").then(safeJson).catch(() => null),
+      fetch("/workflow/inbox").then(safeJson).catch(() => null),
     ]);
 
     const approvalPending = [];
     const reviewPending = [];
     const documentPublished = [];
+    const workflowPending = [];
+
+    (Array.isArray(workflowInbox) ? workflowInbox : []).forEach(i =>
+      workflowPending.push({
+        title: i.title || "Untitled",
+        meta: `${i.record_number || ""} · ${i.current_step_name}`.trim(),
+        open: () => openWorkflowItem(i.module, i.record_id),
+      }));
 
     if (qmsDash) {
       (qmsDash.capa && qmsDash.capa.overdue_capas || []).forEach(c =>
@@ -75,7 +88,7 @@
     (Array.isArray(riskReview) ? riskReview : []).forEach(r =>
       reviewPending.push({ title: r.title, meta: `Risk Assessment · ${r.assessment_type || "in review"}`, open: () => openRisk(r.id) }));
 
-    return { approvalPending, reviewPending, documentPublished };
+    return { approvalPending, reviewPending, documentPublished, workflowPending };
   }
 
   function renderGroup(label, dotClass, items) {
@@ -94,7 +107,8 @@
   }
 
   function render(dropdown, badge, data) {
-    const total = data.approvalPending.length + data.reviewPending.length + data.documentPublished.length;
+    const total = data.approvalPending.length + data.reviewPending.length +
+      data.documentPublished.length + data.workflowPending.length;
 
     if (badge) {
       if (total > 0) { badge.style.display = "flex"; badge.textContent = total > 9 ? "9+" : String(total); }
@@ -108,11 +122,13 @@
     }
 
     dropdown.innerHTML = `<div class="hdr-notif-header">Notifications</div>` +
+      renderGroup("Awaiting My Decision", "hdr-notif-dot-warning", data.workflowPending) +
       renderGroup("Approval Pending", "hdr-notif-dot-warning", data.approvalPending) +
       renderGroup("Review Pending", "hdr-notif-dot-info", data.reviewPending) +
       renderGroup("Document Published", "hdr-notif-dot-success", data.documentPublished);
 
     const byGroup = {
+      "Awaiting My Decision": data.workflowPending,
       "Approval Pending": data.approvalPending,
       "Review Pending": data.reviewPending,
       "Document Published": data.documentPublished,
@@ -132,7 +148,7 @@
     if (btn) btn.setAttribute("aria-expanded", "false");
   }
 
-  let lastData = { approvalPending: [], reviewPending: [], documentPublished: [] };
+  let lastData = { approvalPending: [], reviewPending: [], documentPublished: [], workflowPending: [] };
 
   function refresh() {
     if (!window.PharmaAuth || !window.PharmaAuth.isAuthenticated()) return;

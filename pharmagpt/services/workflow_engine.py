@@ -10,11 +10,11 @@ writing the resulting status back onto the owning record, and logging every
 transition to the existing qms_audit_trail via audit.log() — no new audit
 table.
 
-Deliberately record_type-agnostic: Phase 1 only wires 'deviation'
-(_apply_gate_status below), but CAPA/Change Control/SOP can adopt the same
-engine later by (a) adding a new qms_workflow_templates row + step rows and
-(b) adding one branch to _apply_gate_status — no change to the functions in
-this file.
+Deliberately record_type-agnostic: dispatch for "how does this record_type's
+status get written back" lives in the STATUS_APPLIERS registry below, not in
+hardcoded if/elif branching. A future adopting module needs (a) a new
+qms_workflow_templates row + step rows and (b) one new entry in
+STATUS_APPLIERS — no change to the functions in this file.
 
 Approver semantics (Assumption, see PHASE1_INVESTIGATION_PLAN): a step's
 named approvers are "any one of" — the first assigned approver to act
@@ -26,6 +26,7 @@ delegate coverage, not unanimous consent. Easy to add an all-of mode later
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Callable
 
 from pharmagpt import audit
 from pharmagpt import qms_workflow_database as wfdb
@@ -75,14 +76,55 @@ def _status_after_completing(template_steps: list[dict], completed_step_order: i
     return next_step["gate_status"]
 
 
+def _apply_deviation_status(record_id: int, status: str) -> None:
+    from pharmagpt import qms_deviation_database as ddb
+    ddb.update_deviation(record_id, {"status": status})
+
+
+def _apply_capa_status(record_id: int, status: str) -> None:
+    # The engine's reject/return decisions write generic gate-status labels
+    # ("Rejected", "Returned for Investigation") that aren't part of CAPA's
+    # own status vocabulary (qms_database.QMS_META["capa_statuses"]) — map
+    # the generic label back onto CAPA's actual "Rejected -> Open" rule here,
+    # confined to this one applier, not the engine's core decision logic.
+    from pharmagpt import qms_capa_database as capadb
+    mapped = "Open" if status == "Rejected" else status
+    capadb.update_capa(record_id, {"status": mapped})
+
+
+def _apply_change_control_status(record_id: int, status: str) -> None:
+    from pharmagpt import qms_change_control_database as ccdb
+    mapped = "Draft" if status == "Rejected" else status
+    ccdb.update_change_control(record_id, {"status": mapped})
+
+
+def _apply_document_status(record_id: int, status: str) -> None:
+    from pharmagpt import qms_document_database as qdb
+    from pharmagpt.routes.qms_documents import _publish_effective_document_to_kb
+    mapped = "Draft" if status == "Rejected" else status
+    document = qdb.update_document(record_id, {"status": mapped})
+    if mapped == "Effective" and (document.get("content") or "").strip():
+        _publish_effective_document_to_kb(document)
+
+
+# Registry dispatch for "how does this record_type's status get written back"
+# — adding a future module is one function + one entry here, never a growing
+# if/elif chain and never a change to decide_step/start_instance/etc.
+STATUS_APPLIERS: dict[str, Callable[[int, str], None]] = {
+    "deviation": _apply_deviation_status,
+    "capa": _apply_capa_status,
+    "change_control": _apply_change_control_status,
+    "document": _apply_document_status,
+}
+
+
 def _apply_gate_status(record_type: str, record_id: int, status: str) -> None:
-    """Write the workflow's resulting status onto the owning record. The one
-    place a future adopting module needs a branch."""
-    if record_type == "deviation":
-        from pharmagpt import qms_deviation_database as ddb
-        ddb.update_deviation(record_id, {"status": status})
-    else:
+    """Write the workflow's resulting status onto the owning record via
+    STATUS_APPLIERS. The one place a future adopting module needs an entry."""
+    applier = STATUS_APPLIERS.get(record_type)
+    if applier is None:
         raise WorkflowError(f"Unsupported record_type '{record_type}' for workflow_engine")
+    applier(record_id, status)
 
 
 def get_instance_state(record_type: str, record_id: int) -> dict:

@@ -10,9 +10,9 @@
     "semantic_hash": "a089bcad0d328174f53c430c4e98b782"
   },
   ".claude/settings.local.json": {
-    "mtime": 1785065658.079501,
-    "ast_hash": "8fa044fcb70024a811736f44c8ed909e",
-    "semantic_hash": "8fa044fcb70024a811736f44c8ed909e"
+    "mtime": 1785256938.1631794,
+    "ast_hash": "fe4d17b69d2b77f699e67e45530be97e",
+    "semantic_hash": ""
   },
   "docs/PHASE_F3_MIGRATION_BUNDLE.sql": {
     "mtime": 1784911570.3765414,
@@ -155,9 +155,9 @@
     "semantic_hash": "64cdd1a43e8ab847abcd35373491cd8b"
   },
   "pharmagpt/app.py": {
-    "mtime": 1784789312.7297297,
-    "ast_hash": "7c5cf674d8cad107b25c8129746bc71b",
-    "semantic_hash": "7c5cf674d8cad107b25c8129746bc71b"
+    "mtime": 1785175821.4293575,
+    "ast_hash": "314ab5a99eac6f382fd6a31dff67b6e5",
+    "semantic_hash": ""
   },
   "pharmagpt/audit.py": {
     "mtime": 1784867730.9137697,
@@ -410,9 +410,9 @@
     "semantic_hash": "4d2a48c12c327b8afd9507c0b9a68be0"
   },
   "pharmagpt/qms_database.py": {
-    "mtime": 1785085044.1519845,
-    "ast_hash": "c3b2e7bb72c02bc0f247c75bda8e90ed",
-    "semantic_hash": "c3b2e7bb72c02bc0f247c75bda8e90ed"
+    "mtime": 1785177282.6630332,
+    "ast_hash": "c94ea4c6fc68905be6bc61310c3c0f34",
+    "semantic_hash": ""
   },
   "pharmagpt/qms_deviation_database.py": {
     "mtime": 1785077844.9979506,
@@ -430,9 +430,9 @@
     "semantic_hash": "e17a8366de5bbdf05e634c06988e7b38"
   },
   "pharmagpt/qms_workflow_database.py": {
-    "mtime": 1785078652.4611788,
-    "ast_hash": "5fadd311ef103cd072a2e3c085d86cee",
-    "semantic_hash": "5fadd311ef103cd072a2e3c085d86cee"
+    "mtime": 1785175786.8076937,
+    "ast_hash": "bc9abf41e308fced6655583dba40df6a",
+    "semantic_hash": ""
   },
   "pharmagpt/qual_database.py": {
     "mtime": 1784756635.6038563,
@@ -520,14 +520,14 @@
     "semantic_hash": "8819f1399bb610975542596e414844c8"
   },
   "pharmagpt/routes/qms_capa.py": {
-    "mtime": 1784868443.1447735,
-    "ast_hash": "e32517808d820a8442609f3a4bdfb0c2",
-    "semantic_hash": "e32517808d820a8442609f3a4bdfb0c2"
+    "mtime": 1785175102.0553188,
+    "ast_hash": "dba43768fa38797834b64c17325d2cac",
+    "semantic_hash": ""
   },
   "pharmagpt/routes/qms_change_control.py": {
-    "mtime": 1784868487.349429,
-    "ast_hash": "2e68c4b1131fc6cb5fa8ca9550925a0a",
-    "semantic_hash": "2e68c4b1131fc6cb5fa8ca9550925a0a"
+    "mtime": 1785175139.0201638,
+    "ast_hash": "e6b1097ea49ff2f2d44969ffa51073e4",
+    "semantic_hash": ""
   },
   "pharmagpt/routes/qms_common.py": {
     "mtime": 1785085518.3793082,
@@ -540,9 +540,9 @@
     "semantic_hash": "a085b1c116cc4bab47548eb850558cb1"
   },
   "pharmagpt/routes/qms_documents.py": {
-    "mtime": 1784868281.1834364,
-    "ast_hash": "7ed132fbe8a304ddb779ec193d008578",
-    "semantic_hash": "7ed132fbe8a304ddb779ec193d008578"
+    "mtime": 1785175187.7300994,
+    "ast_hash": "a2165f4d92030669b7d49cc919c821ba",
+    "semantic_hash": ""
   },
   "pharmagpt/routes/qual.py": {
     "mtime": 1784869584.7051997,
@@ -660,9 +660,9 @@
     "semantic_hash": "124b581d3ae95b0246c9ddc58823dd50"
   },
   "pharmagpt/services/identity_admin.py": {
-    "mtime": 1784789266.6377087,
-    "ast_hash": "70a315d87fe9b0604262b2b9082689bc",
-    "semantic_hash": "70a315d87fe9b0604262b2b9082689bc"
+    "mtime": 1785258466.8754742,
+    "ast_hash": "1a23c3caf5f38e5863feee21bcffd6c1",
+    "semantic_hash": ""
   },
   "pharmagpt/services/investigation_engine.py": {
     "mtime": 1785086051.376525,
@@ -755,9 +755,9 @@
     "semantic_hash": "45b1f41cb34650fa5ba272de5ad285b8"
   },
   "pharmagpt/services/workflow_engine.py": {
-    "mtime": 1785078757.535465,
-    "ast_hash": "03929d11f6621877cf21cd94f391eabc",
-    "semantic_hash": "03929d11f6621877cf21cd94f391eabc"
+    "mtime": 1785174743.0196834,
+    "ast_hash": "f9ac4d22ed50f1cf2fcdc581522497c9",
+    "semantic_hash": ""
   },
   "pharmagpt/state.py": {
     "mtime": 1784689203.5701666,
@@ -835,9 +835,9 @@
     "semantic_hash": "e9a9979c49283d1654f153230d5eada4"
   },
   "pharmagpt/static/js/notifications.js": {
-    "mtime": 1784808911.6570308,
-    "ast_hash": "71b90b6c81ddf38529ca4b8297b10c14",
-    "semantic_hash": "71b90b6c81ddf38529ca4b8297b10c14"
+    "mtime": 1785176451.9723585,
+    "ast_hash": "d5b84dce7687fe501a1c933cb2fc2b51",
+    "semantic_hash": ""
   },
   "pharmagpt/static/js/project_workspace.js": {
     "mtime": 1784820763.4895391,
@@ -850,14 +850,14 @@
     "semantic_hash": "31c70fafd584083fd420ce7e0b36e72f"
   },
   "pharmagpt/static/js/qms_capa.js": {
-    "mtime": 1785052109.9503174,
-    "ast_hash": "7cde2d706530abf6334c4cfbef5333b8",
-    "semantic_hash": "7cde2d706530abf6334c4cfbef5333b8"
+    "mtime": 1785176142.3107328,
+    "ast_hash": "12491c396c364da42ff0e074a2a2610c",
+    "semantic_hash": ""
   },
   "pharmagpt/static/js/qms_change_control.js": {
-    "mtime": 1785052113.9693735,
-    "ast_hash": "c15d0cd37ab652017030745b2b7edb88",
-    "semantic_hash": "c15d0cd37ab652017030745b2b7edb88"
+    "mtime": 1785176173.791026,
+    "ast_hash": "9285e4ecaa94ea3905930162931bc909",
+    "semantic_hash": ""
   },
   "pharmagpt/static/js/qms_common.js": {
     "mtime": 1785064983.5201669,
@@ -870,9 +870,9 @@
     "semantic_hash": "fb571783fcfec86bf146fab0a03e723f"
   },
   "pharmagpt/static/js/qms_documents.js": {
-    "mtime": 1785052118.4665766,
-    "ast_hash": "ae832f82758eaad6ab5e1ca22f84996e",
-    "semantic_hash": "ae832f82758eaad6ab5e1ca22f84996e"
+    "mtime": 1785176204.5157309,
+    "ast_hash": "640cea390cdc867c39222f77d560fb84",
+    "semantic_hash": ""
   },
   "pharmagpt/static/js/qual.js": {
     "mtime": 1784809506.7679305,
@@ -890,9 +890,9 @@
     "semantic_hash": "2498394c194af983cc089aa8d49f5b80"
   },
   "pharmagpt/static/js/risk.js": {
-    "mtime": 1784809531.479817,
-    "ast_hash": "5cf675c98402122391e4dc47497d2a5a",
-    "semantic_hash": "5cf675c98402122391e4dc47497d2a5a"
+    "mtime": 1785176306.8464165,
+    "ast_hash": "a4674f2cbd47637ee34cae11f0a6a23f",
+    "semantic_hash": ""
   },
   "pharmagpt/static/js/search.js": {
     "mtime": 1784808862.3345325,
@@ -920,9 +920,9 @@
     "semantic_hash": "3e6f3b2f0ff60e163678645eb900aa76"
   },
   "pharmagpt/static/js/validation_dashboard.js": {
-    "mtime": 1784820713.0949824,
-    "ast_hash": "3c95c0c60313635c7993e633236a1d01",
-    "semantic_hash": "3c95c0c60313635c7993e633236a1d01"
+    "mtime": 1785176523.4103544,
+    "ast_hash": "8622766dc6daa151adfd3f45ae1fd3a1",
+    "semantic_hash": ""
   },
   "pharmagpt/static/js/workspace.js": {
     "mtime": 1784749114.405341,
@@ -1165,9 +1165,9 @@
     "semantic_hash": "0ea6e6f4d88d370173043a77a37dd412"
   },
   "tests/test_phase_f_compliance.py": {
-    "mtime": 1784869926.6124182,
-    "ast_hash": "4529f7387fc473c67b75f1c2b6553ccb",
-    "semantic_hash": "4529f7387fc473c67b75f1c2b6553ccb"
+    "mtime": 1785177332.624797,
+    "ast_hash": "76c536c5ccbaf10c79c0784a43208ea3",
+    "semantic_hash": ""
   },
   "tests/test_pipeline.py": {
     "mtime": 1782885564.7032416,
@@ -1205,9 +1205,9 @@
     "semantic_hash": "09bdbbaff9db3c064354a6e0f0a3dd8c"
   },
   "tests/test_qms_routes.py": {
-    "mtime": 1785086250.4231188,
-    "ast_hash": "ba4fb8769d770838016be8d4498ec53e",
-    "semantic_hash": "ba4fb8769d770838016be8d4498ec53e"
+    "mtime": 1785177296.255819,
+    "ast_hash": "e4f2ae9120bfc3f347f15633e5c65e6f",
+    "semantic_hash": ""
   },
   "tests/test_risk_generate_endpoint.py": {
     "mtime": 1784732633.695107,
@@ -1278,5 +1278,545 @@
     "mtime": 1785078770.92423,
     "ast_hash": "1d4fb80feab73addda295476c91b1ea0",
     "semantic_hash": "1d4fb80feab73addda295476c91b1ea0"
+  },
+  "pharmagpt/routes/workflow_inbox.py": {
+    "mtime": 1785175810.3130116,
+    "ast_hash": "7f25094585a4b82c5b21ff5d6bde2360",
+    "semantic_hash": ""
+  },
+  "pharmagpt/services/workflow_context.py": {
+    "mtime": 1785175761.4856253,
+    "ast_hash": "759c55f584c517cd8607784e020e0ba4",
+    "semantic_hash": ""
+  },
+  "pharmagpt/services/workflow_registry.py": {
+    "mtime": 1785175743.682524,
+    "ast_hash": "9a7b2769bcec14cd86b201f4101f3621",
+    "semantic_hash": ""
+  },
+  "pharmagpt/static/js/workflow_inbox.js": {
+    "mtime": 1785176466.1793733,
+    "ast_hash": "9c10470e95a58b7e55811030b721f6b7",
+    "semantic_hash": ""
+  },
+  "pharmagpt/static/js/workflow_panel.js": {
+    "mtime": 1785176101.1853225,
+    "ast_hash": "d48832408249109dd2437767a3397382",
+    "semantic_hash": ""
+  },
+  "scripts/migrate_workflow_templates_v2.py": {
+    "mtime": 1785177806.2380476,
+    "ast_hash": "bdadf171e4a1e1d3785bdb9ce5cd3419",
+    "semantic_hash": ""
+  },
+  "tests/test_workflow_inbox.py": {
+    "mtime": 1785175961.9323688,
+    "ast_hash": "aeadb1749a474730fd2b66d0b56de84c",
+    "semantic_hash": ""
+  },
+  ".claude/CLAUDE.md": {
+    "mtime": 1785168902.5430775,
+    "ast_hash": "c232166e6492ba1ed955030b16979b05",
+    "semantic_hash": ""
+  },
+  ".claude/skills/graphify/SKILL.md": {
+    "mtime": 1785168902.451088,
+    "ast_hash": "62aa0f6529a7784d9542c575a87d7077",
+    "semantic_hash": ""
+  },
+  ".claude/skills/graphify/references/add-watch.md": {
+    "mtime": 1785168831.2496743,
+    "ast_hash": "d59d027fe449f06aa03905a01184e779",
+    "semantic_hash": ""
+  },
+  ".claude/skills/graphify/references/exports.md": {
+    "mtime": 1785168831.2786746,
+    "ast_hash": "9da2a2152e60a22f07f05fed5158f287",
+    "semantic_hash": ""
+  },
+  ".claude/skills/graphify/references/extraction-spec.md": {
+    "mtime": 1785168831.7116735,
+    "ast_hash": "42fef56a01698118f7fd722acdadea34",
+    "semantic_hash": ""
+  },
+  ".claude/skills/graphify/references/github-and-merge.md": {
+    "mtime": 1785168831.7146792,
+    "ast_hash": "cde13df085e4c492aeb7ba298a996d0d",
+    "semantic_hash": ""
+  },
+  ".claude/skills/graphify/references/hooks.md": {
+    "mtime": 1785168831.7166777,
+    "ast_hash": "3f545db6ce646650bb9de588f5512a27",
+    "semantic_hash": ""
+  },
+  ".claude/skills/graphify/references/query.md": {
+    "mtime": 1785168831.7266858,
+    "ast_hash": "3c46f8ad006874260614ed8657d02307",
+    "semantic_hash": ""
+  },
+  ".claude/skills/graphify/references/transcribe.md": {
+    "mtime": 1785168831.7296739,
+    "ast_hash": "67b6a5fa6c0974e18f60db9f8932fbd8",
+    "semantic_hash": ""
+  },
+  ".claude/skills/graphify/references/update.md": {
+    "mtime": 1785168832.1607063,
+    "ast_hash": "9378bd03d56baaf78bd738ab3848f142",
+    "semantic_hash": ""
+  },
+  "API.md": {
+    "mtime": 1783650847.476749,
+    "ast_hash": "e3ce2ce000743b4db47a9b9e47326559",
+    "semantic_hash": ""
+  },
+  "ARCHITECTURE_BASELINE_v1.0.md": {
+    "mtime": 1785086819.313688,
+    "ast_hash": "b480ee245f0439bc367299bd80098efe",
+    "semantic_hash": ""
+  },
+  "ARCHITECTURE_REVIEW.md": {
+    "mtime": 1784611192.6136942,
+    "ast_hash": "fbfa36e4fe9058495182d092a5f6e5ce",
+    "semantic_hash": ""
+  },
+  "CHANGELOG.md": {
+    "mtime": 1783650665.8191204,
+    "ast_hash": "4c0950cf10d7be88a19bf27816a73bbc",
+    "semantic_hash": ""
+  },
+  "CLAUDE.md": {
+    "mtime": 1785168902.595077,
+    "ast_hash": "9b731395406096521f813ca7a38adc95",
+    "semantic_hash": ""
+  },
+  "DATABASE.md": {
+    "mtime": 1785258961.0769258,
+    "ast_hash": "6a257310a53f0293594f6c9e461b9e5b",
+    "semantic_hash": ""
+  },
+  "DEPLOYMENT_REVIEW.md": {
+    "mtime": 1784873310.3249907,
+    "ast_hash": "e79ceddab3e30578dfd35bed93efefe8",
+    "semantic_hash": ""
+  },
+  "ENTERPRISE_ACCEPTANCE_TEST_REPORT.md": {
+    "mtime": 1784797405.7130291,
+    "ast_hash": "baa36e623894c33d1e03fc89adb2356d",
+    "semantic_hash": ""
+  },
+  "FOUNDATION_ARCHITECTURE.md": {
+    "mtime": 1783651777.8588955,
+    "ast_hash": "cd99b23d8ce71022575a49f5947cca75",
+    "semantic_hash": ""
+  },
+  "FUNCTIONAL_VALIDATION_REPORT.md": {
+    "mtime": 1784741952.9044743,
+    "ast_hash": "8ccaf9d0f60b113c4b79f31ce479605c",
+    "semantic_hash": ""
+  },
+  "HOTFIX_RLS_RECURSION.md": {
+    "mtime": 1784915982.413096,
+    "ast_hash": "aabd0603cd76143e7ed99ebedd43e50f",
+    "semantic_hash": ""
+  },
+  "PERFORMANCE_REPORT.md": {
+    "mtime": 1784611106.8622906,
+    "ast_hash": "7ffa5e39f94dd28cc662f7e19e880a5f",
+    "semantic_hash": ""
+  },
+  "PHARMAGPT_v1.0_FINAL_RELEASE_CERTIFICATION.md": {
+    "mtime": 1784872193.3929238,
+    "ast_hash": "e3a1ad37577c579532077c19d1d5f513",
+    "semantic_hash": ""
+  },
+  "PHARMAGPT_v1.0_PHASE_F_RELEASE_CERTIFICATION.md": {
+    "mtime": 1784870720.4697003,
+    "ast_hash": "7b04e51eb5c12437d09e47dbbf1e6b9b",
+    "semantic_hash": ""
+  },
+  "PHARMAGPT_v1.0_RELEASE_READINESS_REPORT.md": {
+    "mtime": 1784866899.3105562,
+    "ast_hash": "be5fcab61c636513b73b6cec2c097962",
+    "semantic_hash": ""
+  },
+  "PHASE2_COMPLETION.md": {
+    "mtime": 1783859901.6076403,
+    "ast_hash": "fc56b33d15dbd976db1e96667529535e",
+    "semantic_hash": ""
+  },
+  "PHASE_1_IMPLEMENTATION_REPORT.md": {
+    "mtime": 1784749941.753699,
+    "ast_hash": "c376cc2c1bd136ff35c6f2f4f5aa0bd6",
+    "semantic_hash": ""
+  },
+  "PHASE_2_IMPLEMENTATION_REPORT.md": {
+    "mtime": 1784758041.3812497,
+    "ast_hash": "cf714b3d63c448f3ab71fd504434f040",
+    "semantic_hash": ""
+  },
+  "PHASE_3_IMPLEMENTATION_REPORT.md": {
+    "mtime": 1784779395.356021,
+    "ast_hash": "0c5f6f4f90b9e2797ff2baeeeb046910",
+    "semantic_hash": ""
+  },
+  "PHASE_4_UI_NAVIGATION_REPORT.md": {
+    "mtime": 1784799643.7118883,
+    "ast_hash": "79b48eb153e6f1cd9a3c40d23a5638b0",
+    "semantic_hash": ""
+  },
+  "PHASE_5_ENTERPRISE_UX_REPORT.md": {
+    "mtime": 1784811828.1606185,
+    "ast_hash": "3c8f6e04dd593d191fe96c28245ea5d6",
+    "semantic_hash": ""
+  },
+  "PHASE_F2_IMPLEMENTATION_REPORT.md": {
+    "mtime": 1784874393.2737386,
+    "ast_hash": "4deaacd6c69a963b4bdf55dca7ac4542",
+    "semantic_hash": ""
+  },
+  "PROJECT_MEMORY/ARCHITECTURE.md": {
+    "mtime": 1783650803.2251685,
+    "ast_hash": "e4344beefc8d4a6cddd2fcef325ab653",
+    "semantic_hash": ""
+  },
+  "PROJECT_MEMORY/CLAUDE.md": {
+    "mtime": 1783651791.9572208,
+    "ast_hash": "7397022d6a2fd505cf7e1488966e016d",
+    "semantic_hash": ""
+  },
+  "PROJECT_MEMORY/DECISIONS.md": {
+    "mtime": 1783651627.376646,
+    "ast_hash": "e89a488d862a620df16456d0d136cea6",
+    "semantic_hash": ""
+  },
+  "PROJECT_MEMORY/PROJECT_STATUS.md": {
+    "mtime": 1784749776.0248594,
+    "ast_hash": "75e64aeb6f8fd8d3353736c99abb8af5",
+    "semantic_hash": ""
+  },
+  "PROJECT_MEMORY/RELEASE_NOTES.md": {
+    "mtime": 1783650652.7919073,
+    "ast_hash": "0b4a214d64b066736af15ae3d3413ad7",
+    "semantic_hash": ""
+  },
+  "PROJECT_STATUS.md": {
+    "mtime": 1783011443.5127654,
+    "ast_hash": "9917c29579f419f34b366fe174298d40",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1784749789.388429,
+    "ast_hash": "3c3e92436dddc2c64b6a9323d6e56150",
+    "semantic_hash": ""
+  },
+  "ROADMAP.md": {
+    "mtime": 1782545380.9626513,
+    "ast_hash": "aa126ba4cb97b6b3ab1261bacfb72440",
+    "semantic_hash": ""
+  },
+  "SECURITY_REVIEW.md": {
+    "mtime": 1784611118.6849055,
+    "ast_hash": "07a257587ddeee8132b3390d4c653dc1",
+    "semantic_hash": ""
+  },
+  "SQLITE_AUDIT_REPORT.md": {
+    "mtime": 1784611144.906344,
+    "ast_hash": "30505c7e88b5f8df304b3f32f4f1c30d",
+    "semantic_hash": ""
+  },
+  "SYSTEM_ARCHITECTURE_DOCUMENT_PROCESSING.md": {
+    "mtime": 1782885858.4147003,
+    "ast_hash": "ade6cac369f18af604f0ced2b02564b2",
+    "semantic_hash": ""
+  },
+  "TENANCY_VALIDATION.md": {
+    "mtime": 1784610462.7790456,
+    "ast_hash": "87436365d131ea847fe5c0954e11dd7e",
+    "semantic_hash": ""
+  },
+  "TEST_SUMMARY.md": {
+    "mtime": 1784749798.1196108,
+    "ast_hash": "e1b13d913d5c06816b73d94750036db8",
+    "semantic_hash": ""
+  },
+  "docs/ARCHITECTURE.md": {
+    "mtime": 1782561361.8040397,
+    "ast_hash": "32f3d096ebf3bd14b9e143942cad2b5e",
+    "semantic_hash": ""
+  },
+  "docs/ARCHITECTURE_LOCK.md": {
+    "mtime": 1784817697.1917918,
+    "ast_hash": "50350146126b58341a7df7b2ad4b065d",
+    "semantic_hash": ""
+  },
+  "docs/AUDIT_TRAIL_COVERAGE_REPORT.md": {
+    "mtime": 1784870082.7660937,
+    "ast_hash": "07de38f8c7a825521dcaa4d137605c6d",
+    "semantic_hash": ""
+  },
+  "docs/CHANGELOG.md": {
+    "mtime": 1782561479.335827,
+    "ast_hash": "8005c557fadcb3e30e6642fca4684d80",
+    "semantic_hash": ""
+  },
+  "docs/CODE_REVIEW.md": {
+    "mtime": 1782561888.6652546,
+    "ast_hash": "1ad1e5f03d8a3c6e24646341ca8cb430",
+    "semantic_hash": ""
+  },
+  "docs/DATABASE_ARCHITECTURE.md": {
+    "mtime": 1783859901.6350634,
+    "ast_hash": "c059970c6a45b75890a0630ae8047eb7",
+    "semantic_hash": ""
+  },
+  "docs/DEPLOYMENT.md": {
+    "mtime": 1784873272.8303523,
+    "ast_hash": "26d1a2ddd30257a6e65009f4a0a0a1da",
+    "semantic_hash": ""
+  },
+  "docs/DEPLOYMENT_RUNBOOK.md": {
+    "mtime": 1784873363.2521138,
+    "ast_hash": "3f17ec3fee5388a8eb1953f46ba66b98",
+    "semantic_hash": ""
+  },
+  "docs/DEPLOYMENT_VERIFICATION.md": {
+    "mtime": 1784871905.3444588,
+    "ast_hash": "d9d9542fd1bc308057e5d2f5e5793b8c",
+    "semantic_hash": ""
+  },
+  "docs/DESIGN_SYSTEM.md": {
+    "mtime": 1783227789.9473608,
+    "ast_hash": "b324d412063e6bdd534d6d751e6d45d0",
+    "semantic_hash": ""
+  },
+  "docs/FINAL_DATABASE_ROOT_CAUSE.md": {
+    "mtime": 1784871660.2512288,
+    "ast_hash": "def18576318f41bb588b8a8512a386dc",
+    "semantic_hash": ""
+  },
+  "docs/FINAL_RELEASE_EVIDENCE/GIT_AND_MIGRATION_EVIDENCE.md": {
+    "mtime": 1784872013.5504625,
+    "ast_hash": "91f5fcd27bf7d727f9d72a26dfd8ef20",
+    "semantic_hash": ""
+  },
+  "docs/FINAL_RELEASE_EVIDENCE/MANUAL_VERIFICATION_CHECKLIST.md": {
+    "mtime": 1784872057.9581666,
+    "ast_hash": "ed8dd864b818bf145866afc82df62b67",
+    "semantic_hash": ""
+  },
+  "docs/FINAL_RELEASE_EVIDENCE/TEST_OUTPUT.md": {
+    "mtime": 1784871993.0339262,
+    "ast_hash": "5230d34c7a1661e5dfd3a272d57a7304",
+    "semantic_hash": ""
+  },
+  "docs/IMPLEMENTATION_ROADMAP.md": {
+    "mtime": 1783859901.6687062,
+    "ast_hash": "d745c541152fcd6415ab9a0e1ebdb18e",
+    "semantic_hash": ""
+  },
+  "docs/MIGRATION.md": {
+    "mtime": 1784691541.005442,
+    "ast_hash": "605ce62ea647148b9e68e3e4fcd7e969",
+    "semantic_hash": ""
+  },
+  "docs/MIGRATION_VERIFICATION_GUIDE.md": {
+    "mtime": 1784873398.981293,
+    "ast_hash": "c12bf5396bfdca770e14d614a72280b9",
+    "semantic_hash": ""
+  },
+  "docs/MULTI_TENANT_SECURITY_REPORT.md": {
+    "mtime": 1784869814.3549836,
+    "ast_hash": "089aed5b3c19357458b90619ffe90f3c",
+    "semantic_hash": ""
+  },
+  "docs/PHASE3_EXECUTION_PLAN.md": {
+    "mtime": 1783859901.6864297,
+    "ast_hash": "4961fb1919ee3885759787e92b1a38f4",
+    "semantic_hash": ""
+  },
+  "docs/PHASE3_FLAGS.md": {
+    "mtime": 1783859901.703374,
+    "ast_hash": "5dae8fe8c9e95a3f89d012c219e6c941",
+    "semantic_hash": ""
+  },
+  "docs/PHASE_F_FINDING_TRACEABILITY.md": {
+    "mtime": 1784870128.7968488,
+    "ast_hash": "d2ed1101fdd1494420176fe53b8c697a",
+    "semantic_hash": ""
+  },
+  "docs/PLATFORM_ARCHITECTURE.md": {
+    "mtime": 1783859901.7580132,
+    "ast_hash": "eb52a8983fd2549df57a30e01bbf5d27",
+    "semantic_hash": ""
+  },
+  "docs/PRODUCTION_RELEASE_CHECKLIST.md": {
+    "mtime": 1784871948.7230694,
+    "ast_hash": "e1709118e9e347aabedd396c3c0d2f99",
+    "semantic_hash": ""
+  },
+  "docs/PRODUCT_REQUIREMENTS.md": {
+    "mtime": 1782561228.2419386,
+    "ast_hash": "84dd903dea34f910ada57d6ed66de462",
+    "semantic_hash": ""
+  },
+  "docs/QMS_PHASE1.md": {
+    "mtime": 1783011266.4735274,
+    "ast_hash": "1c1ec0112225f3c36aa8bcf82e72480b",
+    "semantic_hash": ""
+  },
+  "docs/QMS_PHASE2.md": {
+    "mtime": 1783264619.2762969,
+    "ast_hash": "ce7084795719f06a5c4ed267b60317cd",
+    "semantic_hash": ""
+  },
+  "docs/RBAC_VERIFICATION_REPORT.md": {
+    "mtime": 1784870072.3966994,
+    "ast_hash": "b3b196d778a42c889945b5de4541d073",
+    "semantic_hash": ""
+  },
+  "docs/ROADMAP.md": {
+    "mtime": 1783264653.8181677,
+    "ast_hash": "6bd9c1d6a6ed83a0fc765b467028c0d8",
+    "semantic_hash": ""
+  },
+  "docs/TESTING_VALIDATION_GUIDE.md": {
+    "mtime": 1783354556.1683767,
+    "ast_hash": "f9debb74e992d40dbe9acb5071426663",
+    "semantic_hash": ""
+  },
+  "docs/URS_STABILIZATION_ITERATION2_BACKEND.md": {
+    "mtime": 1783877900.4405985,
+    "ast_hash": "913f817d2945b0bb91b29cbb762ad38d",
+    "semantic_hash": ""
+  },
+  "docs/URS_STABILIZATION_ITERATION3_FRONTEND.md": {
+    "mtime": 1783879469.0104392,
+    "ast_hash": "65bb42b76b9a25565bd1af8528b49ef8",
+    "semantic_hash": ""
+  },
+  "docs/URS_STABILIZATION_ITERATION4_VALIDATION_REPORT.md": {
+    "mtime": 1783881252.4106889,
+    "ast_hash": "c65ed67beccbe5dbb6f12bea91625451",
+    "semantic_hash": ""
+  },
+  "docs/URS_STABILIZATION_REVIEW.md": {
+    "mtime": 1783876059.2879703,
+    "ast_hash": "caa0354fb2ab04b24c960cec614985cd",
+    "semantic_hash": ""
+  },
+  "docs/VALIDATION_EVIDENCE/AUDIT_MATRIX.md": {
+    "mtime": 1784870383.6625085,
+    "ast_hash": "c5adb01b0a74350c9cd80d14e6c970df",
+    "semantic_hash": ""
+  },
+  "docs/VALIDATION_EVIDENCE/OPEN_ISSUES.md": {
+    "mtime": 1784870449.4302967,
+    "ast_hash": "f622ba5353ff3865455ad93e37605af7",
+    "semantic_hash": ""
+  },
+  "docs/VALIDATION_EVIDENCE/RBAC_MATRIX.md": {
+    "mtime": 1784870406.017833,
+    "ast_hash": "1be7325fb83d6a48fbd9d750fb5c849f",
+    "semantic_hash": ""
+  },
+  "docs/VALIDATION_EVIDENCE/RELEASE_RECOMMENDATION.md": {
+    "mtime": 1784870666.1466703,
+    "ast_hash": "bc2c9ee7fe8e0b320ac9f670b44f5f19",
+    "semantic_hash": ""
+  },
+  "docs/VALIDATION_EVIDENCE/RESIDUAL_RISKS.md": {
+    "mtime": 1784870462.4294672,
+    "ast_hash": "4a75e92832eebdce2ac68c5793e0515c",
+    "semantic_hash": ""
+  },
+  "docs/VALIDATION_EVIDENCE/RISK_ASSESSMENT.md": {
+    "mtime": 1784870436.757048,
+    "ast_hash": "a7b003af7445559812032024d1611ab5",
+    "semantic_hash": ""
+  },
+  "docs/VALIDATION_EVIDENCE/TEST_SUMMARY.md": {
+    "mtime": 1784870420.3761873,
+    "ast_hash": "24820ccde14d36952c4b23a346b68a6d",
+    "semantic_hash": ""
+  },
+  "docs/VALIDATION_EVIDENCE/TRACEABILITY_MATRIX.md": {
+    "mtime": 1784870187.1631463,
+    "ast_hash": "35b88bb4d22f37a4fec2267f75adb4cd",
+    "semantic_hash": ""
+  },
+  "docs/VALIDATION_EVIDENCE/WORKFLOW_MATRIX.md": {
+    "mtime": 1784870198.1112583,
+    "ast_hash": "651f2d710d0e82bc39088ef6ab72b99c",
+    "semantic_hash": ""
+  },
+  "docs/WORKFLOW_VALIDATION_REPORT.md": {
+    "mtime": 1784870048.5858538,
+    "ast_hash": "b8f134f2010ac06a2e90deafe797b7e1",
+    "semantic_hash": ""
+  },
+  "pharmagpt/templates/index.html": {
+    "mtime": 1785176642.7222867,
+    "ast_hash": "7b309225b1fc0f2ad9201765db4d1634",
+    "semantic_hash": ""
+  },
+  "render.yaml": {
+    "mtime": 1784873258.5232046,
+    "ast_hash": "566abca4067119d30aaf02d43feb7428",
+    "semantic_hash": ""
+  },
+  "requirements-dev.txt": {
+    "mtime": 1782883185.688369,
+    "ast_hash": "7109a67b3097c49014819f63e1d0ae01",
+    "semantic_hash": ""
+  },
+  "requirements.txt": {
+    "mtime": 1784689260.9291537,
+    "ast_hash": "c6e7d555a6aead3d6622e470a6e40627",
+    "semantic_hash": ""
+  },
+  "migrations/0014_nutra_demo_schema_down.sql": {
+    "mtime": 1785258442.7871823,
+    "ast_hash": "321d431a4c957d152976a523f5eb5162",
+    "semantic_hash": ""
+  },
+  "migrations/0014_nutra_demo_schema_up.sql": {
+    "mtime": 1785258435.2603717,
+    "ast_hash": "3474ae309c5cf39818b6dd68a4d87831",
+    "semantic_hash": ""
+  },
+  "pharmagpt/services/module_permissions.py": {
+    "mtime": 1785258479.261957,
+    "ast_hash": "37a3d1d8abbbe167e2b83a4880220ed4",
+    "semantic_hash": ""
+  },
+  "pharmagpt/services/org_directory.py": {
+    "mtime": 1785258491.6362045,
+    "ast_hash": "0c9af1201ae945b2bb4db5dafd69d7b8",
+    "semantic_hash": ""
+  },
+  "scripts/seed_nutra_demo.py": {
+    "mtime": 1785258873.862927,
+    "ast_hash": "dea4e413c8fd5d87eec90698fe7d3f53",
+    "semantic_hash": ""
+  },
+  "tests/test_module_permissions.py": {
+    "mtime": 1785258707.7985818,
+    "ast_hash": "9cd177119f2f00969f575be1c4701a12",
+    "semantic_hash": ""
+  },
+  "tests/test_org_directory.py": {
+    "mtime": 1785258722.6988807,
+    "ast_hash": "50c5cb6341cadc2cb05e29d4cf9f4d67",
+    "semantic_hash": ""
+  },
+  "tests/test_seed_nutra_demo.py": {
+    "mtime": 1785258878.3906264,
+    "ast_hash": "44712d6d3b31da038ffc837ce4ac3751",
+    "semantic_hash": ""
+  },
+  "NUTRA_DEMO_DATA.md": {
+    "mtime": 1785258993.0040123,
+    "ast_hash": "8bbe4f1b087f40fc3214a2a70bfbd66f",
+    "semantic_hash": ""
   }
 }

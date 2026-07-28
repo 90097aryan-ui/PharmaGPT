@@ -45,14 +45,17 @@ from pharmagpt import database as db
 from pharmagpt import qms_capa_database as cdb
 from pharmagpt import qms_deviation_database as ddb
 from pharmagpt import qms_database as qmsdb
+from pharmagpt import qms_workflow_database as wfdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import qms_repo
 from pharmagpt.services import qms_capa_service as svc
+from pharmagpt.services import workflow_engine as wfe
 
 bp = Blueprint("qms_capa", __name__, url_prefix="/qms/capa")
 logger = logging.getLogger(__name__)
 RECORD_TYPE = "capa"
+WORKFLOW_KEY = "CAPA_WORKFLOW_V1"
 
 
 # ── Phase 3.5 dual-write (docs/PHASE3_EXECUTION_PLAN.md) ───────────────────────
@@ -274,7 +277,74 @@ def get_linked_deviations(cid):
     return jsonify(ddb.get_linked_deviations(cid))
 
 
-# ── Approval / status transition ──────────────────────────────────────────────
+# ── Workflow: named-approver, gated CAPA lifecycle ────────────────────────────
+# Same engine as routes/qms_deviations.py — see services/workflow_engine.py.
+
+def _record_scoped_or_404(cid):
+    return tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id)
+
+
+@bp.route("/<int:cid>/workflow", methods=["GET"])
+def get_workflow(cid):
+    if not _record_scoped_or_404(cid):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(wfe.get_instance_state(RECORD_TYPE, cid))
+
+
+@bp.route("/<int:cid>/workflow/start", methods=["POST"])
+def start_workflow(cid):
+    if not _record_scoped_or_404(cid):
+        return jsonify({"error": "Not found"}), 404
+    sig = tenancy.signing_identity(g.tenant)
+    try:
+        state = wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, cid, g.tenant.company_id, sig["performed_by"])
+    except wfe.WorkflowError as e:
+        audit.log_failure("capa", cid, "Workflow start blocked", reason=str(e))
+        return jsonify({"error": str(e)}), 409
+    return jsonify(state), 201
+
+
+@bp.route("/<int:cid>/workflow/steps/<int:step_order>/assign", methods=["POST"])
+def assign_workflow_step(cid, step_order):
+    if not _record_scoped_or_404(cid):
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json() or {}
+    approvers = data.get("approvers") or []
+    if not isinstance(approvers, list) or not all(a.get("user_id") for a in approvers):
+        return jsonify({"error": "approvers must be a non-empty list of {user_id, display_name}"}), 400
+    try:
+        state = wfe.assign_approvers(RECORD_TYPE, cid, step_order, approvers)
+    except wfe.WorkflowError as e:
+        return jsonify({"error": str(e)}), 409
+    return jsonify(state)
+
+
+@bp.route("/<int:cid>/workflow/steps/<int:step_order>/decide", methods=["POST"])
+def decide_workflow_step(cid, step_order):
+    if not _record_scoped_or_404(cid):
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json() or {}
+    decision = data.get("decision", "")
+    if decision not in ("approve", "reject", "advance"):
+        return jsonify({"error": "decision must be one of approve/reject/advance"}), 400
+
+    sig = tenancy.signing_identity(g.tenant)
+    try:
+        state = wfe.decide_step(
+            RECORD_TYPE, cid, step_order, decision,
+            user_id=g.tenant.user_id, role=g.tenant.role,
+            performed_by=sig["performed_by"], comments=data.get("comments", ""),
+        )
+    except wfe.WorkflowPermissionError as e:
+        audit.log_failure("capa", cid, f"Workflow decision blocked ({decision})", reason=str(e))
+        return jsonify({"error": str(e)}), 403
+    except wfe.WorkflowError as e:
+        audit.log_failure("capa", cid, f"Workflow decision blocked ({decision})", reason=str(e))
+        return jsonify({"error": str(e)}), 409
+    return jsonify(state)
+
+
+# ── Approval / status transition (legacy compatibility wrapper) ──────────────
 
 _STATUS_MAP = {
     "Root Cause Analysis Started": "Root Cause Analysis",
@@ -291,6 +361,17 @@ _STATUS_MAP = {
 @bp.route("/<int:cid>/approval", methods=["POST"])
 @require_role("company_admin", "reviewer_qa")
 def submit_approval(cid):
+    """Legacy-URL compatibility wrapper (kept for backward compatibility
+    during deployment — see docs/plan). Same URL, request shape, and
+    response shape as before, but now internally decides the CAPA's current
+    Workflow Engine step instead of writing `status` directly, so this
+    record's workflow instance can never diverge from what this endpoint
+    does. One call now advances exactly one workflow step — the engine
+    enforces real sequential state; the old free action->status map that
+    could jump to any status from any state is exactly what
+    services/workflow_engine.py replaces (see its module docstring, and
+    routes/qms_deviations.py's identical rationale). Safe to retire once
+    the frontend only calls /workflow/steps/<order>/decide directly."""
     capa = tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id)
     if not capa:
         return jsonify({"error": "Not found"}), 404
@@ -298,32 +379,51 @@ def submit_approval(cid):
     action_name = data.get("action", "")
     if not action_name:
         return jsonify({"error": "Action is required"}), 400
+    if action_name not in _STATUS_MAP:
+        return jsonify({"error": f"Unknown action '{action_name}'"}), 400
     if capa["status"] == "Closed":
         audit.log_failure("capa", cid, f"Approval action blocked ({action_name}) — record is Closed",
                            reason="Closed CAPAs are immutable")
         return jsonify({"error": "This CAPA is Closed and cannot accept further actions"}), 409
 
     sig = tenancy.signing_identity(g.tenant)
+    comments = data.get("comments", "")
+    try:
+        if not wfdb.get_active_instance(RECORD_TYPE, cid):
+            wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, cid, g.tenant.company_id, sig["performed_by"])
+        state = wfe.get_instance_state(RECORD_TYPE, cid)
+        instance = state["instance"]
+        if not instance or instance["status"] != "in_progress":
+            return jsonify({"error": "No active workflow step to act on"}), 409
+        step = next(s for s in state["steps"] if s["step_order"] == instance["current_step_order"])
+        if action_name == "Rejected":
+            if step["step_type"] != "approval":
+                return jsonify({"error": f"'{step['step_name']}' cannot be rejected directly"}), 409
+            decision = "reject"
+        else:
+            decision = "approve" if step["step_type"] == "approval" else "advance"
+        if step["step_type"] == "approval":
+            approver_ids = {a["user_id"] for a in step.get("approvers", [])}
+            if g.tenant.user_id not in approver_ids:
+                wfe.assign_approvers(RECORD_TYPE, cid, step["step_order"],
+                                      [{"user_id": g.tenant.user_id, "display_name": sig["performed_by"]}])
+        wfe.decide_step(RECORD_TYPE, cid, step["step_order"], decision,
+                         user_id=g.tenant.user_id, role=g.tenant.role,
+                         performed_by=sig["performed_by"], comments=comments)
+    except (wfe.WorkflowPermissionError, wfe.WorkflowError) as e:
+        audit.log_failure("capa", cid, f"Approval action blocked ({action_name})", reason=str(e))
+        return jsonify({"error": str(e)}), 409
 
-    updates = {}
-    if action_name in _STATUS_MAP:
-        updates["status"] = _STATUS_MAP[action_name]
     if action_name == "Closed":
-        updates["closure_date"] = data.get("closure_date", "")
+        cdb.update_capa(cid, {"closure_date": data.get("closure_date", ""), "approver": sig["performed_by"]})
     if action_name == "Submitted for QA Review":
-        updates["qa_reviewer"] = sig["performed_by"]
-    if action_name == "Closed":
-        updates["approver"] = sig["performed_by"]
-    if updates:
-        cdb.update_capa(cid, updates)
+        cdb.update_capa(cid, {"qa_reviewer": sig["performed_by"]})
 
     entry = qmsdb.add_approval_entry(
         "capa", cid, action_name,
         sig["performed_by"], sig["role"],
-        data.get("comments", ""), sig["electronic_sig"],
+        comments, sig["electronic_sig"],
     )
-    audit.log("capa", cid, action_name, old={"status": capa["status"]}, new=updates or None,
-              reason=data.get("comments", ""))
     return jsonify(entry), 201
 
 

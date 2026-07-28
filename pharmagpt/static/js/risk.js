@@ -1137,7 +1137,11 @@ window.printReport = function () {
 // ── Approval ──────────────────────────────────────────────────────────────────
 
 window.openApprovalPanel = async function (aid) {
-  showRiskView("view-risk-approval");
+  // Targets the per-assessment detail view, distinct from "view-risk-approval"
+  // (the sidebar's nav item), which is now the Universal Workflow Inbox — see
+  // static/js/workflow_inbox.js. Risk Assessment stays on this existing
+  // legacy review flow this release.
+  showRiskView("view-risk-approval-detail");
   const body = document.getElementById("risk-approval-body");
   if (!body) return;
   body.innerHTML = `<div class="risk-ai-generating"><div class="spinner"></div></div>`;

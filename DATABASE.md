@@ -305,3 +305,45 @@ untouched for backward compatibility with existing consumers (chat, validation w
 `POST /projects/<id>/equipment/import-legacy` offers a one-click migration path from those fields
 into a real Equipment record, so existing projects can adopt the new entity without duplicate data
 entry.
+
+## Organizational Model (departments, workflow roles, module permissions) — added 2026-07-28
+
+Postgres/Supabase-side schema (`migrations/0014_nutra_demo_schema_up.sql`), additive to the
+Identity & Tenancy tables (migration 0001) and Core Platform Schema (migration 0004). Five new
+tables plus one nullable column on `users`; nothing existing is altered, and none of it is read by
+`pharmagpt/services/workflow_engine.py` or `pharmagpt/auth/decorators.py::require_role` — see
+`docs/DATABASE_ARCHITECTURE.md` for the platform-wide entity inventory this extends, and
+`NUTRA_DEMO_DATA.md` for the seed data (`scripts/seed_nutra_demo.py`) that exercises it end-to-end.
+
+```
+companies ──< departments ──< user_departments >── users >── user_module_permissions >── modules
+                                                       └──< workflow_role_id (roles-style lookup)
+```
+
+- **`modules`** — platform-scoped, static reference table of product suites a user may be granted
+  access to (`QMS`, `VALIDATION`, `DOCUMENT_GENERATOR` at v1.0). `code` is the stable key callers use
+  (`pharmagpt/services/module_permissions.py`); a future module (Training, Calibration, Equipment,
+  Audit, Supplier, ...) is one row insert, no schema change.
+- **`workflow_roles`** — platform-scoped, static reference table of organizational job titles
+  (Initiator, Coordinator, Reviewer, Approver, Plant Head), each carrying `sequence` and
+  `can_start_workflow`/`can_review`/`can_approve`/`is_final_approver` capability flags. Documented
+  explicitly as **future capability** — not yet consumed by `workflow_engine.py`'s own
+  `eligible_roles`/named-approver decision logic (a separate, SQLite-side mechanism, untouched by
+  this migration). `users.workflow_role_id` (nullable) is the only new column on `users`.
+- **`departments`** — company-scoped. `department_code` is the stable identity (`QA`, `PROD`, `WH`,
+  `PPIC`, `ENG`, `QC`, `VAL` for the Nutra demo); `name` may change without breaking lookups keyed
+  on the code.
+- **`user_departments`** — normalized many-to-many between `users` and `departments`, with a
+  database-enforced partial unique index guaranteeing at most one `is_primary = true` row per user.
+  Deliberately not a flat `users.department_id` column, so a user gaining a second department later
+  needs no further migration.
+- **`user_module_permissions`** — one row per `(user_id, module_id)`, `enabled` boolean. User-scoped
+  by design — distinct from the reserved, role-scoped `permissions`/`role_permissions`
+  (`docs/DATABASE_ARCHITECTURE.md` §21, decision DB-006, targeted at v1.2), which cannot represent
+  two users sharing a `role_id` having different module access.
+
+All five tables carry RLS (company_admin may `SELECT` their own company's rows; write access is
+`service_role`-only for now — no route manages this data yet) using the `current_user_company_id()`/
+`current_user_role_name()` SECURITY DEFINER helpers introduced in migration 0013. Organizational
+metadata and capability data only — not platform authorization, and no existing route's
+`@require_role` check changes.

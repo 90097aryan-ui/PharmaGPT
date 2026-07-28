@@ -1018,6 +1018,12 @@ button:has(> .icon) {
   box-shadow: 0 4px 24px rgba(45,42,40,0.18);
   width: 560px;
   max-width: calc(100vw - 32px);
+  /* Baseline height cap so every modal (not just .eq-modal/.kb-upload-modal,
+     which already redeclared this individually) stays reachable when its
+     content is taller than the viewport, instead of overflowing off-screen
+     top/bottom with no way to scroll to the rest of the form. */
+  max-height: 90vh;
+  overflow-y: auto;
   z-index: 101;
   opacity: 0;
   transition: transform 0.18s ease, opacity 0.18s ease;

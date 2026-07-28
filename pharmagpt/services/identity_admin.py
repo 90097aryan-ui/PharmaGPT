@@ -48,12 +48,17 @@ def _generate_temporary_password() -> str:
     return secrets.token_urlsafe(16)
 
 
-def provision_user(*, email: str, display_name: str, company_id: str | None, role_id: int) -> dict:
+def provision_user(*, email: str, display_name: str, company_id: str | None, role_id: int,
+                    password: str | None = None) -> dict:
     """Create a new Supabase Auth identity and its `users` profile row.
 
-    Returns {"auth_user_id": ..., "temporary_password": ...}. The temporary
+    Returns {"auth_user_id": ..., "temporary_password": ...}. By default the
     password is generated here and returned exactly once — it is never
-    stored by this application beyond the return value.
+    stored by this application beyond the return value. `password` is an
+    optional override for the one caller that needs a fixed, known password
+    instead of a random one (scripts/seed_nutra_demo.py's demo accounts);
+    every other caller (routes/companies.py, routes/users.py) omits it and
+    gets the original random-password behavior unchanged.
 
     Raises IdentityProvisioningError on any failure (email already
     registered without an existing profile row for it, Postgres insert
@@ -61,7 +66,7 @@ def provision_user(*, email: str, display_name: str, company_id: str | None, rol
     response rather than letting a raw exception surface.
     """
     client = get_service_role_client()
-    temporary_password = _generate_temporary_password()
+    temporary_password = password or _generate_temporary_password()
 
     try:
         response = client.auth.admin.create_user({

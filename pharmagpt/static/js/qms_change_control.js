@@ -224,7 +224,7 @@ window.qmsCCCreate = qmsCCCreate;
 
 // ── Detail view ─────────────────────────────────────────────────────────────
 
-const QMS_CC_TABS = ["overview", "impact", "plan", "ai", "links", "attachments", "comments", "audit", "approval"];
+const QMS_CC_TABS = ["overview", "workflow", "impact", "plan", "ai", "links", "attachments", "comments", "audit", "approval"];
 
 async function qmsCCOpenDetail(id) {
   qmsCCCurrentId = id;
@@ -275,7 +275,7 @@ function qmsCCMetaHTML(cc) {
 
 function qmsCCTabLabel(t) {
   return {
-    overview: "Overview", impact: "Impact Assessment", plan: "Implementation Plan",
+    overview: "Overview", workflow: "Workflow", impact: "Impact Assessment", plan: "Implementation Plan",
     ai: "AI Assistant", links: "Related Records", attachments: "Attachments",
     comments: "Comments", audit: "Audit Trail", approval: "Approval",
   }[t] || t;
@@ -312,6 +312,9 @@ function qmsCCRenderTab(cc) {
         </div>
       </div>
     `;
+  } else if (qmsCCActiveTab === "workflow") {
+    el.innerHTML = `<div id="qms-workflow-change_control-${id}"></div>`;
+    renderWorkflowPanel(`qms-workflow-change_control-${id}`, "change_control", "/qms/change-control", id);
   } else if (qmsCCActiveTab === "impact") {
     qmsCCRenderImpact(id);
   } else if (qmsCCActiveTab === "plan") {

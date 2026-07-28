@@ -372,8 +372,8 @@
           <div class="sidebar-item risk-sub-item" id="risk-nav-reports" onclick="showRiskReports()">
             <span class='icon' data-lucide='file-text'></span> Reports
           </div>
-          <div class="sidebar-item risk-sub-item" id="risk-nav-approval" onclick="showRiskApproval()">
-            <span class='icon' data-lucide='check-circle'></span> Approval Queue
+          <div class="sidebar-item risk-sub-item" id="risk-nav-approval" onclick="showWorkflowInbox()">
+            <span class='icon' data-lucide='inbox'></span> Workflow Inbox
           </div>
           <div class="sidebar-item risk-sub-item" id="risk-nav-assistant" onclick="window.showAllRiskViews && window.showAllRiskViews('view-risk-assistant'); loadAIAssistant && loadAIAssistant()">
             <span class='icon' data-lucide='bot'></span> AI Assistant
@@ -855,13 +855,26 @@
           </div>
         </div>
 
-        <!-- 4. Approval Queue — merges existing filtered list endpoints -->
+        <!-- 4. Approval Queue — merges existing filtered list endpoints
+             (Risk Assessment, Validation Suite — still on the legacy flow) -->
         <div class="dash-card">
           <div class="dash-card-header">
             <span class="dash-card-title">Approval Queue</span>
             <span class="dash-card-icon" data-lucide="check-circle"></span>
           </div>
           <div class="dash-card-body" id="vd-approvals-body">
+            <div class="dash-loading">Loading…</div>
+          </div>
+        </div>
+
+        <!-- 4b. My Pending Approvals — Workflow Engine (Deviations, CAPA,
+             Change Control, SOP), sourced from GET /workflow/inbox/stats -->
+        <div class="dash-card">
+          <div class="dash-card-header">
+            <span class="dash-card-title">My Pending Approvals</span>
+            <span class="dash-card-icon" data-lucide="inbox"></span>
+          </div>
+          <div class="dash-card-body" id="vd-workflow-pending-body">
             <div class="dash-loading">Loading…</div>
           </div>
         </div>
@@ -1392,7 +1405,7 @@
     <!-- ══════════════════════════════════════════════════════════════════════ -->
 
     <!-- ── Risk Dashboard ────────────────────────────────────────────────── -->
-    <main id="view-risk-dashboard" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
+    <main id="view-risk-dashboard" class="qms-view">
       <div class="risk-page-header">
         <div>
           <h2><span class='icon' data-lucide='alert-triangle'></span> Risk Management</h2>
@@ -1409,7 +1422,7 @@
     </main>
 
     <!-- ── New Assessment / List / Editor ────────────────────────────────── -->
-    <main id="view-risk-new" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
+    <main id="view-risk-new" class="qms-view">
       <div class="risk-page-header">
         <div>
           <h2 id="risk-new-header-title"><span class='icon' data-lucide='clipboard-list'></span> Risk Assessments</h2>
@@ -1605,7 +1618,7 @@
     </main><!-- /view-risk-new -->
 
     <!-- ── Risk Library ───────────────────────────────────────────────────── -->
-    <main id="view-risk-library" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
+    <main id="view-risk-library" class="qms-view">
       <div class="risk-page-header">
         <div>
           <h2><span class='icon' data-lucide='book-open'></span> Risk Library</h2>
@@ -1621,7 +1634,7 @@
     </main>
 
     <!-- ── Templates ──────────────────────────────────────────────────────── -->
-    <main id="view-risk-templates" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
+    <main id="view-risk-templates" class="qms-view">
       <div class="risk-page-header">
         <div>
           <h2><span class='icon' data-lucide='folder'></span> Templates</h2>
@@ -1634,7 +1647,7 @@
     </main>
 
     <!-- ── Reports ────────────────────────────────────────────────────────── -->
-    <main id="view-risk-reports" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
+    <main id="view-risk-reports" class="qms-view">
       <div class="risk-page-header">
         <div>
           <h2><span class='icon' data-lucide='bar-chart-3'></span> Risk Reports</h2>
@@ -1650,8 +1663,34 @@
       </div>
     </main>
 
-    <!-- ── Review & Approval ──────────────────────────────────────────────── -->
-    <main id="view-risk-approval" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
+    <!-- ── Workflow Inbox (formerly "Approval Queue" / Risk-only "Review &
+         Approval"; reuses this same nav item + view container per the
+         Universal Workflow Inbox migration — never module-specific, reads
+         only Workflow Engine tables via GET /workflow/inbox) ───────────── -->
+    <main id="view-risk-approval" class="qms-view">
+      <div class="risk-page-header">
+        <div>
+          <h2><span class='icon' data-lucide='inbox'></span> Workflow Inbox</h2>
+          <p>Every pending Workflow Engine approval assigned to you, across every module</p>
+        </div>
+        <div class="qms-header-actions">
+          <input type="text" id="wf-inbox-search" placeholder="Search by title or record number…" style="width:220px" />
+          <select id="wf-inbox-filter-module"><option value="">All Modules</option></select>
+          <select id="wf-inbox-filter-status"><option value="">All Statuses</option></select>
+        </div>
+      </div>
+      <div class="risk-body" id="workflow-inbox-body">
+        <div class="risk-empty">
+          <div class="risk-empty-icon"><span class='icon' data-lucide='inbox'></span></div>
+          <h3>Loading…</h3>
+        </div>
+      </div>
+    </main>
+
+    <!-- ── Risk Assessment Review & Approval (per-assessment detail panel;
+         Risk Assessment stays on its existing legacy approval flow this
+         release — see docs/plan) ─────────────────────────────────────── -->
+    <main id="view-risk-approval-detail" class="qms-view">
       <div class="risk-page-header">
         <div>
           <h2><span class='icon' data-lucide='check-circle-2'></span> Review &amp; Approval</h2>
@@ -1668,7 +1707,7 @@
     </main>
 
     <!-- ── AI Assistant ────────────────────────────────────────────────────── -->
-    <main id="view-risk-assistant" style="display:none;flex-direction:column;flex:1;overflow:hidden;background:var(--bg)">
+    <main id="view-risk-assistant" class="qms-view">
       <div class="risk-page-header">
         <div>
           <h2><span class='icon' data-lucide='bot'></span> AI Risk Assistant</h2>
@@ -2280,23 +2319,23 @@
   <!-- ── Quality Management Suite Views ─────────────────────────────────── -->
   <!-- ══════════════════════════════════════════════════════════════════════ -->
 
-  <main class="qms-view" id="view-qms-dashboard" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+  <main class="qms-view" id="view-qms-dashboard">
     <div id="qms-dashboard-body"></div>
   </main>
 
-  <main class="qms-view" id="view-qms-documents" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+  <main class="qms-view" id="view-qms-documents">
     <div id="qms-documents-body"></div>
   </main>
 
-  <main class="qms-view" id="view-qms-deviations" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+  <main class="qms-view" id="view-qms-deviations">
     <div id="qms-deviations-body"></div>
   </main>
 
-  <main class="qms-view" id="view-qms-capa" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+  <main class="qms-view" id="view-qms-capa">
     <div id="qms-capa-body"></div>
   </main>
 
-  <main class="qms-view" id="view-qms-change-control" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+  <main class="qms-view" id="view-qms-change-control">
     <div id="qms-cc-body"></div>
   </main>
 
@@ -2334,8 +2373,10 @@
   <script src="{{ url_for('static', filename='js/investigation_case.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_documents.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_deviations.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/workflow_panel.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_capa.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_change_control.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/workflow_inbox.js') }}"></script>
   <script src="{{ url_for('static', filename='js/validation_dashboard.js') }}"></script>
   <script src="{{ url_for('static', filename='js/admin_assume_context.js') }}"></script>
   <script src="{{ url_for('static', filename='js/admin_companies.js') }}"></script>
@@ -2556,13 +2597,14 @@
     }
     window.showRiskReports = showRiskReports;
 
-    function showRiskApproval() {
+    function showWorkflowInbox() {
       showAllRiskViews("view-risk-approval");
       document.querySelectorAll(".risk-sub-item").forEach(el => el.classList.remove("active"));
       const el = document.getElementById("risk-nav-approval");
       if (el) el.classList.add("active");
+      if (window.loadWorkflowInbox) window.loadWorkflowInbox();
     }
-    window.showRiskApproval = showRiskApproval;
+    window.showWorkflowInbox = showWorkflowInbox;
 
     // Override initRisk to also handle view switching
     const _origInitRisk = window.initRisk;

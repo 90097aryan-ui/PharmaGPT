@@ -104,6 +104,14 @@ def test_document_create_requires_title(client):
 
 
 def test_document_approval_transitions_status(client):
+    # The /approval endpoint is now a compatibility wrapper over
+    # services/workflow_engine.py (DOCUMENT_WORKFLOW_V1, 3 steps): one call
+    # decides exactly one real workflow step — see
+    # routes/qms_documents.py::submit_approval docstring. The first call
+    # both starts the instance (auto-completing "Submitted for Review") and
+    # decides the now-current "Under Review" step in the same request; since
+    # "Under Review" is the second-to-last step, the display stays "Under
+    # Review" until the final "Made Effective" step is itself decided.
     doc = client.post("/qms/documents", json={"title": "Doc"}).get_json()
     did = doc["id"]
 
@@ -452,11 +460,22 @@ def test_capa_effectiveness_route(client):
 
 
 def test_capa_approval_status_map(client):
+    # The /approval endpoint is now a compatibility wrapper over
+    # services/workflow_engine.py (CAPA_WORKFLOW_V1): one call decides
+    # exactly one real workflow step — see
+    # routes/qms_capa.py::submit_approval docstring. The first call both
+    # starts the instance (auto-completing "CAPA Opened") and decides the
+    # now-current "Root Cause Analysis" step, landing on "CA Planned".
     capa = client.post("/qms/capa", json={"title": "CAPA"}).get_json()
     cid = capa["id"]
 
     client.post(f"/qms/capa/{cid}/approval", json={"action": "Root Cause Analysis Started", "performed_by": "A"})
-    assert client.get(f"/qms/capa/{cid}").get_json()["status"] == "Root Cause Analysis"
+    assert client.get(f"/qms/capa/{cid}").get_json()["status"] == "CA Planned"
+
+    for action in ["Preventive Actions Planned", "Implementation Started",
+                   "Effectiveness Check Started", "Submitted for QA Review", "Closed"]:
+        client.post(f"/qms/capa/{cid}/approval", json={"action": action, "performed_by": "B"})
+    assert client.get(f"/qms/capa/{cid}").get_json()["status"] == "QA Review"
 
     client.post(f"/qms/capa/{cid}/approval", json={"action": "Closed", "performed_by": "B"})
     assert client.get(f"/qms/capa/{cid}").get_json()["status"] == "Closed"
@@ -567,23 +586,44 @@ def test_change_control_deviation_capa_linking(client):
 
 
 def test_change_control_approval_status_map(client):
+    # The /approval endpoint is now a compatibility wrapper over
+    # services/workflow_engine.py (CHANGE_CONTROL_WORKFLOW_V1): one call
+    # decides exactly one real workflow step — see
+    # routes/qms_change_control.py::submit_approval docstring. The first
+    # call both starts the instance (auto-completing "Submitted") and
+    # decides the now-current "Initial Review" step, landing on
+    # "Impact Assessment".
     cc = client.post("/qms/change-control", json={"title": "Change"}).get_json()
     cc_id = cc["id"]
 
     client.post(f"/qms/change-control/{cc_id}/approval", json={"action": "Submitted", "performed_by": "A"})
-    assert client.get(f"/qms/change-control/{cc_id}").get_json()["status"] == "Submitted"
+    assert client.get(f"/qms/change-control/{cc_id}").get_json()["status"] == "Impact Assessment"
 
-    client.post(f"/qms/change-control/{cc_id}/approval", json={"action": "Approved", "performed_by": "B"})
+    for action in ["Risk Assessment Started", "Sent for Department Review", "Submitted for QA Review",
+                   "Sent for Approval", "Approved"]:
+        client.post(f"/qms/change-control/{cc_id}/approval", json={"action": action, "performed_by": "B"})
     assert client.get(f"/qms/change-control/{cc_id}").get_json()["status"] == "Implementation"
+
+    for action in ["Implementation Complete", "Verified", "Verified"]:
+        client.post(f"/qms/change-control/{cc_id}/approval", json={"action": action, "performed_by": "C"})
+    assert client.get(f"/qms/change-control/{cc_id}").get_json()["status"] == "Effectiveness Review"
 
     client.post(f"/qms/change-control/{cc_id}/approval", json={"action": "Closed", "performed_by": "C"})
     assert client.get(f"/qms/change-control/{cc_id}").get_json()["status"] == "Closed"
 
 
 def test_change_control_rejection_returns_to_draft(client):
+    # Reject is only legal from an approval-type step (the same
+    # decide_step() rule Deviations already follow), so this drives the
+    # change control forward to its "QA Review" approval gate first, then
+    # rejects from there.
     cc = client.post("/qms/change-control", json={"title": "Change"}).get_json()
     cc_id = cc["id"]
     client.post(f"/qms/change-control/{cc_id}/approval", json={"action": "Submitted", "performed_by": "A"})
+    for action in ["Risk Assessment Started", "Sent for Department Review", "Submitted for QA Review"]:
+        client.post(f"/qms/change-control/{cc_id}/approval", json={"action": action, "performed_by": "B"})
+    assert client.get(f"/qms/change-control/{cc_id}").get_json()["status"] == "QA Review"
+
     client.post(f"/qms/change-control/{cc_id}/approval", json={"action": "Rejected", "performed_by": "B"})
     assert client.get(f"/qms/change-control/{cc_id}").get_json()["status"] == "Draft"
 

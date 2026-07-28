@@ -217,7 +217,7 @@ async function qmsCapaOpenDetail(id) {
       </div>
       <div class="qms-body">
         <div class="qms-tabs" id="qms-capa-tabs">
-          ${["overview", "actions", "effectiveness", "deviations", "attachments", "comments", "audit", "approval"]
+          ${["overview", "workflow", "actions", "effectiveness", "deviations", "attachments", "comments", "audit", "approval"]
             .map(t => `<button class="qms-tab ${t === qmsCapaActiveTab ? "active" : ""}" onclick="qmsCapaSwitchTab('${t}')">${qmsCapaTabLabel(t)}</button>`).join("")}
         </div>
         <div id="qms-capa-tab-body"></div>
@@ -242,7 +242,7 @@ function qmsCapaMetaHTML(capa) {
 
 function qmsCapaTabLabel(t) {
   return {
-    overview: "Overview", actions: "Actions", effectiveness: "Effectiveness Check",
+    overview: "Overview", workflow: "Workflow", actions: "Actions", effectiveness: "Effectiveness Check",
     deviations: "Linked Deviations", attachments: "Attachments", comments: "Comments",
     audit: "Audit Trail", approval: "Approval",
   }[t] || t;
@@ -250,7 +250,7 @@ function qmsCapaTabLabel(t) {
 
 async function qmsCapaSwitchTab(tab) {
   qmsCapaActiveTab = tab;
-  const order = ["overview", "actions", "effectiveness", "deviations", "attachments", "comments", "audit", "approval"];
+  const order = ["overview", "workflow", "actions", "effectiveness", "deviations", "attachments", "comments", "audit", "approval"];
   document.querySelectorAll("#qms-capa-tabs .qms-tab").forEach((b, i) => b.classList.toggle("active", order[i] === tab));
   const capa = await qmsFetch(`/qms/capa/${qmsCapaCurrentId}`);
   qmsCapaRenderTab(capa);
@@ -284,6 +284,9 @@ function qmsCapaRenderTab(capa) {
         </div>
       </div>
     `;
+  } else if (qmsCapaActiveTab === "workflow") {
+    el.innerHTML = `<div id="qms-workflow-capa-${id}"></div>`;
+    renderWorkflowPanel(`qms-workflow-capa-${id}`, "capa", "/qms/capa", id);
   } else if (qmsCapaActiveTab === "actions") {
     qmsCapaRenderActions(id);
   } else if (qmsCapaActiveTab === "effectiveness") {

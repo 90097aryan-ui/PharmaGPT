@@ -57,14 +57,17 @@ from pharmagpt import qms_change_control_database as ccdb
 from pharmagpt import qms_deviation_database as ddb
 from pharmagpt import qms_capa_database as cdb
 from pharmagpt import qms_database as qmsdb
+from pharmagpt import qms_workflow_database as wfdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import qms_repo
 from pharmagpt.services import qms_change_control_service as svc
+from pharmagpt.services import workflow_engine as wfe
 
 bp = Blueprint("qms_change_control", __name__, url_prefix="/qms/change-control")
 logger = logging.getLogger(__name__)
 RECORD_TYPE = "change_control"
+WORKFLOW_KEY = "CHANGE_CONTROL_WORKFLOW_V1"
 
 
 # ── Phase 3.5 dual-write (docs/PHASE3_EXECUTION_PLAN.md) ───────────────────────
@@ -320,7 +323,74 @@ def get_linked_capas(cc_id):
     return jsonify([cdb.get_capa(l["linked_id"]) for l in links if cdb.get_capa(l["linked_id"])])
 
 
-# ── Approval / status transition ──────────────────────────────────────────────
+# ── Workflow: named-approver, gated Change Control lifecycle ─────────────────
+# Same engine as routes/qms_deviations.py — see services/workflow_engine.py.
+
+def _record_scoped_or_404(cc_id):
+    return tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id)
+
+
+@bp.route("/<int:cc_id>/workflow", methods=["GET"])
+def get_workflow(cc_id):
+    if not _record_scoped_or_404(cc_id):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(wfe.get_instance_state(RECORD_TYPE, cc_id))
+
+
+@bp.route("/<int:cc_id>/workflow/start", methods=["POST"])
+def start_workflow(cc_id):
+    if not _record_scoped_or_404(cc_id):
+        return jsonify({"error": "Not found"}), 404
+    sig = tenancy.signing_identity(g.tenant)
+    try:
+        state = wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, cc_id, g.tenant.company_id, sig["performed_by"])
+    except wfe.WorkflowError as e:
+        audit.log_failure("change_control", cc_id, "Workflow start blocked", reason=str(e))
+        return jsonify({"error": str(e)}), 409
+    return jsonify(state), 201
+
+
+@bp.route("/<int:cc_id>/workflow/steps/<int:step_order>/assign", methods=["POST"])
+def assign_workflow_step(cc_id, step_order):
+    if not _record_scoped_or_404(cc_id):
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json() or {}
+    approvers = data.get("approvers") or []
+    if not isinstance(approvers, list) or not all(a.get("user_id") for a in approvers):
+        return jsonify({"error": "approvers must be a non-empty list of {user_id, display_name}"}), 400
+    try:
+        state = wfe.assign_approvers(RECORD_TYPE, cc_id, step_order, approvers)
+    except wfe.WorkflowError as e:
+        return jsonify({"error": str(e)}), 409
+    return jsonify(state)
+
+
+@bp.route("/<int:cc_id>/workflow/steps/<int:step_order>/decide", methods=["POST"])
+def decide_workflow_step(cc_id, step_order):
+    if not _record_scoped_or_404(cc_id):
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json() or {}
+    decision = data.get("decision", "")
+    if decision not in ("approve", "reject", "advance"):
+        return jsonify({"error": "decision must be one of approve/reject/advance"}), 400
+
+    sig = tenancy.signing_identity(g.tenant)
+    try:
+        state = wfe.decide_step(
+            RECORD_TYPE, cc_id, step_order, decision,
+            user_id=g.tenant.user_id, role=g.tenant.role,
+            performed_by=sig["performed_by"], comments=data.get("comments", ""),
+        )
+    except wfe.WorkflowPermissionError as e:
+        audit.log_failure("change_control", cc_id, f"Workflow decision blocked ({decision})", reason=str(e))
+        return jsonify({"error": str(e)}), 403
+    except wfe.WorkflowError as e:
+        audit.log_failure("change_control", cc_id, f"Workflow decision blocked ({decision})", reason=str(e))
+        return jsonify({"error": str(e)}), 409
+    return jsonify(state)
+
+
+# ── Approval / status transition (legacy compatibility wrapper) ──────────────
 
 _STATUS_MAP = {
     "Submitted": "Submitted",
@@ -341,6 +411,13 @@ _STATUS_MAP = {
 @bp.route("/<int:cc_id>/approval", methods=["POST"])
 @require_role("company_admin", "reviewer_qa")
 def submit_approval(cc_id):
+    """Legacy-URL compatibility wrapper (kept for backward compatibility
+    during deployment — see docs/plan). Same URL, request shape, and
+    response shape as before, but now internally decides the change
+    control's current Workflow Engine step instead of writing `status`
+    directly. One call now advances exactly one workflow step — see the
+    identical rationale in routes/qms_capa.py's submit_approval. Safe to
+    retire once the frontend only calls /workflow/steps/<order>/decide."""
     cc = tenancy.scoped_or_none(ccdb.get_change_control(cc_id), g.tenant.company_id)
     if not cc:
         return jsonify({"error": "Not found"}), 404
@@ -348,36 +425,57 @@ def submit_approval(cc_id):
     action_name = data.get("action", "")
     if not action_name:
         return jsonify({"error": "Action is required"}), 400
+    if action_name not in _STATUS_MAP:
+        return jsonify({"error": f"Unknown action '{action_name}'"}), 400
     if cc["status"] == "Closed":
         audit.log_failure("change_control", cc_id, f"Approval action blocked ({action_name}) — record is Closed",
                            reason="Closed change controls are immutable")
         return jsonify({"error": "This change control is Closed and cannot accept further actions"}), 409
 
     sig = tenancy.signing_identity(g.tenant)
+    comments = data.get("comments", "")
+    try:
+        if not wfdb.get_active_instance(RECORD_TYPE, cc_id):
+            wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, cc_id, g.tenant.company_id, sig["performed_by"])
+        state = wfe.get_instance_state(RECORD_TYPE, cc_id)
+        instance = state["instance"]
+        if not instance or instance["status"] != "in_progress":
+            return jsonify({"error": "No active workflow step to act on"}), 409
+        step = next(s for s in state["steps"] if s["step_order"] == instance["current_step_order"])
+        if action_name == "Rejected":
+            if step["step_type"] != "approval":
+                return jsonify({"error": f"'{step['step_name']}' cannot be rejected directly"}), 409
+            decision = "reject"
+        else:
+            decision = "approve" if step["step_type"] == "approval" else "advance"
+        if step["step_type"] == "approval":
+            approver_ids = {a["user_id"] for a in step.get("approvers", [])}
+            if g.tenant.user_id not in approver_ids:
+                wfe.assign_approvers(RECORD_TYPE, cc_id, step["step_order"],
+                                      [{"user_id": g.tenant.user_id, "display_name": sig["performed_by"]}])
+        wfe.decide_step(RECORD_TYPE, cc_id, step["step_order"], decision,
+                         user_id=g.tenant.user_id, role=g.tenant.role,
+                         performed_by=sig["performed_by"], comments=comments)
+    except (wfe.WorkflowPermissionError, wfe.WorkflowError) as e:
+        audit.log_failure("change_control", cc_id, f"Approval action blocked ({action_name})", reason=str(e))
+        return jsonify({"error": str(e)}), 409
 
-    updates = {}
-    if action_name in _STATUS_MAP:
-        updates["status"] = _STATUS_MAP[action_name]
     if action_name == "Submitted for QA Review":
-        updates["qa_reviewer"] = sig["performed_by"]
+        ccdb.update_change_control(cc_id, {"qa_reviewer": sig["performed_by"]})
     if action_name == "Approved":
-        updates["approver"] = sig["performed_by"]
+        ccdb.update_change_control(cc_id, {"approver": sig["performed_by"]})
     if action_name == "Implementation Complete":
-        updates["implementation_date"] = data.get("effective_date", "")
+        ccdb.update_change_control(cc_id, {"implementation_date": data.get("effective_date", "")})
     if action_name == "Verified":
-        updates["verification_date"] = data.get("effective_date", "")
+        ccdb.update_change_control(cc_id, {"verification_date": data.get("effective_date", "")})
     if action_name == "Closed":
-        updates["closure_date"] = data.get("effective_date", "")
-    if updates:
-        ccdb.update_change_control(cc_id, updates)
+        ccdb.update_change_control(cc_id, {"closure_date": data.get("effective_date", "")})
 
     entry = qmsdb.add_approval_entry(
         "change_control", cc_id, action_name,
         sig["performed_by"], sig["role"],
-        data.get("comments", ""), sig["electronic_sig"],
+        comments, sig["electronic_sig"],
     )
-    audit.log("change_control", cc_id, action_name, old={"status": cc["status"]}, new=updates or None,
-              reason=data.get("comments", ""))
     return jsonify(entry), 201
 
 

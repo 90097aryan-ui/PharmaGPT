@@ -172,8 +172,17 @@ def test_report_approval_unaffected_when_no_qualification_linked(client):
 def test_closed_capa_cannot_be_edited(client):
     with _as(ADMIN_A):
         capa = client.post("/qms/capa", json={"title": "Closing CAPA"}, headers=AUTH_HEADERS).get_json()
+        # /approval is now a compatibility wrapper over the Workflow Engine
+        # (CAPA_WORKFLOW_V1, 8 steps) — one call advances exactly one real
+        # step, so reaching "Closed" from a fresh CAPA takes the full
+        # sequence (same mechanism as tests/test_qms_routes.py::
+        # test_capa_approval_status_map).
+        for action in ["Root Cause Analysis Started", "Preventive Actions Planned", "Implementation Started",
+                       "Effectiveness Check Started", "Submitted for QA Review", "Closed"]:
+            client.post(f"/qms/capa/{capa['id']}/approval", json={"action": action}, headers=AUTH_HEADERS)
         close_resp = client.post(f"/qms/capa/{capa['id']}/approval", json={"action": "Closed"}, headers=AUTH_HEADERS)
         assert close_resp.status_code == 201
+        assert client.get(f"/qms/capa/{capa['id']}", headers=AUTH_HEADERS).get_json()["status"] == "Closed"
 
         resp = client.put(f"/qms/capa/{capa['id']}", json={"title": "Sneaky edit"}, headers=AUTH_HEADERS)
     assert resp.status_code == 409

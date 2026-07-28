@@ -201,6 +201,52 @@
       </div>`).join("");
   }
 
+  // ── 4b. My Pending Approvals — Workflow Engine (Problem 3) ───────────────
+  // Sourced from GET /workflow/inbox/stats (services/workflow_registry.py +
+  // qms_workflow_database.py::list_my_pending_steps) — Deviations, CAPA,
+  // Change Control, SOP today; a future module appears automatically once
+  // it has a template + registry entry, no change needed here.
+
+  async function loadWorkflowPendingWidget(targetId) {
+    const el = document.getElementById(targetId || "vd-workflow-pending-body");
+    if (!el) return;
+    const stats = await fetchJSON("/workflow/inbox/stats");
+    if (!stats) { el.innerHTML = '<div class="dash-empty">Failed to load.</div>'; return; }
+
+    if (!stats.my_pending_count) {
+      if (window.PharmaUI) {
+        window.PharmaUI.emptyState(el, { icon: "inbox", title: "Nothing pending", message: "No Workflow Engine steps are waiting on you." });
+      } else {
+        el.innerHTML = '<div class="dash-empty">Nothing pending.</div>';
+      }
+      return;
+    }
+
+    el.innerHTML = `
+      <div class="qms-stats-grid" style="margin-bottom:10px">
+        <div class="qms-stat-card"><strong>${stats.my_pending_count}</strong><div class="qms-panel-item-meta">My Pending</div></div>
+        <div class="qms-stat-card ${stats.overdue_count ? "critical" : ""}"><strong>${stats.overdue_count}</strong><div class="qms-panel-item-meta">Overdue</div></div>
+        <div class="qms-stat-card info"><strong>${stats.awaiting_my_decision_count}</strong><div class="qms-panel-item-meta">Awaiting My Decision</div></div>
+      </div>
+      <div class="dash-proj-row" onclick="window.showWorkflowInbox && window.showWorkflowInbox()">
+        <div class="dash-proj-icon"><span class='icon' data-lucide='arrow-right'></span></div>
+        <div class="dash-proj-info"><div class="dash-proj-name">Open Workflow Inbox</div></div>
+      </div>
+      ${(stats.recent_decisions || []).length ? `
+        <div class="sidebar-label" style="margin-top:10px">Recent Decisions</div>
+        ${stats.recent_decisions.slice(0, 4).map(d => `
+          <div class="dash-proj-row">
+            <div class="dash-proj-icon"><span class='icon' data-lucide='check'></span></div>
+            <div class="dash-proj-info">
+              <div class="dash-proj-name">${d.step_name}</div>
+              <div class="dash-proj-meta">${d.status} · ${d.decided_at ? new Date(d.decided_at).toLocaleDateString() : ""}</div>
+            </div>
+          </div>`).join("")}
+      ` : ""}
+    `;
+  }
+  window.loadWorkflowPendingWidget = loadWorkflowPendingWidget;
+
   // ── 5. Recent Activity ───────────────────────────────────────────────────
   // Reuses GET /dashboard/stats().recent_activity verbatim (already unifies
   // qms_audit_trail, project documents, KB documents, and generated
@@ -260,6 +306,7 @@
     renderQuality(qmsStats);
     renderActivity(dashboardStats && dashboardStats.recent_activity);
     loadApprovalQueue(); // independent fetch set; does not block the rest
+    loadWorkflowPendingWidget(); // independent fetch set; does not block the rest
   }
 
   window.loadValidationDashboard = loadValidationDashboard;
