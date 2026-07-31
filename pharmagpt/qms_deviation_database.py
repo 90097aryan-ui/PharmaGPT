@@ -177,6 +177,44 @@ def get_workflow_steps(deviation_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_capa_phase_approvers(deviation_id: int) -> dict:
+    """The two fixed, single-approver CAPA-phase steps (QA Review, Final
+    Approval) — see qms_deviations.capa_*_approver_* columns' docstring in
+    database.py::init_db()."""
+    d = get_deviation(deviation_id)
+    if not d:
+        return {}
+    return {
+        "qa_review_approver_user_id": d.get("capa_qa_review_approver_user_id", ""),
+        "qa_review_approver_display_name": d.get("capa_qa_review_approver_display_name", ""),
+        "final_approval_approver_user_id": d.get("capa_final_approval_approver_user_id", ""),
+        "final_approval_approver_display_name": d.get("capa_final_approval_approver_display_name", ""),
+    }
+
+
+def set_capa_phase_approvers(deviation_id: int, data: dict) -> dict:
+    conn = get_connection()
+    conn.execute(
+        """UPDATE qms_deviations SET
+               capa_qa_review_approver_user_id = ?,
+               capa_qa_review_approver_display_name = ?,
+               capa_final_approval_approver_user_id = ?,
+               capa_final_approval_approver_display_name = ?,
+               updated_at = datetime('now')
+           WHERE id = ?""",
+        (
+            (data.get("qa_review_approver_user_id") or "").strip(),
+            (data.get("qa_review_approver_display_name") or "").strip(),
+            (data.get("final_approval_approver_user_id") or "").strip(),
+            (data.get("final_approval_approver_display_name") or "").strip(),
+            deviation_id,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return get_capa_phase_approvers(deviation_id)
+
+
 def replace_workflow_steps(deviation_id: int, steps: list[dict]) -> list[dict]:
     """Full replace (DELETE + INSERT), same pattern as
     qms_workflow_database.set_step_approvers. Enforces the module's one hard

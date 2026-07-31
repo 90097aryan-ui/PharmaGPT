@@ -556,6 +556,7 @@ const QMS_DEV_STEP_BUTTON_LABELS = {
 const QMS_DEV_LIFECYCLE_PHASES = ["Draft", "Submitted", "Review", "Investigation", "CAPA", "Effectiveness Check", "Closure"];
 
 let qmsDevBuilderSteps = [];
+let qmsDevBuilderCapaPhase = {};
 
 async function qmsDevRenderLifecycleTab(dev) {
   const id = dev.id;
@@ -572,7 +573,9 @@ async function qmsDevRenderLifecycleTab(dev) {
   if (!wf.instance) {
     qmsDevBuilderSaving = false;
     try {
-      qmsDevBuilderSteps = await qmsFetch(`/qms/deviations/${id}/workflow-builder`);
+      const builder = await qmsFetch(`/qms/deviations/${id}/workflow-builder`);
+      qmsDevBuilderSteps = builder.steps;
+      qmsDevBuilderCapaPhase = builder.capa_phase;
     } catch (e) {
       el.innerHTML = `<div class="qms-empty"><p>Failed to load workflow builder: ${e.message}</p></div>`;
       return;
@@ -623,12 +626,18 @@ async function qmsDevRenderLifecycleTab(dev) {
 }
 window.qmsDevRenderLifecycleTab = qmsDevRenderLifecycleTab;
 
-// ── Workflow Builder: Draft-time Review chain configuration ──────────────────
-// Replaces the fixed approval chain — the initiator adds/removes/reorders
-// steps and picks a Department + Approver for each. QA Approval (the last
-// row) is always present, always final, and cannot be removed or reordered
-// — see routes/qms_deviations.py::replace_workflow_steps for the
-// server-side enforcement this UI mirrors.
+// ── Workflow Builder: Draft-time, whole-lifecycle approver configuration ─────
+// Two parts, both saved together (routes/qms_deviations.py::update_workflow_builder):
+//   qmsDevBuilderSteps     — the dynamic Review chain. The initiator adds/
+//                            removes/reorders steps and picks a Department +
+//                            Approver for each. QA Approval (the last row) is
+//                            always present, always final, and cannot be
+//                            removed or reordered.
+//   qmsDevBuilderCapaPhase — the two fixed, single-approver CAPA-phase steps
+//                            (QA Review, Final Approval) that follow
+//                            Investigation; not reorderable/addable/removable.
+// This is the only place approvers are configured for a deviation — there is
+// no runtime "Assign Approver" action anywhere in the Lifecycle tab.
 
 // True while a workflow-builder PUT is in flight. Every mutating action
 // below checks this before touching qmsDevBuilderSteps/the DOM, and the
@@ -647,9 +656,10 @@ function qmsDevRenderWorkflowBuilder(id) {
     <div class="qms-section-card">
       <h3>Workflow Builder</h3>
       <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px">
-        This deviation has not been submitted yet. Configure the Review chain below — add, remove, and
-        reorder steps, and choose a Department and Approver for each. QA Approval is mandatory and always
-        the final step; the Investigation Case stays locked until it clears.
+        This deviation has not been submitted yet. Configure every approver for its full lifecycle here —
+        there is no assignment step after submission. Review chain: add, remove, and reorder steps, and
+        choose a Department and Approver for each; QA Approval is mandatory and always the final step, and
+        the Investigation Case stays locked until it clears.
       </p>
       <div id="qms-wfb-steps">
         ${qmsDevBuilderSteps.map((s, i) => qmsDevBuilderStepHTML(s, i, i === lastIdx, busy)).join("")}
@@ -657,6 +667,16 @@ function qmsDevRenderWorkflowBuilder(id) {
       <div class="qms-form-actions" style="margin-top:10px">
         <button class="btn-secondary" onclick="qmsDevBuilderAddStep(${id})" ${busy}>+ Add Step</button>
       </div>
+    </div>
+    <div class="qms-section-card">
+      <h3>CAPA Phase Approvers</h3>
+      <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px">
+        QA Review and Final Approval follow the Investigation Case and are always present — pick their
+        approver here so they're already assigned when the record reaches CAPA.
+      </p>
+      ${qmsDevBuilderCapaPhaseHTML(busy)}
+    </div>
+    <div class="qms-section-card">
       <div class="qms-form-actions">
         <button class="btn-secondary" onclick="qmsDevBuilderSave(${id})" ${busy}>Save Workflow</button>
         <button class="btn-primary" onclick="qmsDevSubmitForReview(${id})" ${busy}>Submit for Review</button>
@@ -665,6 +685,26 @@ function qmsDevRenderWorkflowBuilder(id) {
   `;
 }
 window.qmsDevRenderWorkflowBuilder = qmsDevRenderWorkflowBuilder;
+
+function qmsDevBuilderCapaPhaseHTML(busy) {
+  const c = qmsDevBuilderCapaPhase || {};
+  return `
+    <div class="qms-stat-card" style="margin-bottom:10px">
+      <strong>QA Review</strong>
+      <div class="form-grid">
+        <div class="form-field"><label>Approver User ID</label><input type="text" id="qms-wfb-capa-qa-review-uid" value="${c.qa_review_approver_user_id || ""}" placeholder="Supabase user id" ${busy} /></div>
+        <div class="form-field"><label>Approver Display Name</label><input type="text" id="qms-wfb-capa-qa-review-dname" value="${c.qa_review_approver_display_name || ""}" placeholder="Full name" ${busy} /></div>
+      </div>
+    </div>
+    <div class="qms-stat-card">
+      <strong>Final Approval</strong>
+      <div class="form-grid">
+        <div class="form-field"><label>Approver User ID</label><input type="text" id="qms-wfb-capa-final-uid" value="${c.final_approval_approver_user_id || ""}" placeholder="Supabase user id" ${busy} /></div>
+        <div class="form-field"><label>Approver Display Name</label><input type="text" id="qms-wfb-capa-final-dname" value="${c.final_approval_approver_display_name || ""}" placeholder="Full name" ${busy} /></div>
+      </div>
+    </div>
+  `;
+}
 
 function qmsDevBuilderStepHTML(step, i, isFinal, busy) {
   return `
@@ -695,6 +735,12 @@ function qmsDevBuilderSyncFromDOM() {
     approver_user_id: (document.getElementById(`qms-wfb-uid-${i}`) || { value: "" }).value.trim(),
     approver_display_name: (document.getElementById(`qms-wfb-dname-${i}`) || { value: "" }).value.trim(),
   }));
+  qmsDevBuilderCapaPhase = {
+    qa_review_approver_user_id: (document.getElementById("qms-wfb-capa-qa-review-uid") || { value: "" }).value.trim(),
+    qa_review_approver_display_name: (document.getElementById("qms-wfb-capa-qa-review-dname") || { value: "" }).value.trim(),
+    final_approval_approver_user_id: (document.getElementById("qms-wfb-capa-final-uid") || { value: "" }).value.trim(),
+    final_approval_approver_display_name: (document.getElementById("qms-wfb-capa-final-dname") || { value: "" }).value.trim(),
+  };
 }
 
 // Every structural edit (add/remove/reorder) persists immediately via PUT —
@@ -707,7 +753,11 @@ async function qmsDevBuilderPersist(id, { toast } = {}) {
   qmsDevBuilderSaving = true;
   qmsDevRenderWorkflowBuilder(id);
   try {
-    qmsDevBuilderSteps = await qmsPutJSON(`/qms/deviations/${id}/workflow-builder`, { steps: qmsDevBuilderSteps });
+    const builder = await qmsPutJSON(`/qms/deviations/${id}/workflow-builder`, {
+      steps: qmsDevBuilderSteps, capa_phase: qmsDevBuilderCapaPhase,
+    });
+    qmsDevBuilderSteps = builder.steps;
+    qmsDevBuilderCapaPhase = builder.capa_phase;
     if (toast) qmsToast(toast);
   } catch (e) {
     qmsToast("Failed to save workflow: " + e.message);
@@ -790,16 +840,13 @@ function qmsDevWorkflowActionHTML(id, step, user) {
   if (step.step_type === "approval") {
     const approvers = step.approvers || [];
     if (!approvers.length) {
-      return `
-        <div class="form-grid" style="margin-top:8px">
-          <div class="form-field"><label>Approver User ID</label><input type="text" id="${formId}-uid" placeholder="Supabase user id" /></div>
-          <div class="form-field"><label>Display Name</label><input type="text" id="${formId}-name" placeholder="Full name" /></div>
-        </div>
-        <div class="qms-form-actions">
-          <button class="btn-secondary" onclick="qmsDevAssignApprover(${id}, ${step.step_order}, '${formId}')">Assign Approver</button>
-        </div>
-        <p style="font-size:11.5px;color:var(--text-muted);margin-top:4px">Awaiting approver assignment — this step cannot be decided until at least one approver is assigned.</p>
-      `;
+      // Every step's approver is configured in the Workflow Builder and
+      // assigned automatically at Submit for Review (routes/qms_deviations.py
+      // ::start_workflow) — an approval step with no approver here means the
+      // record predates that guarantee or the workflow is misconfigured.
+      // There is no runtime "Assign Approver" control; this must be fixed by
+      // re-running the Workflow Builder before submission, not from here.
+      return `<div class="qms-panel-item-meta">No approver assigned for this step — the Workflow Builder should have assigned one at submission. Contact your administrator.</div>`;
     }
     const isApprover = approvers.some(a => a.user_id === user.user_id);
     if (!isApprover) {
@@ -842,7 +889,7 @@ async function qmsDevSubmitForReview(id) {
   qmsDevRenderWorkflowBuilder(id);
   try {
     qmsDevBuilderSyncFromDOM();
-    await qmsPutJSON(`/qms/deviations/${id}/workflow-builder`, { steps: qmsDevBuilderSteps });
+    await qmsPutJSON(`/qms/deviations/${id}/workflow-builder`, { steps: qmsDevBuilderSteps, capa_phase: qmsDevBuilderCapaPhase });
     await qmsPostJSON(`/qms/deviations/${id}/workflow/start`, {});
     qmsToast("Submitted for review");
     qmsDevRefreshCurrentView(id);
@@ -865,22 +912,6 @@ async function qmsDevRequestInfo(id, stepName) {
   }
 }
 window.qmsDevRequestInfo = qmsDevRequestInfo;
-
-async function qmsDevAssignApprover(id, stepOrder, formId) {
-  const user_id = document.getElementById(`${formId}-uid`).value.trim();
-  const display_name = document.getElementById(`${formId}-name`).value.trim();
-  if (!user_id) { qmsToast("Approver User ID is required"); return; }
-  try {
-    await qmsPostJSON(`/qms/deviations/${id}/workflow/steps/${stepOrder}/assign`, {
-      approvers: [{ user_id, display_name }],
-    });
-    qmsToast("Approver assigned");
-    qmsDevRefreshCurrentView(id);
-  } catch (e) {
-    qmsToast("Failed to assign approver: " + e.message);
-  }
-}
-window.qmsDevAssignApprover = qmsDevAssignApprover;
 
 async function qmsDevDecide(id, stepOrder, decision, formId) {
   const comments = formId && document.getElementById(`${formId}-comments`) ? document.getElementById(`${formId}-comments`).value.trim() : "";

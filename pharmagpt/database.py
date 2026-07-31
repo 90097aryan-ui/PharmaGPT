@@ -398,6 +398,20 @@ def init_db() -> None:
     _add_column_if_missing(conn, "qms_change_controls", "postgres_id", "TEXT DEFAULT NULL")
     conn.commit()
 
+    # ── Deviation Workflow Builder: CAPA-phase approvers ───────────────────────
+    # The Workflow Builder's qms_deviation_workflow_steps table only covers the
+    # dynamic, reorderable Review chain (ending in the mandatory QA Approval
+    # gate). QA Review and Final Approval — the two named-approver steps in the
+    # fixed post-Investigation CAPA phase (routes/qms_deviations.py's
+    # DEVIATION_LIFECYCLE_V2 tail) — are exactly one approver each, never
+    # reorderable/addable/removable, so they live as plain columns on the
+    # deviation itself rather than rows in that table.
+    _add_column_if_missing(conn, "qms_deviations", "capa_qa_review_approver_user_id", "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(conn, "qms_deviations", "capa_qa_review_approver_display_name", "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(conn, "qms_deviations", "capa_final_approval_approver_user_id", "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(conn, "qms_deviations", "capa_final_approval_approver_display_name", "TEXT NOT NULL DEFAULT ''")
+    conn.commit()
+
     # ── Tenant isolation (security fix, docs/SECURITY_REVIEW.md) ──────────────
     for _qms_table in ("qms_deviations", "qms_capas", "qms_change_controls", "qms_documents"):
         _add_column_if_missing(conn, _qms_table, "company_id", "TEXT DEFAULT NULL")

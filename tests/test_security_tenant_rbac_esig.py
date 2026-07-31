@@ -319,18 +319,33 @@ def test_company_admin_can_delete_project(client):
     assert db.get_project(project["id"]) is None
 
 
+def _dev_configure_all_approvers(client, deviation_id, tenant):
+    """Fill in every named-approval step's approver via the Workflow Builder
+    — the Review chain plus the fixed CAPA-phase steps (QA Review, Final
+    Approval) — since that's the only place approvers are ever configured
+    for a deviation; there is no runtime "Assign Approver" action. Must be
+    called while already inside an `_as(...)` context so the PUT is
+    authenticated as the intended caller."""
+    builder = client.get(f"/qms/deviations/{deviation_id}/workflow-builder", headers=AUTH_HEADERS).get_json()
+    for s in builder["steps"]:
+        s["approver_user_id"] = tenant.user_id
+        s["approver_display_name"] = tenant.display_name
+    capa_phase = {
+        "qa_review_approver_user_id": tenant.user_id, "qa_review_approver_display_name": tenant.display_name,
+        "final_approval_approver_user_id": tenant.user_id, "final_approval_approver_display_name": tenant.display_name,
+    }
+    client.put(f"/qms/deviations/{deviation_id}/workflow-builder",
+               json={"steps": builder["steps"], "capa_phase": capa_phase}, headers=AUTH_HEADERS)
+
+
 def _reach_qa_approval(client, deviation_id, approver_tenant):
     """Drive a deviation through the Initiator Manager Review -> QA Manager
     Review -> QA Approval gate, naming `approver_tenant` as the approver for
     all three steps (all eligible for reviewer_qa/company_admin)."""
     with _as(approver_tenant):
+        _dev_configure_all_approvers(client, deviation_id, approver_tenant)
         client.post(f"/qms/deviations/{deviation_id}/workflow/start", headers=AUTH_HEADERS)
         for step_order in (2, 3, 4):
-            client.post(
-                f"/qms/deviations/{deviation_id}/workflow/steps/{step_order}/assign",
-                json={"approvers": [{"user_id": approver_tenant.user_id, "display_name": approver_tenant.display_name}]},
-                headers=AUTH_HEADERS,
-            )
             client.post(
                 f"/qms/deviations/{deviation_id}/workflow/steps/{step_order}/decide",
                 json={"decision": "approve"}, headers=AUTH_HEADERS,
@@ -372,12 +387,8 @@ def test_reviewer_qa_not_named_as_approver_cannot_decide_approval_step(client):
     action->status map; the redesign requires being the *assigned* approver."""
     deviation = _create_deviation(client, ADMIN_A)
     with _as(ADMIN_A):
+        _dev_configure_all_approvers(client, deviation["id"], ADMIN_A)
         client.post(f"/qms/deviations/{deviation['id']}/workflow/start", headers=AUTH_HEADERS)
-        client.post(
-            f"/qms/deviations/{deviation['id']}/workflow/steps/2/assign",
-            json={"approvers": [{"user_id": ADMIN_A.user_id, "display_name": ADMIN_A.display_name}]},
-            headers=AUTH_HEADERS,
-        )
 
     with _as(REVIEWER_A):
         resp = client.post(
@@ -412,12 +423,8 @@ def test_workflow_decide_identity_cannot_be_spoofed_by_client(client):
     ignored — the decided_by field must record the authenticated identity."""
     deviation = _create_deviation(client, ADMIN_A)
     with _as(ADMIN_A):
+        _dev_configure_all_approvers(client, deviation["id"], REVIEWER_A)
         client.post(f"/qms/deviations/{deviation['id']}/workflow/start", headers=AUTH_HEADERS)
-        client.post(
-            f"/qms/deviations/{deviation['id']}/workflow/steps/2/assign",
-            json={"approvers": [{"user_id": REVIEWER_A.user_id, "display_name": REVIEWER_A.display_name}]},
-            headers=AUTH_HEADERS,
-        )
 
     with _as(REVIEWER_A):
         resp = client.post(
@@ -441,12 +448,8 @@ def test_workflow_decide_identity_cannot_be_spoofed_by_client(client):
 def test_workflow_audit_entry_also_uses_authenticated_identity(client):
     deviation = _create_deviation(client, ADMIN_A)
     with _as(ADMIN_A):
+        _dev_configure_all_approvers(client, deviation["id"], REVIEWER_A)
         client.post(f"/qms/deviations/{deviation['id']}/workflow/start", headers=AUTH_HEADERS)
-        client.post(
-            f"/qms/deviations/{deviation['id']}/workflow/steps/2/assign",
-            json={"approvers": [{"user_id": REVIEWER_A.user_id, "display_name": REVIEWER_A.display_name}]},
-            headers=AUTH_HEADERS,
-        )
 
     with _as(REVIEWER_A):
         client.post(

@@ -12,6 +12,22 @@ _FIXED_USER_ID = "00000000-0000-0000-0000-000000000001"  # tests/conftest.py::_T
 _ASSIGN = {"approvers": [{"user_id": _FIXED_USER_ID, "display_name": "Test User"}]}
 
 
+def _dev_configure_all_approvers(client, did, user_id=_FIXED_USER_ID, display_name="Test User"):
+    """The Workflow Builder is the only place a deviation's approvers are
+    configured — there is no runtime "Assign Approver" action. Fill in the
+    Review chain plus both fixed CAPA-phase steps (QA Review, Final
+    Approval); /workflow/start then auto-assigns all of them."""
+    steps = client.get(f"/qms/deviations/{did}/workflow-builder").get_json()["steps"]
+    for s in steps:
+        s["approver_user_id"] = user_id
+        s["approver_display_name"] = display_name
+    capa_phase = {
+        "qa_review_approver_user_id": user_id, "qa_review_approver_display_name": display_name,
+        "final_approval_approver_user_id": user_id, "final_approval_approver_display_name": display_name,
+    }
+    client.put(f"/qms/deviations/{did}/workflow-builder", json={"steps": steps, "capa_phase": capa_phase})
+
+
 def test_inbox_empty_when_nothing_pending(client):
     r = client.get("/workflow/inbox")
     assert r.status_code == 200
@@ -24,18 +40,22 @@ def test_inbox_empty_when_nothing_pending(client):
     assert stats["recent_decisions"] == []
 
 
-def test_inbox_lists_pending_deviation_approval_step_once_assigned(client):
+def test_inbox_lists_pending_deviation_approval_step_once_workflow_starts(client):
     # DEVIATION_LIFECYCLE_V2's step 2 ("initiator_mgr_review") is an
     # approval step — it only appears in the Inbox once someone is named as
-    # its approver (same rule Deviations' own workflow tab already follows,
-    # see tests/test_qms_routes.py::_dev_reach_qa_approval).
+    # its approver. There is no runtime "Assign Approver" action for
+    # deviations anymore (see tests/test_qms_routes.py::_dev_reach_qa_approval):
+    # the Workflow Builder is the only place to configure approvers, and
+    # /workflow/start auto-assigns everyone configured, so the step is
+    # already in the Inbox the moment submission succeeds.
     dev = client.post("/qms/deviations", json={"title": "Temp excursion"}).get_json()
     did = dev["id"]
-    r = client.post(f"/qms/deviations/{did}/workflow/start")
-    assert r.status_code == 201
     assert client.get("/workflow/inbox").get_json() == []
 
-    client.post(f"/qms/deviations/{did}/workflow/steps/2/assign", json=_ASSIGN)
+    _dev_configure_all_approvers(client, did)
+    r = client.post(f"/qms/deviations/{did}/workflow/start")
+    assert r.status_code == 201
+
     items = client.get("/workflow/inbox").get_json()
     assert len(items) == 1
     row = items[0]
@@ -83,8 +103,8 @@ def test_inbox_lists_pending_document_once_assigned(client):
 
 def test_inbox_stats_awaiting_my_decision_counts_approval_steps_only(client):
     dev = client.post("/qms/deviations", json={"title": "Dev"}).get_json()
-    client.post(f"/qms/deviations/{dev['id']}/workflow/start")
-    client.post(f"/qms/deviations/{dev['id']}/workflow/steps/2/assign", json=_ASSIGN)  # approval step
+    _dev_configure_all_approvers(client, dev["id"])
+    client.post(f"/qms/deviations/{dev['id']}/workflow/start")  # approval step, already assigned
 
     capa = client.post("/qms/capa", json={"title": "CAPA"}).get_json()
     client.post(f"/qms/capa/{capa['id']}/workflow/start")  # current step is activity, no assignment needed

@@ -30,11 +30,14 @@ PUT    /qms/deviations/<id>                  update deviation fields
 DELETE /qms/deviations/<id>                  delete deviation
 
 GET    /qms/deviations/<id>/workflow                       lifecycle state: instance + steps + phase grouping + dashboard fields
-GET    /qms/deviations/<id>/workflow-builder                Draft-time Review chain configuration (Workflow Builder)
-PUT    /qms/deviations/<id>/workflow-builder                replace the Review chain (Draft only; last step always QA Approval)
+GET    /qms/deviations/<id>/workflow-builder                Draft-time approver configuration for the whole lifecycle:
+                                                             {"steps": [...] (Review chain), "capa_phase": {...}
+                                                             (QA Review + Final Approval)} — the Workflow Builder
+PUT    /qms/deviations/<id>/workflow-builder                replace both (Draft only; Review chain's last step is
+                                                             always QA Approval)
 POST   /qms/deviations/<id>/workflow/start                 submit for review (compiles the Workflow Builder into a fresh
-                                                             per-deviation template and instantiates it)
-POST   /qms/deviations/<id>/workflow/steps/<order>/assign   assign named approver(s) to an approval step
+                                                             per-deviation template, instantiates it, and assigns every
+                                                             configured step's approver — no separate assignment step)
 POST   /qms/deviations/<id>/workflow/steps/<order>/decide   approve / reject / return / advance the current step
 
 GET/POST /qms/deviations/<id>/investigation/evidence            Investigation Case — evidence/documents
@@ -709,17 +712,29 @@ def get_workflow(did):
     return jsonify(_enrich_workflow_state(wfe.get_instance_state(RECORD_TYPE, did)))
 
 
-# ── Workflow Builder: Draft-time Review chain configuration ──────────────────
-# One record per step (qms_deviation_workflow_steps), editable only while the
-# deviation is in Draft. At Submit for Review this is compiled into a fresh
-# per-deviation workflow template (see _build_dynamic_workflow_key) handed to
-# the unmodified services/workflow_engine.py — no engine change.
+# ── Workflow Builder: Draft-time, whole-lifecycle approver configuration ─────
+# Configures every named-approval step in the deviation's lifecycle, editable
+# only while the deviation is in Draft — the sole place approvers are ever
+# set; there is no runtime "Assign Approver" action. Two parts:
+#   "steps"      — the dynamic, reorderable Review chain (one record per step
+#                   in qms_deviation_workflow_steps), always ending in the
+#                   mandatory QA Approval gate.
+#   "capa_phase" — the two fixed, single-approver CAPA-phase steps (QA
+#                   Review, Final Approval) that follow Investigation; not
+#                   reorderable/addable/removable, so they're plain columns
+#                   on qms_deviations rather than additional step rows.
+# Investigation, Effectiveness Check, and Closure need no approver here —
+# they're role-eligible 'activity' steps in DEVIATION_LIFECYCLE_V2, decided
+# by any user with an eligible role, never a named assignee.
+# At Submit for Review this is compiled into a fresh per-deviation workflow
+# template (see _build_dynamic_workflow_key) handed to the unmodified
+# services/workflow_engine.py — no engine change.
 
 @bp.route("/<int:did>/workflow-builder", methods=["GET"])
 def get_workflow_builder(did):
     if not _record_scoped_or_404(did):
         return jsonify({"error": "Not found"}), 404
-    return jsonify(ddb.get_workflow_steps(did))
+    return jsonify({"steps": ddb.get_workflow_steps(did), "capa_phase": ddb.get_capa_phase_approvers(did)})
 
 
 @bp.route("/<int:did>/workflow-builder", methods=["PUT"])
@@ -731,11 +746,12 @@ def update_workflow_builder(did):
         return jsonify({"error": "The workflow can only be edited while the deviation is in Draft"}), 409
     data = request.get_json() or {}
     try:
-        updated = ddb.replace_workflow_steps(did, data.get("steps") or [])
+        steps = ddb.replace_workflow_steps(did, data.get("steps") or [])
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    capa_phase = ddb.set_capa_phase_approvers(did, data.get("capa_phase") or {})
     audit.log("deviation", did, "Workflow configuration updated")
-    return jsonify(updated)
+    return jsonify({"steps": steps, "capa_phase": capa_phase})
 
 
 def _build_dynamic_workflow_key(did: int) -> str:
@@ -789,6 +805,25 @@ def start_workflow(did):
     deviation = _record_scoped_or_404(did)
     if not deviation:
         return jsonify({"error": "Not found"}), 404
+
+    # The Workflow Builder is the only place approvers are configured for a
+    # deviation (no runtime "Assign Approver" action exists) — every
+    # named-approval step across the whole lifecycle (the Review chain, plus
+    # the fixed CAPA-phase QA Review/Final Approval steps) must already carry
+    # a chosen approver before the record can leave Draft, or a step with no
+    # one able to decide it would become permanently stuck once submitted.
+    configured_steps = ddb.get_workflow_steps(did)
+    capa_phase = ddb.get_capa_phase_approvers(did)
+    unassigned = [s["step_name"] for s in configured_steps if not s.get("approver_user_id")]
+    if not capa_phase.get("qa_review_approver_user_id"):
+        unassigned.append("QA Review")
+    if not capa_phase.get("final_approval_approver_user_id"):
+        unassigned.append("Final Approval")
+    if unassigned:
+        reason = f"Assign an approver in the Workflow Builder for: {', '.join(unassigned)}"
+        audit.log_failure("deviation", did, "Workflow start blocked", reason=reason)
+        return jsonify({"error": reason}), 409
+
     sig = tenancy.signing_identity(g.tenant)
     try:
         dynamic_key = _build_dynamic_workflow_key(did)
@@ -797,33 +832,26 @@ def start_workflow(did):
         audit.log_failure("deviation", did, "Workflow start blocked", reason=str(e))
         return jsonify({"error": str(e)}), 409
 
-    # Steps already carrying a chosen approver (Workflow Builder) are
-    # assigned immediately — "create approval tasks" / "notify the first
-    # approver": the first step's approver now appears in the existing,
-    # unchanged Workflow Inbox without any new notification code. Steps left
-    # blank fall back to the pre-existing manual "Assign Approver" action.
-    for step in ddb.get_workflow_steps(did):
-        if step.get("approver_user_id"):
-            wfe.assign_approvers(RECORD_TYPE, did, step["step_order"], [
-                {"user_id": step["approver_user_id"], "display_name": step.get("approver_display_name", "")}
-            ])
+    # Every named-approval step already carries its approver (validated
+    # above) — assign them all immediately so the runtime Review screen never
+    # needs a manual assignment control. Review-chain steps are assigned by
+    # their known step_order; QA Review/Final Approval's step_order shifts
+    # with however many Review steps were configured, so they're looked up
+    # by step_key from the just-compiled instance instead.
+    for step in configured_steps:
+        wfe.assign_approvers(RECORD_TYPE, did, step["step_order"], [
+            {"user_id": step["approver_user_id"], "display_name": step.get("approver_display_name", "")}
+        ])
+    capa_assignments = {
+        "qa_review": (capa_phase["qa_review_approver_user_id"], capa_phase["qa_review_approver_display_name"]),
+        "final_approval": (capa_phase["final_approval_approver_user_id"], capa_phase["final_approval_approver_display_name"]),
+    }
+    for s in wfe.get_instance_state(RECORD_TYPE, did)["steps"]:
+        if s["step_key"] in capa_assignments:
+            user_id, display_name = capa_assignments[s["step_key"]]
+            wfe.assign_approvers(RECORD_TYPE, did, s["step_order"], [{"user_id": user_id, "display_name": display_name}])
 
     return jsonify(wfe.get_instance_state(RECORD_TYPE, did)), 201
-
-
-@bp.route("/<int:did>/workflow/steps/<int:step_order>/assign", methods=["POST"])
-def assign_workflow_step(did, step_order):
-    if not _record_scoped_or_404(did):
-        return jsonify({"error": "Not found"}), 404
-    data = request.get_json() or {}
-    approvers = data.get("approvers") or []
-    if not isinstance(approvers, list) or not all(a.get("user_id") for a in approvers):
-        return jsonify({"error": "approvers must be a non-empty list of {user_id, display_name}"}), 400
-    try:
-        state = wfe.assign_approvers(RECORD_TYPE, did, step_order, approvers)
-    except wfe.WorkflowError as e:
-        return jsonify({"error": str(e)}), 409
-    return jsonify(state)
 
 
 @bp.route("/<int:did>/workflow/steps/<int:step_order>/decide", methods=["POST"])

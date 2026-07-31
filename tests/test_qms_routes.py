@@ -186,18 +186,35 @@ def test_document_docx_export(client):
 _FIXED_USER_ID = "00000000-0000-0000-0000-000000000001"  # tests/conftest.py::_TEST_TENANT.user_id
 
 
+def _dev_configure_all_approvers(client, did, user_id=_FIXED_USER_ID, display_name="Test User"):
+    """Fill in every named-approval step's approver via the Workflow Builder
+    (the only place they can be set for deviations — there is no runtime
+    "Assign Approver" action): the Review chain plus the fixed CAPA-phase
+    steps (QA Review, Final Approval)."""
+    steps = client.get(f"/qms/deviations/{did}/workflow-builder").get_json()["steps"]
+    for s in steps:
+        s["approver_user_id"] = user_id
+        s["approver_display_name"] = display_name
+    capa_phase = {
+        "qa_review_approver_user_id": user_id, "qa_review_approver_display_name": display_name,
+        "final_approval_approver_user_id": user_id, "final_approval_approver_display_name": display_name,
+    }
+    client.put(f"/qms/deviations/{did}/workflow-builder", json={"steps": steps, "capa_phase": capa_phase})
+
+
 def _dev_reach_qa_approval(client, did):
     """Drive a deviation from Draft through the Initiator Manager Review ->
     QA Manager Review -> QA Approval gate, using the fixture's single fixed
     tenant (role=company_admin) as the named approver for every step —
     that role is eligible for all three per DEVIATION_LIFECYCLE_V2 (steps
-    2/3/4, displayed as the "Review" phase)."""
+    2/3/4, displayed as the "Review" phase). Approvers (including the
+    CAPA-phase steps not reached yet) are configured via the Workflow
+    Builder before submission and are auto-assigned at /workflow/start."""
+    _dev_configure_all_approvers(client, did)
+
     r = client.post(f"/qms/deviations/{did}/workflow/start")
     assert r.status_code == 201, r.get_json()
     for step_order in (2, 3, 4):
-        r = client.post(f"/qms/deviations/{did}/workflow/steps/{step_order}/assign",
-                         json={"approvers": [{"user_id": _FIXED_USER_ID, "display_name": "Test User"}]})
-        assert r.status_code == 200, r.get_json()
         r = client.post(f"/qms/deviations/{did}/workflow/steps/{step_order}/decide", json={"decision": "approve"})
         assert r.status_code == 200, r.get_json()
 
@@ -393,10 +410,11 @@ def test_deviation_workflow_named_approver_gate_end_to_end(client):
     assert r.status_code == 200, r.get_json()
     assert client.get(f"/qms/deviations/{did}").get_json()["status"] == "CAPA"
 
-    # QA Review (6) and Final Approval (7) are named-approval gates grouped under "CAPA".
+    # QA Review (6) and Final Approval (7) are named-approval gates grouped
+    # under "CAPA" — already assigned at /workflow/start via the Workflow
+    # Builder's capa_phase configuration (_dev_reach_qa_approval above), no
+    # runtime assignment needed here.
     for step_order in (6, 7):
-        client.post(f"/qms/deviations/{did}/workflow/steps/{step_order}/assign",
-                    json={"approvers": [{"user_id": _FIXED_USER_ID, "display_name": "Test User"}]})
         r = client.post(f"/qms/deviations/{did}/workflow/steps/{step_order}/decide", json={"decision": "approve"})
         assert r.status_code == 200, r.get_json()
 

@@ -1,16 +1,16 @@
-# Graph Report - PharmaAgent  (2026-07-31)
+# Graph Report - PharmaAgent  (2026-07-28)
 
 ## Corpus Check
-- 361 files · ~466,344 words
+- 360 files · ~461,805 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 5061 nodes · 8657 edges · 302 communities (277 shown, 25 thin omitted)
+- 4997 nodes · 8519 edges · 316 communities (291 shown, 25 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 86 edges (avg confidence: 0.54)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `07d26d17`
+- Built from commit: `d89717b5`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -22,15 +22,15 @@
 - DocxGenerator
 - test_check_projects_parity.py
 - test_security_tenant_rbac_esig.py
-- require_role
-- context.py
+- extract_bearer_token
+- Flask
 - preamble
 - risk.py
 - qual.js
 - knowledge_base.js
 - risk.js
 - urs.js
-- qms_common.py
+- documents.py
 - decide_step
 - report.py
 - test_qms_routes.py
@@ -45,11 +45,11 @@
 - test_kb_sync.py
 - qms_database.py
 - review_engine.py
-- test_deviation_workflow_builder.py
+- validation.py
 - test_urs_generation_job.py
 - qms_change_control.js
 - qms_deviations.js
-- _dev_reach_qa_approval
+- get_authenticated_client
 - urs_database.py
 - EngineOpenError
 - equipment.js
@@ -81,12 +81,12 @@
 - _extract_headings
 - qms_common.js
 - test_pipeline.py
-- Flask
+- document_processor.py
 - projects.js
 - test_phase_f_compliance.py
-- EquipmentProfile
+- _register
 - qms_deviation_database.py
-- investigation_engine.py
+- get_dashboard
 - dashboard.js
 - test_equipment_database.py
 - test_equipment_dual_write.py
@@ -99,28 +99,28 @@
 - test_urs_audit_logging.py
 - test_urs_routes.py
 - app.py
-- document_processor.py
+- extract_sync
 - test_projects_dual_write.py
 - chat.js
 - notifications.js
 - test_migrations_rls_recursion.py
 - test_project_workspace.py
-- test_routes_auth.py
+- qms_common.py
 - test_approval_engine.py
 - 2. Problems, by workflow stage
-- test_urs_docx_download_auth.py
+- test_app_auth_integration.py
 - test_kb_dual_write.py
-- get_dashboard
+- investigation_engine.py
 - audit.py
 - project_workspace.js
 - test_creator_attribution.py
-- get_authenticated_client
-- dashboard.py
+- require_role
+- config.py
 - workflow_engine.py
 - validation_dashboard.js
 - test_equipment_links.py
 - test_login_ui.py
-- Database Schema
+- investigation_prompt.py
 - test_module_permissions.py
 - admin_assume_context.js
 - test_equipment_library.py
@@ -170,7 +170,7 @@
 - Product Requirements Document — PharmaGPT
 - PharmaGPT — Architecture Baseline v1.0
 - PharmaGPT — Database Reference
-- README.md
+- Deployment Guide — Render
 - PharmaGPT Architecture Review
 - Deployment Runbook — Company Administration Production Enablement
 - Findings by Category
@@ -211,7 +211,7 @@
 - RBAC Verification Report — Phase F, Work Package 4
 - Workflow Validation Report — Phase F, Work Package 3
 - workflow_panel.js
-- fixtures_dir
+- conftest.py
 - _FakeQuery
 - Audit Trail Coverage Report — Phase F, Work Package 2
 - 3. Dead Code / Unused Stubs
@@ -220,7 +220,8 @@
 - HOTFIX — RLS Infinite Recursion on `users` (42P17)
 - 0001_identity_tenancy_up.sql
 - Important Implementation Details
-- _app_context
+- Features Completed
+- report_service.py
 - 1. Security Issues
 - 9. Additional Observations
 - Final Database Root Cause — Phase F.1
@@ -282,18 +283,30 @@
 - 0007_equipment_fixes_and_rls_up.sql
 - urs_requirement_library.py
 - Nutra Demo Tenant
+- _investigation_lock
 - _FakeAuthAdmin
+- Projects
 - urs_service.py
+- Validation — Document Generation
+- README.md
+- 3. Backend Architecture
+- 4. Functional Requirements
 - 0014_nutra_demo_schema_up.sql
+- finalize_summary
 - lifecycle_engine.py
 - _FakeCandidate
+- 4. Frontend Architecture
+- API Routes
+- 3. Entity Relationship Overview
+- 6. Equipment Library Relationships
+- 7. Knowledge Base Relationships
 - 0014_nutra_demo_schema_down.sql
 - authed_client
 - test_create_urs_ignores_client_supplied_approved_status
 - test_approval_performed_by_derived_from_authenticated_user
 
 ## God Nodes (most connected - your core abstractions)
-1. `get_connection()` - 271 edges
+1. `get_connection()` - 266 edges
 2. `require_role()` - 57 edges
 3. `extract_bearer_token()` - 49 edges
 4. `get_authenticated_client()` - 41 edges
@@ -302,7 +315,7 @@
 7. `DocxGenerator` - 31 edges
 8. `preamble()` - 30 edges
 9. `ReviewIssue` - 30 edges
-10. `_record_scoped_or_404()` - 28 edges
+10. `markdown_to_docx()` - 28 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `_FakeChunk` --uses--> `TenantContext`  [INFERRED]
@@ -313,13 +326,13 @@
   tests/test_pipeline.py → pharmagpt/services/extraction/base.py
 - `FakeEngine` --uses--> `ExtractionEngine`  [INFERRED]
   tests/test_pipeline.py → pharmagpt/services/extraction/base.py
-- `test_ocr_placeholder_always_unavailable()` --calls--> `OCRPlaceholderEngine`  [EXTRACTED]
-  tests/test_pdf_engines.py → pharmagpt/services/extraction/pdf_engines.py
+- `SeedError` --uses--> `IdentityProvisioningError`  [INFERRED]
+  scripts/seed_nutra_demo.py → pharmagpt/services/identity_admin.py
 
 ## Import Cycles
 - None detected.
 
-## Communities (302 total, 25 thin omitted)
+## Communities (316 total, 25 thin omitted)
 
 ### Community 0 - "database.py"
 Cohesion: 0.02
@@ -339,7 +352,7 @@ Nodes (65): backfill_equipment(), backfill_equipment_links(), main(), Client, sc
 
 ### Community 4 - "DocxGenerator"
 Cohesion: 0.06
-Nodes (39): Path, _add_field(), _add_page_field(), _add_paragraph_border_bottom(), _add_paragraph_border_top(), _apply_inline(), build_document_data(), DocumentData (+31 more)
+Nodes (40): Path, services/doc_exporter.py — Thin adapter: wizard form_data → DocxGenerator.  Al, _add_field(), _add_page_field(), _add_paragraph_border_bottom(), _add_paragraph_border_top(), _apply_inline(), build_document_data() (+32 more)
 
 ### Community 5 - "test_check_projects_parity.py"
 Cohesion: 0.06
@@ -347,15 +360,15 @@ Nodes (59): check_equipment_parity(), main(), _normalize(), Client, scripts/chec
 
 ### Community 6 - "test_security_tenant_rbac_esig.py"
 Cohesion: 0.06
-Nodes (65): _as(), client(), fixture, parametrize, tests/test_security_super_admin_guard.py — Regression coverage for the Phase 3.5, test_real_company_admin_is_unaffected(), test_super_admin_gets_403_not_a_leak(), _as() (+57 more)
+Nodes (63): _as(), client(), fixture, parametrize, tests/test_security_super_admin_guard.py — Regression coverage for the Phase 3.5, test_real_company_admin_is_unaffected(), test_super_admin_gets_403_not_a_leak(), _as() (+55 more)
 
-### Community 7 - "require_role"
-Cohesion: 0.12
-Nodes (35): extract_bearer_token(), Return the bearer token from the current request's Authorization     header, or, Reject the request unless it carries a valid Supabase Auth bearer     token, an, Reject the request (403) unless `g.tenant.role` is one of     `allowed_roles`., require_auth(), require_role(), assume_company(), end_assume_company() (+27 more)
+### Community 7 - "extract_bearer_token"
+Cohesion: 0.15
+Nodes (23): extract_bearer_token(), Return the bearer token from the current request's Authorization     header, or, Reject the request unless it carries a valid Supabase Auth bearer     token, an, require_auth(), assume_company(), end_assume_company(), list_companies_for_assume(), login() (+15 more)
 
-### Community 8 - "context.py"
+### Community 8 - "Flask"
 Cohesion: 0.06
-Nodes (40): before_request, AuthenticationError, Exception, pharmagpt/auth/context.py — Supabase Auth verification and tenant-context resolu, Raised when a bearer token is missing, invalid, expired, or belongs     to an i, The resolved identity + tenancy facts for one authenticated request., Verify a Supabase Auth access token and resolve it to a TenantContext.      Ra, resolve_tenant_context() (+32 more)
+Nodes (40): Flask, AuthenticationError, Exception, pharmagpt/auth/context.py — Supabase Auth verification and tenant-context resolu, Raised when a bearer token is missing, invalid, expired, or belongs     to an i, The resolved identity + tenancy facts for one authenticated request., Verify a Supabase Auth access token and resolve it to a TenantContext.      Ra, resolve_tenant_context() (+32 more)
 
 ### Community 9 - "preamble"
 Cohesion: 0.06
@@ -381,17 +394,21 @@ Nodes (45): applyRiskFilters(), approvalEntryHtml(), ASSESSMENT_TYPES, assessmen
 Cohesion: 0.09
 Nodes (42): buildDashboardHTML(), buildDetailRow(), buildReqRow(), createURSRecord(), escHtml(), fetchAndRenderURSList(), formatDate(), formatStatus() (+34 more)
 
-### Community 15 - "qms_common.py"
-Cohesion: 0.07
-Nodes (47): allowed_file(), delete_from_disk(), delete_kb_from_disk(), file_exists(), get_extension(), get_file_path(), get_kb_file_path(), get_kb_upload_dir() (+39 more)
+### Community 15 - "documents.py"
+Cohesion: 0.11
+Nodes (25): allowed_file(), delete_from_disk(), delete_kb_from_disk(), file_exists(), get_file_path(), get_kb_file_path(), get_kb_upload_dir(), get_project_upload_dir() (+17 more)
 
 ### Community 16 - "decide_step"
-Cohesion: 0.26
-Nodes (23): decide_step(), Decide the record's *current* workflow step.      decision:       'advance', _advance(), _approve(), _assign(), _make_deviation(), tests/test_workflow_engine.py — Regression coverage for the generic workflow eng, Helper: submitted -> initiator_mgr_review -> qa_mgr_review -> qa_approval, all a (+15 more)
+Cohesion: 0.21
+Nodes (26): decide_step(), Decide the record's *current* workflow step.      decision:       'advance', _advance(), _app_context(), _approve(), _assign(), _make_deviation(), fixture (+18 more)
 
 ### Community 17 - "report.py"
-Cohesion: 0.07
-Nodes (54): route, SSE streaming chat endpoint.      Body:   { "message": "...", "project_id": 3, ", stream(), add_approval(), create_report(), create_version(), dashboard(), delete_report() (+46 more)
+Cohesion: 0.16
+Nodes (29): add_approval(), create_report(), create_version(), dashboard(), delete_report(), export_docx(), generate_all_sections(), generate_section() (+21 more)
+
+### Community 18 - "test_qms_routes.py"
+Cohesion: 0.05
+Nodes (11): Complete context package returned by retrieve_context().      Attributes, RetrievalResult, _dev_reach_qa_approval(), tests/test_qms_routes.py — Flask test-client integration tests for the QMS Phase, Drive a deviation from Draft through the Initiator Manager Review ->     QA Mana, test_deviation_investigation_ai_assistant_and_report(), test_deviation_investigation_knowledge_base(), test_deviation_investigation_knowledge_base_finds_related_deviations() (+3 more)
 
 ### Community 19 - "test_bootstrap_super_admin.py"
 Cohesion: 0.10
@@ -399,7 +416,7 @@ Nodes (42): bootstrap_super_admin(), BootstrapError, build_service_role_client()
 
 ### Community 20 - "get_connection"
 Cohesion: 0.08
-Nodes (46): get_connection(), Open (or create) the database and return a connection.     row_factory=sqlite3., add_ai_run(), add_evidence(), add_interview(), add_sop_review(), add_task(), add_timeline_event() (+38 more)
+Nodes (44): get_connection(), Open (or create) the database and return a connection.     row_factory=sqlite3., add_ai_run(), add_evidence(), add_interview(), add_sop_review(), add_task(), add_timeline_event() (+36 more)
 
 ### Community 21 - "report.js"
 Cohesion: 0.09
@@ -410,8 +427,8 @@ Cohesion: 0.07
 Nodes (39): add_approval_entry(), add_test_case(), build_traceability_matrix(), create_deviation(), create_protocol(), create_qualification(), create_version_snapshot(), delete_protocol() (+31 more)
 
 ### Community 23 - "qms_deviations.py"
-Cohesion: 0.08
-Nodes (56): accept_investigation_kb_suggestion(), add_impact(), add_investigation_sop_review(), add_investigation_timeline_event(), _build_dynamic_workflow_key(), create_deviation(), decide_workflow_step(), delete_deviation() (+48 more)
+Cohesion: 0.13
+Nodes (38): add_impact(), assign_workflow_step(), create_deviation(), decide_workflow_step(), delete_deviation(), _dual_write_create(), _dual_write_delete(), _dual_write_update() (+30 more)
 
 ### Community 24 - "review_rules.py"
 Cohesion: 0.10
@@ -434,12 +451,12 @@ Cohesion: 0.06
 Nodes (34): create_capa(), delete_capa(), escalate_action(), get_action(), get_actions(), get_all_capas(), get_capa(), get_dashboard_stats() (+26 more)
 
 ### Community 29 - "review_engine.py"
-Cohesion: 0.12
-Nodes (19): pharmagpt/review — Validation Review Engine (PharmaGPT v0.9.5).  Public API -, _build_approval_recommendation(), _build_recommendations(), _build_reviewer_comments(), _content_key(), _deduct(), get_avg_score(), get_score_cache() (+11 more)
+Cohesion: 0.10
+Nodes (24): pharmagpt/review — Validation Review Engine (PharmaGPT v0.9.5).  Public API -, _build_approval_recommendation(), _build_recommendations(), _build_reviewer_comments(), _content_key(), _deduct(), get_avg_score(), get_score_cache() (+16 more)
 
-### Community 30 - "test_deviation_workflow_builder.py"
-Cohesion: 0.14
-Nodes (31): _configure_all_step_approvers(), _create_deviation(), _get_builder(), _put_builder(), tests/test_deviation_workflow_builder.py — Deviation UI & Workflow Refactor: the, Even if the client tries to rename/unflag the last row, the server     forces it, Submitting a fully-configured workflow must assign every named-approval     step, QA Review/Final Approval's step_order shifts with however many Review     steps (+23 more)
+### Community 30 - "validation.py"
+Cohesion: 0.09
+Nodes (31): EquipmentProfile, format_profile_for_prompt(), get_equipment_profile(), pharmagpt/equipment/__init__.py — Equipment Intelligence Engine for PharmaGPT v0, Complete GMP validation intelligence for a single equipment type., Return the best-matching EquipmentProfile for the given equipment name string., Render an EquipmentProfile as a structured text block to be injected into     t, delete_generated_doc() (+23 more)
 
 ### Community 31 - "test_urs_generation_job.py"
 Cohesion: 0.13
@@ -450,19 +467,19 @@ Cohesion: 0.10
 Nodes (25): initQMSChangeControl(), QMS_CC_NARRATIVES, QMS_CC_TABS, qmsCCAcceptImpactSuggestion(), qmsCCAcceptPlanSuggestions(), qmsCCAddAction(), qmsCCAddImpact(), qmsCCApplyFilters() (+17 more)
 
 ### Community 33 - "qms_deviations.js"
-Cohesion: 0.08
-Nodes (37): initQMSDeviations(), QMS_DEV_LIFECYCLE_PHASES, QMS_DEV_STEP_BUTTON_LABELS, qmsDevAcceptImpactSuggestion(), qmsDevAddImpact(), qmsDevApplyFilters(), qmsDevApproversBadge(), qmsDevBuilderAddStep() (+29 more)
+Cohesion: 0.11
+Nodes (27): initQMSDeviations(), QMS_DEV_LIFECYCLE_PHASES, QMS_DEV_STEP_BUTTON_LABELS, qmsDevAcceptImpactSuggestion(), qmsDevAddImpact(), qmsDevApplyFilters(), qmsDevApproversBadge(), qmsDevAssignApprover() (+19 more)
 
-### Community 34 - "_dev_reach_qa_approval"
-Cohesion: 0.18
-Nodes (12): Complete context package returned by retrieve_context().      Attributes, RetrievalResult, _dev_configure_all_approvers(), _dev_reach_qa_approval(), Fill in every named-approval step's approver via the Workflow Builder     (the o, Drive a deviation from Draft through the Initiator Manager Review ->     QA Mana, test_deviation_investigation_ai_assistant_and_report(), test_deviation_investigation_knowledge_base() (+4 more)
+### Community 34 - "get_authenticated_client"
+Cohesion: 0.07
+Nodes (37): create_equipment(), delete_equipment(), link_kb_document(), _payload(), pharmagpt/db/equipment_repo.py — Postgres CRUD for the `equipment` and `equipme, Insert one row into Postgres `equipment`. Returns the inserted row., Update the mutable fields of one Postgres `equipment` row., Delete one Postgres `equipment` row. Raises if Postgres RESTRICTs the     delet (+29 more)
 
 ### Community 35 - "urs_database.py"
 Cohesion: 0.07
 Nodes (33): add_approval_entry(), add_requirement(), append_requirements(), create_urs(), create_version_snapshot(), delete_requirement(), delete_urs(), finish_generation() (+25 more)
 
 ### Community 36 - "EngineOpenError"
-Cohesion: 0.15
+Cohesion: 0.14
 Nodes (12): EngineOpenError, PageExtractionError, Exception, Raised when an engine cannot open a file at all (corrupted, encrypted,     unsup, Raised by an engine when a single page cannot be read. The pipeline     catches, OCRPlaceholderEngine, PdfplumberEngine, Any (+4 more)
 
 ### Community 37 - "equipment.js"
@@ -475,19 +492,19 @@ Nodes (27): find_or_create_company(), Idempotent lookup by legal_name. If more t
 
 ### Community 39 - "projects.py"
 Cohesion: 0.15
-Nodes (21): clear_conversation(), create_project(), delete_project(), _dual_write_create(), _dual_write_delete(), _dual_write_update(), get_project(), _link_equipment_to_new_project() (+13 more)
+Nodes (22): _dual_write_create(), clear_conversation(), create_project(), delete_project(), _dual_write_create(), _dual_write_delete(), _dual_write_update(), get_project() (+14 more)
 
 ### Community 40 - "test_investigation_engine.py"
-Cohesion: 0.08
-Nodes (39): build_assistant_prompt(), build_report_prompt(), _context_lines(), _evidence_lines(), _list_lines(), prompts/investigation_prompt.py — AI prompt builders for the Investigation Engin, Itemized rendering of _evidence_summary() (services/investigation_engine.py) —, add_investigation_evidence() (+31 more)
+Cohesion: 0.10
+Nodes (29): add_investigation_interview(), get_investigation_ai_history(), add_evidence(), add_interview(), get_ai_history(), Interactive, ad-hoc AI analysis — callable any number of times, never     gates, run_ai_assistant(), update_evidence() (+21 more)
 
 ### Community 41 - "test_risk_generate_endpoint.py"
 Cohesion: 0.11
 Nodes (26): _as(), client(), _create_assessment(), _FakeChunk, fixture, tests/test_risk_generate_endpoint.py — Regression coverage for the POST /risk/as, generate_items() starts the SSE response (200, text/event-stream)     before eve, The condition that used to slip through useTemplate()'s missing     res.ok check (+18 more)
 
 ### Community 42 - "test_pdf_engines.py"
-Cohesion: 0.11
-Nodes (14): DocxEngine, ExcelEngine, Any, TxtEngine, parametrize, tests/test_pdf_engines.py — Unit tests for each extraction engine adapter in iso, test_corrupted_pdf_raises_engine_open_error(), test_docx_engine_single_unit_loop() (+6 more)
+Cohesion: 0.12
+Nodes (13): DocxEngine, ExcelEngine, Any, TxtEngine, parametrize, tests/test_pdf_engines.py — Unit tests for each extraction engine adapter in iso, test_corrupted_pdf_raises_engine_open_error(), test_docx_engine_single_unit_loop() (+5 more)
 
 ### Community 44 - "equipment_database.py"
 Cohesion: 0.07
@@ -498,12 +515,12 @@ Cohesion: 0.14
 Nodes (32): add_impact(), assign_workflow_step(), create_change_control(), decide_workflow_step(), delete_change_control(), _dual_write_create(), _dual_write_delete(), _dual_write_update() (+24 more)
 
 ### Community 46 - "qms_documents.py"
-Cohesion: 0.15
-Nodes (31): acknowledge_distribution(), add_distribution(), add_training(), assign_workflow_step(), create_document(), create_version(), decide_workflow_step(), delete_document() (+23 more)
+Cohesion: 0.17
+Nodes (29): acknowledge_distribution(), add_distribution(), add_training(), assign_workflow_step(), create_document(), create_version(), decide_workflow_step(), delete_document() (+21 more)
 
 ### Community 47 - "ExtractionEngine"
-Cohesion: 0.11
-Nodes (17): ExtractionEngine, ABC, Any, services/extraction/base.py — The ExtractionEngine interface (Strategy pattern)., A single extraction backend for one document handle.      Lifecycle, driven enti, Open the document and return an engine-specific handle.          Raises, Return the number of units the pipeline should loop over when calling         ex, Return the page count to show to users / store in stats. Defaults to         pag (+9 more)
+Cohesion: 0.13
+Nodes (15): ExtractionEngine, ABC, Any, services/extraction/base.py — The ExtractionEngine interface (Strategy pattern)., A single extraction backend for one document handle.      Lifecycle, driven enti, Open the document and return an engine-specific handle.          Raises, Return the number of units the pipeline should loop over when calling         ex, Return the page count to show to users / store in stats. Defaults to         pag (+7 more)
 
 ### Community 48 - "qms_capa.js"
 Cohesion: 0.13
@@ -526,8 +543,8 @@ Cohesion: 0.13
 Nodes (19): _batch_sections(), _check_finish_reason(), _extract_partial_requirements(), _generate_batch(), GenerationBlockedError, _parse_ai_requirements(), Exception, services/urs_generation_job.py — Background execution of URS AI requirement gene (+11 more)
 
 ### Community 53 - "knowledge_base.py"
-Cohesion: 0.08
-Nodes (36): archive_document(), create_kb_document(), find_or_create_category(), find_or_create_tag(), _parse_tags(), pharmagpt/db/kb_repo.py — Postgres CRUD for Knowledge Base documents.  Phase 3, Update the extracted_text of a KB document's (only) version row. Not     called, Mark a Postgres-mirrored KB document 'archived' — the dual-write     counterpar (+28 more)
+Cohesion: 0.11
+Nodes (24): archive_document(), Mark a Postgres-mirrored KB document 'archived' — the dual-write     counterpar, _dual_write_create(), _dual_write_delete(), kb_delete_document(), kb_download_document(), kb_extraction_status(), kb_folder_counts() (+16 more)
 
 ### Community 54 - "qms_document_database.py"
 Cohesion: 0.09
@@ -542,8 +559,8 @@ Cohesion: 0.09
 Nodes (26): add_approval_entry(), add_library_entry(), create_assessment(), delete_assessment(), get_actions(), get_all_assessments(), get_approval_trail(), get_assessment() (+18 more)
 
 ### Community 57 - "equipment.py"
-Cohesion: 0.09
-Nodes (34): create_equipment(), delete_equipment(), link_kb_document(), _payload(), pharmagpt/db/equipment_repo.py — Postgres CRUD for the `equipment` and `equipme, Insert one row into Postgres `equipment`. Returns the inserted row., Update the mutable fields of one Postgres `equipment` row., Delete one Postgres `equipment` row. Raises if Postgres RESTRICTs the     delet (+26 more)
+Cohesion: 0.11
+Nodes (28): unlink(), create_equipment(), delete_equipment(), _dual_write_delete(), _dual_write_link(), _dual_write_unlink(), _dual_write_update(), equipment_ai_context() (+20 more)
 
 ### Community 58 - "qms_change_control_database.py"
 Cohesion: 0.10
@@ -574,12 +591,12 @@ Cohesion: 0.18
 Nodes (18): initQMSDashboard(), qmsAddComment(), qmsBadge(), qmsBadgeClass(), qmsDeleteAttachment(), qmsFetch(), _qmsGroupState, qmsLoadMeta() (+10 more)
 
 ### Community 65 - "test_pipeline.py"
-Cohesion: 0.19
-Nodes (16): extract_document(), Extract every page of a document, never raising — corrupted, encrypted,     empt, quality_score(), Percentage of pages successfully extracted, rounded to 1 decimal.      Example:, FakeEngine, tests/test_pipeline.py — Unit tests for the page-by-page pipeline (services/extr, A configurable in-memory engine for pipeline testing.      `fail_pages`   : page, test_all_pages_succeed_on_primary_engine() (+8 more)
+Cohesion: 0.13
+Nodes (22): extract_document(), _extract_page_with_fallback(), services/extraction/pipeline.py — Page-by-page extraction loop.  This is where r, Extract every page of a document, never raising — corrupted, encrypted,     empt, Run fn(*args) with a hard wall-clock timeout, using a fresh daemon thread     pe, Try to extract one page, starting with the primary engine and falling     back t, _run_with_timeout(), quality_score() (+14 more)
 
-### Community 66 - "Flask"
-Cohesion: 0.06
-Nodes (42): Flask, pharmagpt/auth/decorators.py — Flask route protection built on pharmagpt.auth.co, routes/chat.py — SSE streaming chat endpoint.  Route ----- POST /stream   stream, delete_document(), _doc_scoped(), document_extraction_status(), download_document(), list_documents() (+34 more)
+### Community 66 - "document_processor.py"
+Cohesion: 0.11
+Nodes (29): Kind, delete_document(), _doc_scoped(), document_extraction_status(), download_document(), list_documents(), project_insights(), route (+21 more)
 
 ### Community 67 - "projects.js"
 Cohesion: 0.13
@@ -589,17 +606,17 @@ Nodes (18): activeBannerEl, activeProjMetaEl, activeProjNameEl, confirmDeletePro
 Cohesion: 0.16
 Nodes (20): _as(), client(), fixture, tests/test_phase_f_compliance.py — Regression coverage for the Phase F complianc, Linkage stays optional — this is the pre-existing, legitimate     standalone-rep, Control case: proves the block above is role-specific, not a general failure., test_closed_capa_cannot_be_edited(), test_equipment_create_writes_audit_entry_with_company_and_diff() (+12 more)
 
-### Community 69 - "EquipmentProfile"
-Cohesion: 0.07
-Nodes (32): EquipmentProfile, format_profile_for_prompt(), get_equipment_profile(), pharmagpt/equipment/__init__.py — Equipment Intelligence Engine for PharmaGPT v0, Complete GMP validation intelligence for a single equipment type., Add a profile to the registry under its canonical name (upper-cased)., Return the best-matching EquipmentProfile for the given equipment name string., Render an EquipmentProfile as a structured text block to be injected into     t (+24 more)
+### Community 69 - "_register"
+Cohesion: 0.13
+Nodes (12): Add a profile to the registry under its canonical name (upper-cased)., _register(), Analytical instruments: HPLC, GC, UV Spectrophotometer., _autoload(), pharmagpt/equipment/profiles/__init__.py  Imports every profile module so their, No-op — importing this package is sufficient to trigger all registrations., Manufacturing equipment: Tablet Compression Machine, Capsule Filling Machine., Packaging equipment: Blister Packing, Bottle Filling, Cartoner, Labeler. (+4 more)
 
 ### Community 70 - "qms_deviation_database.py"
-Cohesion: 0.09
-Nodes (28): generate_deviation_number(), add_impact(), create_deviation(), delete_deviation(), get_all_deviations(), get_capa_phase_approvers(), get_dashboard_stats(), get_deviation() (+20 more)
+Cohesion: 0.11
+Nodes (20): generate_deviation_number(), add_impact(), create_deviation(), delete_deviation(), get_all_deviations(), get_dashboard_stats(), get_deviation(), get_impacts() (+12 more)
 
-### Community 71 - "investigation_engine.py"
-Cohesion: 0.12
-Nodes (25): add_investigation_task(), get_investigation_summary(), save_investigation_summary(), update_investigation_task(), add_task(), finalize_summary(), get_summary(), get_task_scoped() (+17 more)
+### Community 71 - "get_dashboard"
+Cohesion: 0.13
+Nodes (20): add_investigation_task(), get_investigation_dashboard(), list_investigation_tasks(), update_investigation_task(), add_task(), get_dashboard(), get_task_scoped(), get_tasks() (+12 more)
 
 ### Community 72 - "dashboard.js"
 Cohesion: 0.21
@@ -649,9 +666,9 @@ Nodes (8): _FakeCandidate, _FakeClient, _FakeModels, _FakeResponse, _FakeUsage, 
 Cohesion: 0.18
 Nodes (14): errorhandler, handle_404(), handle_405(), handle_500(), health(), index(), route, app.py — Flask application factory for PharmaGPT.  Responsibilities --------- (+6 more)
 
-### Community 84 - "document_processor.py"
-Cohesion: 0.12
-Nodes (25): Kind, extract_sync(), _finalize(), services/document_processor.py — The single entry point for every uploaded docum, The actual background job body. Runs on services/job_runner.py's     thread pool, Extract text from a document file, choosing the best available engine     chain, _run_extraction_job(), _write_progress() (+17 more)
+### Community 84 - "extract_sync"
+Cohesion: 0.21
+Nodes (15): extract_sync(), Extract text from a document file, choosing the best available engine     chain, slow, tests/test_document_processor.py — Integration tests for services/document_proce, Stress test for the 1000+ page vendor manuals mentioned in the     background re, test_corrupted_pdf_never_raises(), test_empty_pdf(), test_engineering_manual_pdf() (+7 more)
 
 ### Community 85 - "test_projects_dual_write.py"
 Cohesion: 0.21
@@ -673,9 +690,9 @@ Nodes (13): _all_up_migrations(), _effective_policies(), _extract_policy_stateme
 Cohesion: 0.20
 Nodes (12): _create_project(), tests/test_project_workspace.py — PharmaGPT v1.0 Module 3: Project Workspace nav, RBF-001 Fix 2: a status-changing update now emits both the generic     'Project, The 'Project deleted' entry is written (and the qms_audit_trail row     itself i, The polymorphic qms_common endpoints (attachments/comments/approval)     should, routes/workspace.py was deleted (PharmaGPT v1.0 Module 3) — its     /val-project, test_create_project_logs_audit_entry(), test_delete_project_logs_audit_entry_before_removal() (+4 more)
 
-### Community 90 - "test_routes_auth.py"
+### Community 90 - "qms_common.py"
 Cohesion: 0.18
-Nodes (4): app(), client(), fixture, tests/test_routes_auth.py — routes/auth.py (login/logout/me), mocked against th
+Nodes (22): get_extension(), get_mime_type(), Return the lowercased file extension without the leading dot., Return the MIME type for a given extension, defaulting to octet-stream., add_comment(), dashboard(), delete_attachment(), download_attachment() (+14 more)
 
 ### Community 91 - "test_approval_engine.py"
 Cohesion: 0.21
@@ -685,17 +702,17 @@ Nodes (9): services/approval_engine.py — shared, configurable approval-workflo
 Cohesion: 0.06
 Nodes (30): API changes (breaking), Database changes, Files changed, Migration requirements, Regression risks, Tests executed, URS Workflow — Stabilization Iteration 2: Backend Implementation, What each priority actually fixed (+22 more)
 
-### Community 93 - "test_urs_docx_download_auth.py"
-Cohesion: 0.19
-Nodes (12): client(), _login(), fixture, tests/test_urs_docx_download_auth.py — Regression coverage for the DOCX export d, Log in through the real /auth/login route so the session-cookie     fallback is, A request with no Authorization header and no session cookie — a     cold browse, Reproduces the reported bug end-to-end: log in (establishing the     session coo, The session-cookie fallback only applies when a request has *no*     Authorizati (+4 more)
+### Community 93 - "test_app_auth_integration.py"
+Cohesion: 0.08
+Nodes (15): client(), fixture, tests/test_app_auth_integration.py — Phase 2 step 2.5 integration tests.  Exer, client(), _login(), fixture, tests/test_urs_docx_download_auth.py — Regression coverage for the DOCX export d, Log in through the real /auth/login route so the session-cookie     fallback is (+7 more)
 
 ### Community 94 - "test_kb_dual_write.py"
 Cohesion: 0.24
 Nodes (12): authed(), client(), fixture, tests/test_kb_dual_write.py — Phase 3.3 dual-write coverage (docs/PHASE3_EXECUT, Super Admin has no standing access to tenant content (PLATFORM_ARCHITECTURE.md, test_dual_write_create_calls_repo_and_stores_postgres_id(), test_dual_write_create_failure_does_not_break_response(), test_dual_write_delete_archives_instead_of_hard_delete() (+4 more)
 
-### Community 95 - "get_dashboard"
-Cohesion: 0.10
-Nodes (21): add_investigation_interview(), get_investigation_dashboard(), list_investigation_evidence(), list_investigation_interviews(), list_investigation_sop_reviews(), list_investigation_tasks(), add_interview(), get_dashboard() (+13 more)
+### Community 95 - "investigation_engine.py"
+Cohesion: 0.16
+Nodes (22): add_investigation_timeline_event(), run_investigation_ai_report(), add_timeline_event(), _evidence_references(), _evidence_summary(), get_evidence(), get_interviews(), get_root_cause() (+14 more)
 
 ### Community 96 - "audit.py"
 Cohesion: 0.26
@@ -709,17 +726,17 @@ Nodes (10): PW_TABS, pwEsc(), pwField(), pwOpenWorkspace(), pwRenderDqFatSat(), 
 Cohesion: 0.17
 Nodes (7): tests/test_creator_attribution.py — RBF-001 Fix 2 (P0 release blocker): Projects, No matching audit-trail entry exists — created_by must stay '' rather     than b, get_kb_documents() (the list projection, used by GET /kb/documents)     curates, Simulates a pre-Fix-2 row (created before created_by/updated_by/     updated_at, test_kb_document_list_endpoint_includes_creator_fields(), test_legacy_project_backfilled_created_by_from_audit_trail(), test_legacy_project_without_audit_entry_stays_blank_not_fabricated()
 
-### Community 99 - "get_authenticated_client"
-Cohesion: 0.08
-Nodes (41): create_project(), delete_project(), pharmagpt/db/projects_repo.py — Postgres CRUD for the `projects` table.  Phase, Insert one row into Postgres `projects`. Returns the inserted row., Update the mutable fields of one Postgres `projects` row. RLS     (company_id =, Delete one Postgres `projects` row., update_project(), add_audit_entry() (+33 more)
+### Community 99 - "require_role"
+Cohesion: 0.11
+Nodes (36): Reject the request (403) unless `g.tenant.role` is one of     `allowed_roles`., require_role(), _audit_best_effort(), create_company(), _get_role_id(), list_companies(), route, routes/companies.py — Company Administration (Phase 3.5).  Routes ------ GET  /c (+28 more)
 
-### Community 100 - "dashboard.py"
-Cohesion: 0.33
-Nodes (6): dashboard_stats(), dashboard_validation_score(), route, routes/dashboard.py — Home Dashboard statistics endpoints.  Routes ------ GE, Return aggregated statistics for the Home Dashboard, scoped to the caller's comp, Return the average validation score from the in-session review cache.      Res
+### Community 100 - "config.py"
+Cohesion: 0.15
+Nodes (16): route, routes/chat.py — SSE streaming chat endpoint.  Route ----- POST /stream   stream, SSE streaming chat endpoint.      Body:   { "message": "...", "project_id": 3, ", stream(), chunk_text(), services/document_search.py — Relevance search over extracted document text.  Ke, Split text into overlapping word-based chunks.      overlap ensures sentences th, Lowercase, strip punctuation, return a set of tokens longer than 2 chars. (+8 more)
 
 ### Community 101 - "workflow_engine.py"
 Cohesion: 0.09
-Nodes (24): _publish_effective_document_to_kb(), Phase 2: an Effective Document Control record becomes the current     version in, build_workflow_context(), services/workflow_context.py — a single object describing "where a record stands, WorkflowContext, _apply_document_status(), _apply_gate_status(), assign_approvers() (+16 more)
+Nodes (26): _publish_effective_document_to_kb(), Phase 2: an Effective Document Control record becomes the current     version in, build_workflow_context(), services/workflow_context.py — a single object describing "where a record stands, WorkflowContext, _apply_document_status(), _apply_gate_status(), assign_approvers() (+18 more)
 
 ### Community 102 - "validation_dashboard.js"
 Cohesion: 0.44
@@ -733,9 +750,9 @@ Nodes (8): _make_equipment(), tests/test_equipment_links.py — Regression cover
 Cohesion: 0.31
 Nodes (9): client(), _get_shell(), fixture, tests/test_login_ui.py — IMPLEMENTATION_ROADMAP.md Phase 2 step 2.6.  The proj, test_auth_js_loads_before_business_logic_scripts(), test_login_view_hidden_by_default_in_markup(), test_login_view_markup_present(), test_session_check_view_present() (+1 more)
 
-### Community 105 - "Database Schema"
-Cohesion: 0.29
-Nodes (7): Database Schema, `document_text`, `documents`, `generated_documents`, `kb_documents`, `messages`, `projects`
+### Community 105 - "investigation_prompt.py"
+Cohesion: 0.39
+Nodes (8): build_assistant_prompt(), build_report_prompt(), _context_lines(), _evidence_lines(), _list_lines(), prompts/investigation_prompt.py — AI prompt builders for the Investigation Engin, Itemized rendering of _evidence_summary() (services/investigation_engine.py) —, test_never_invent_rules_and_refusal_statement_are_in_both_prompts()
 
 ### Community 106 - "test_module_permissions.py"
 Cohesion: 0.18
@@ -798,8 +815,8 @@ Cohesion: 0.40
 Nodes (5): get_backend_name(), is_postgres_backend(), backend.py — reads which database backend is active for the current process., Return the configured backend name: "sqlite" (default) or "postgres"., True once DATABASE_BACKEND=postgres — always False until a later phase     sets
 
 ### Community 121 - "call_gemini"
-Cohesion: 0.10
-Nodes (30): build_draft_prompt(), build_effectiveness_prompt(), build_trend_prompt(), _capa_context(), prompts/qms_capa_prompt.py — AI prompt builders for the CAPA module.  Three AI f, build_capa_suggestion_prompt(), build_impact_prompt(), build_investigation_prompt() (+22 more)
+Cohesion: 0.09
+Nodes (32): build_draft_prompt(), build_effectiveness_prompt(), build_trend_prompt(), _capa_context(), prompts/qms_capa_prompt.py — AI prompt builders for the CAPA module.  Three AI f, build_capa_suggestion_prompt(), build_impact_prompt(), build_investigation_prompt() (+24 more)
 
 ### Community 122 - "Changelog"
 Cohesion: 0.07
@@ -814,8 +831,8 @@ Cohesion: 0.53
 Nodes (4): closeResults(), esc(), renderResults(), runSearch()
 
 ### Community 125 - "Architecture — PharmaGPT"
-Cohesion: 0.07
-Nodes (26): 10. Planned Architecture Changes (v0.8+), 1. High-Level Overview, 2. Directory Structure, 3.1 Flask Application (`app.py`), 3.2 Database Layer (`database.py`), 3.3 SSE Streaming, 3.4 RAG Pipeline (`document_search.py`), 3.5 Validation Document Generator (`doc_generator.py`) (+18 more)
+Cohesion: 0.14
+Nodes (14): 10. Planned Architecture Changes (v0.8+), 1. High-Level Overview, 2. Directory Structure, 5.1 Tables, 5.2 Foreign Key Cascades, 5. Database Schema, 6.1 Conventions, 6.2 SSE Event Format (+6 more)
 
 ### Community 126 - "hello.py"
 Cohesion: 0.40
@@ -858,20 +875,20 @@ Cohesion: 0.08
 Nodes (24): [0.1.0] — CLI Foundation — 2026-01-15, [0.2.0] — Web App + Streaming Chat — 2026-02-01, [0.3.0] — Project Management — 2026-02-20, [0.4.0] — Document Upload — 2026-03-10, [0.5.0] — AI Document Intelligence — 2026-04-01, [0.6.0] — Validation Document Generator — 2026-05-15, [0.7.0] — Knowledge Base — 2026-06-27, Added (+16 more)
 
 ### Community 143 - "test_workflow_inbox.py"
-Cohesion: 0.10
-Nodes (20): _assigned_to(), _days_pending(), _enrich(), get_inbox(), get_inbox_stats(), route, routes/workflow_inbox.py — Universal Workflow Inbox: every pending Workflow Engi, describe() (+12 more)
+Cohesion: 0.11
+Nodes (16): _assigned_to(), _days_pending(), _enrich(), get_inbox(), get_inbox_stats(), route, routes/workflow_inbox.py — Universal Workflow Inbox: every pending Workflow Engi, describe() (+8 more)
 
 ### Community 144 - "PharmaGPT Database Architecture v1.0"
-Cohesion: 0.08
-Nodes (24): 11. Authentication Model, 12. Authorization Model, 15. Naming Standards, 16. Storage Strategy, 17. Backup Strategy, 18. Disaster Recovery, 1. Database Design Principles, 20. Scalability Strategy (+16 more)
+Cohesion: 0.13
+Nodes (15): 11. Authentication Model, 12. Authorization Model, 15. Naming Standards, 16. Storage Strategy, 17. Backup Strategy, 18. Disaster Recovery, 1. Database Design Principles, 20. Scalability Strategy (+7 more)
 
 ### Community 145 - "RELEASE_NOTES.md — PharmaGPT Release History"
 Cohesion: 0.08
 Nodes (24): [0.1.0] — Foundation, [0.2.0] — PharmaGPT Web App, [0.3.0] — Project Management, [0.4.0] — Document Management, [0.5.0] — AI Document Intelligence (v1), [0.6.0] — 2026-06-27 (b) — part of "Foundation with Projects, Documents and Validation, [0.7.0] — 2026-06-27 (c) — Knowledge Base, [0.8.0] — 2026-06-27 (d) — Validation Workspace & Home Dashboard (+16 more)
 
 ### Community 146 - "PharmaGPT — API Reference"
-Cohesion: 0.07
-Nodes (30): Core, `DELETE /documents/<id>`, `DELETE /generated-docs/<id>`, `DELETE /projects/<id>`, Documents, Equipment (PharmaGPT v1.0 Module 2) — added 2026-07-10, Error Responses, `GET /` (+22 more)
+Cohesion: 0.13
+Nodes (15): Core, `DELETE /documents/<id>`, Documents, Equipment (PharmaGPT v1.0 Module 2) — added 2026-07-10, Error Responses, `GET /`, `GET /documents/<id>/download`, `GET /documents/<id>/view` (+7 more)
 
 ### Community 147 - "PharmaGPT — Architecture Lock Document (ALD-001)"
 Cohesion: 0.09
@@ -886,8 +903,8 @@ Cohesion: 0.09
 Nodes (22): 0. Environment Setup (do this first), 1. Critical Pre-Demo Blockers, 2. Module-by-Module: Process Flow + Test Script, 3. Cross-Cutting Non-Functional Checks, 4. Suggested Demo Order, 5. Sign-Off Checklist, A. 🟢 Home Dashboard, B. 🟢 AI Chat Assistant (+14 more)
 
 ### Community 150 - "PharmaGPT — Development Status (v0.7)"
-Cohesion: 0.09
-Nodes (22): API Routes, Core, Current Architecture, Documents, Environment Setup, Features Completed, Folder Structure, Future (+14 more)
+Cohesion: 0.12
+Nodes (16): Current Architecture, Database Schema, `document_text`, `documents`, Environment Setup, Folder Structure, Future, `generated_documents` (+8 more)
 
 ### Community 151 - "**52%**"
 Cohesion: 0.10
@@ -906,8 +923,8 @@ Cohesion: 0.11
 Nodes (19): 10. Deployment Strategy, 11. Release Strategy, 12.1 Technical risks, 12.2 Business risks, 12.3 Migration-specific risks, 12. Risk Register, 13. Development Order, 14. Final Checklist (+11 more)
 
 ### Community 155 - "Product Requirements Document — PharmaGPT"
-Cohesion: 0.11
-Nodes (18): 1. Executive Summary, 2. Goals & Objectives, 3.1 Primary: Validation Engineer, 3.2 Secondary: QA/QC Manager, 3.3 Tertiary: Regulatory Affairs Specialist, 3. Users & Personas, 4.1 AI Consultation (Chat), 4.2 Project Management (+10 more)
+Cohesion: 0.18
+Nodes (11): 1. Executive Summary, 2. Goals & Objectives, 3.1 Primary: Validation Engineer, 3.2 Secondary: QA/QC Manager, 3.3 Tertiary: Regulatory Affairs Specialist, 3. Users & Personas, 5. Non-Functional Requirements, 6. Out of Scope (Current Version) (+3 more)
 
 ### Community 156 - "PharmaGPT — Architecture Baseline v1.0"
 Cohesion: 0.11
@@ -917,9 +934,9 @@ Nodes (17): 1.1 Workflow Engine (`services/workflow_engine.py` + `qms_workflow_d
 Cohesion: 0.11
 Nodes (19): CRUD Reference, `document_text`, `documents`, Documents, Equipment (PharmaGPT v1.0 Module 2) — added 2026-07-10, `generated_documents`, Generated Documents, `messages` (+11 more)
 
-### Community 158 - "README.md"
-Cohesion: 0.18
-Nodes (6): 1. First-time setup, 2. What `render.yaml` already handles, 3. Deployment checklist, 4. Local dev vs production, Deployment Guide — Render, Phase 3 Feature Flag Ledger
+### Community 158 - "Deployment Guide — Render"
+Cohesion: 0.17
+Nodes (10): Already production-ready, Deployment Checklist, Executive Summary, Needs attention before onboarding 10–50 SaaS customers, PharmaGPT — Deployment / Production-Readiness Review, 1. First-time setup, 2. What `render.yaml` already handles, 3. Deployment checklist (+2 more)
 
 ### Community 159 - "PharmaGPT Architecture Review"
 Cohesion: 0.12
@@ -930,8 +947,8 @@ Cohesion: 0.12
 Nodes (16): 3.1 — Pre-flight state check (optional but recommended), 3.2 — Run `migrations/0010_break_glass_rls_up.sql`, 3.3 — Run `migrations/0011_companies_admin_rls_up.sql`, 3.4 — Run `migrations/0012_users_company_admin_rls_up.sql`, 3.5 — Post-migration verification, 3.6 — Confirm migration 0009's grants (not previously independently verified live), Deployment Runbook — Company Administration Production Enablement, Phase F.2 (+8 more)
 
 ### Community 161 - "Findings by Category"
-Cohesion: 0.12
-Nodes (15): 1. `render.yaml`, 2. `Procfile` vs `pharmagpt/config.py` timeout settings, 3. `requirements.txt` / `requirements-dev.txt`, 4. `.env` variable names vs `pharmagpt/config.py` / runtime usage, 5. Health check endpoint, 6. Static file serving, 7. File storage — `uploads/` and `generated_documents/` (ephemeral vs persistent), 8. Dockerfile (+7 more)
+Cohesion: 0.20
+Nodes (10): 1. `render.yaml`, 2. `Procfile` vs `pharmagpt/config.py` timeout settings, 3. `requirements.txt` / `requirements-dev.txt`, 4. `.env` variable names vs `pharmagpt/config.py` / runtime usage, 5. Health check endpoint, 6. Static file serving, 7. File storage — `uploads/` and `generated_documents/` (ephemeral vs persistent), 8. Dockerfile (+2 more)
 
 ### Community 162 - "Phase 2 Completion Report — Authentication (Supabase Auth)"
 Cohesion: 0.13
@@ -1081,9 +1098,9 @@ Nodes (8): 1. IQ → OQ → PQ sequencing (closes C2), 2. Validation Report cann
 Cohesion: 0.42
 Nodes (8): renderWorkflowPanel(), wfPanelActionHTML(), wfPanelApproversBadge(), wfPanelAssign(), wfPanelDecide(), wfPanelDelegate(), wfPanelStart(), wfPanelStepHTML()
 
-### Community 199 - "fixtures_dir"
-Cohesion: 0.22
-Nodes (9): client(), db_path(), fixtures_dir(), fixture, Build every standard PDF fixture once per test session.      Returns {filename, Point pharmagpt.database at a throwaway SQLite file for this test and     initi, Flask test client wired to the db_path fixture's throwaway database.     pharma, build_all() (+1 more)
+### Community 199 - "conftest.py"
+Cohesion: 0.18
+Nodes (12): before_request, client(), db_path(), _fill_in_fake_tenant_for_auth_bypassed_tests(), fixtures_dir(), fixture, tests/conftest.py — Shared pytest fixtures.  `fixtures_dir` builds the standar, Build every standard PDF fixture once per test session.      Returns {filename (+4 more)
 
 ### Community 201 - "Audit Trail Coverage Report — Phase F, Work Package 2"
 Cohesion: 0.25
@@ -1113,9 +1130,13 @@ Nodes (7): break_glass_access, chk_users_super_admin_company_null(), companies, 
 Cohesion: 0.25
 Nodes (8): Config-Driven Wizard, Document Text Extraction, DOCX Export, History Cache, Important Implementation Details, Keyword Search (v0.5 RAG), PDF Export, SSE Streaming
 
-### Community 208 - "_app_context"
-Cohesion: 0.67
-Nodes (3): _app_context(), fixture, workflow_engine calls audit.log(), which reads flask.g — needs an     applicatio
+### Community 208 - "Features Completed"
+Cohesion: 0.25
+Nodes (8): Features Completed, v0.1 — Foundation, v0.2 — PharmaGPT Web App, v0.3 — Project Management, v0.4 — Document Management, v0.5 — AI Document Intelligence, v0.6 — Validation Document Generator, v0.7 — Knowledge Base ✅ CURRENT
+
+### Community 209 - "report_service.py"
+Cohesion: 0.15
+Nodes (13): aggregate_report_context(), build_docx_markdown(), build_full_generation_prompt(), build_review_prompt(), build_section_prompt(), build_traceability_summary(), report_service.py — Business logic and AI prompts for the Validation Report Mana, Build an AI prompt for a specific report section. (+5 more)
 
 ### Community 210 - "1. Security Issues"
 Cohesion: 0.29
@@ -1305,17 +1326,41 @@ Nodes (11): library_sections(), library_types(), build_numbered_requirements(), 
 Cohesion: 0.20
 Nodes (9): Company, Departments, Intended testing scenarios, Module permissions, Nutra Demo Tenant, Role mapping (Likely — a documented judgment call), Scope boundary, Users (+1 more)
 
+### Community 294 - "_investigation_lock"
+Cohesion: 0.22
+Nodes (10): accept_investigation_kb_suggestion(), add_investigation_evidence(), add_investigation_sop_review(), _investigation_lock(), save_investigation_root_cause(), add_sop_review(), AI output (possible_cause) is written by run_ai_assistant/callers     separately, save_root_cause() (+2 more)
+
 ### Community 295 - "_FakeAuthAdmin"
 Cohesion: 0.22
 Nodes (3): _FakeAuthAdmin, FakeServiceRoleClient, test_main_returns_0_and_prints_summary_on_success()
+
+### Community 296 - "Projects"
+Cohesion: 0.25
+Nodes (8): `DELETE /projects/<id>`, `GET /projects`, `GET /projects/<id>`, `GET /projects/<id>/messages`, `POST /clear`, `POST /projects`, `POST /stream`, Projects
 
 ### Community 297 - "urs_service.py"
 Cohesion: 0.25
 Nodes (7): build_ai_review_prompt(), build_generation_prompt(), build_urs_markdown(), urs_service.py — Business logic for the URS Management Suite.  Responsibilities, Convert URS data to a professional Markdown document for DOCX export., Build a structured Gemini prompt for AI requirement generation., Build a Gemini prompt for AI review of a complete URS.
 
+### Community 298 - "Validation — Document Generation"
+Cohesion: 0.29
+Nodes (7): `DELETE /generated-docs/<id>`, `GET /generated-docs/<id>`, `GET /projects/<id>/generated-docs`, `POST /validation/export/docx`, `POST /validation/generate`, `POST /validation/save`, Validation — Document Generation
+
+### Community 300 - "3. Backend Architecture"
+Cohesion: 0.29
+Nodes (7): 3.1 Flask Application (`app.py`), 3.2 Database Layer (`database.py`), 3.3 SSE Streaming, 3.4 RAG Pipeline (`document_search.py`), 3.5 Validation Document Generator (`doc_generator.py`), 3.6 DOCX Exporter (`doc_exporter.py`), 3. Backend Architecture
+
+### Community 301 - "4. Functional Requirements"
+Cohesion: 0.29
+Nodes (7): 4.1 AI Consultation (Chat), 4.2 Project Management, 4.3 Document Upload & Management, 4.4 Validation Document Generator, 4.5 Knowledge Base, 4.6 Dashboard, 4. Functional Requirements
+
 ### Community 302 - "0014_nutra_demo_schema_up.sql"
 Cohesion: 0.48
 Nodes (6): departments, modules, user_departments, user_module_permissions, users, workflow_roles
+
+### Community 303 - "finalize_summary"
+Cohesion: 0.33
+Nodes (7): get_investigation_summary(), save_investigation_summary(), finalize_summary(), get_summary(), _now(), test_finalize_summary_records_who_and_when(), test_summary_open_questions_round_trip()
 
 ### Community 305 - "lifecycle_engine.py"
 Cohesion: 0.33
@@ -1325,22 +1370,42 @@ Nodes (4): InvalidTransitionError, Exception, services/lifecycle_engine.py — s
 Cohesion: 0.33
 Nodes (3): _FakeCandidate, _FakeResponse, _FakeUsage
 
+### Community 307 - "4. Frontend Architecture"
+Cohesion: 0.40
+Nodes (5): 4.1 Single-Page Application, 4.2 JavaScript Modules, 4.3 SSE Client, 4.4 Markdown Rendering, 4. Frontend Architecture
+
+### Community 308 - "API Routes"
+Cohesion: 0.40
+Nodes (5): API Routes, Core, Documents, Knowledge Base (v0.7), Validation (v0.6)
+
+### Community 309 - "3. Entity Relationship Overview"
+Cohesion: 0.67
+Nodes (3): 3.1 Platform layer (not tenant-scoped), 3.2 Company-level pillars (every table below carries `company_id`), 3. Entity Relationship Overview
+
+### Community 310 - "6. Equipment Library Relationships"
+Cohesion: 0.67
+Nodes (3): 6.1 The mechanism: two link types, chosen per relationship nature, 6.2 Why this avoids duplication, 6. Equipment Library Relationships
+
+### Community 311 - "7. Knowledge Base Relationships"
+Cohesion: 0.67
+Nodes (3): 7.1 How reuse actually works, 7.2 Platform-seeded templates, 7. Knowledge Base Relationships
+
 ## Knowledge Gaps
-- **1123 isolated node(s):** `documents`, `audit_trail`, `attachments`, `comments`, `notifications` (+1118 more)
+- **1121 isolated node(s):** `documents`, `audit_trail`, `attachments`, `comments`, `notifications` (+1116 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **25 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `require_role()` connect `require_role` to `qual.py`, `Flask`, `get_authenticated_client`, `projects.py`, `risk.py`, `qms_change_control.py`, `qms_documents.py`, `qms_common.py`, `report.py`, `qms_deviations.py`, `knowledge_base.py`, `qms_capa.py`, `equipment.py`, `urs.py`?**
-  _High betweenness centrality (0.020) - this node is a cross-community bridge._
-- **Why does `get_authenticated_client()` connect `get_authenticated_client` to `context.py`, `equipment.py`, `knowledge_base.py`, `require_role`?**
-  _High betweenness centrality (0.016) - this node is a cross-community bridge._
-- **Why does `markdown_to_docx()` connect `qual.py` to `Flask`, `DocxGenerator`, `risk.py`, `qms_change_control.py`, `qms_documents.py`, `report.py`, `qms_capa.py`, `qms_deviations.py`, `urs.py`, `review_engine.py`?**
-  _High betweenness centrality (0.013) - this node is a cross-community bridge._
+- **Why does `require_role()` connect `require_role` to `qual.py`, `document_processor.py`, `extract_bearer_token`, `Flask`, `projects.py`, `risk.py`, `qms_change_control.py`, `qms_documents.py`, `report.py`, `qms_deviations.py`, `knowledge_base.py`, `validation.py`, `qms_capa.py`, `equipment.py`, `qms_common.py`, `urs.py`?**
+  _High betweenness centrality (0.030) - this node is a cross-community bridge._
+- **Why does `IdentityProvisioningError` connect `require_role` to `seed_nutra_demo.py`, `test_companies.py`?**
+  _High betweenness centrality (0.022) - this node is a cross-community bridge._
+- **Why does `get_authenticated_client()` connect `get_authenticated_client` to `require_role`, `extract_bearer_token`, `Flask`, `knowledge_base.py`, `equipment.py`?**
+  _High betweenness centrality (0.015) - this node is a cross-community bridge._
 - **What connects `documents`, `audit_trail`, `attachments` to the rest of the system?**
-  _1123 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _1121 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `database.py` be split into smaller, more focused modules?**
   _Cohesion score 0.022694696607740088 - nodes in this community are weakly interconnected._
 - **Should `qual.py` be split into smaller, more focused modules?**
