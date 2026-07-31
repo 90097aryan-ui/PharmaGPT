@@ -570,6 +570,7 @@ async function qmsDevRenderLifecycleTab(dev) {
   }
 
   if (!wf.instance) {
+    qmsDevBuilderSaving = false;
     try {
       qmsDevBuilderSteps = await qmsFetch(`/qms/deviations/${id}/workflow-builder`);
     } catch (e) {
@@ -629,9 +630,19 @@ window.qmsDevRenderLifecycleTab = qmsDevRenderLifecycleTab;
 // — see routes/qms_deviations.py::replace_workflow_steps for the
 // server-side enforcement this UI mirrors.
 
+// True while a workflow-builder PUT is in flight. Every mutating action
+// below checks this before touching qmsDevBuilderSteps/the DOM, and the
+// render function disables every builder control while it's true — without
+// this, two mutations fired before the first one's response/re-render
+// lands (e.g. a fast double-click) would both call qmsDevBuilderSyncFromDOM()
+// against the same stale, not-yet-re-rendered DOM, and whichever PUT's
+// response arrived last would silently clobber the other's change.
+let qmsDevBuilderSaving = false;
+
 function qmsDevRenderWorkflowBuilder(id) {
   const el = document.getElementById("qms-dev-tab-body");
   const lastIdx = qmsDevBuilderSteps.length - 1;
+  const busy = qmsDevBuilderSaving ? "disabled" : "";
   el.innerHTML = `
     <div class="qms-section-card">
       <h3>Workflow Builder</h3>
@@ -641,36 +652,36 @@ function qmsDevRenderWorkflowBuilder(id) {
         the final step; the Investigation Case stays locked until it clears.
       </p>
       <div id="qms-wfb-steps">
-        ${qmsDevBuilderSteps.map((s, i) => qmsDevBuilderStepHTML(s, i, i === lastIdx)).join("")}
+        ${qmsDevBuilderSteps.map((s, i) => qmsDevBuilderStepHTML(s, i, i === lastIdx, busy)).join("")}
       </div>
       <div class="qms-form-actions" style="margin-top:10px">
-        <button class="btn-secondary" onclick="qmsDevBuilderAddStep(${id})">+ Add Step</button>
+        <button class="btn-secondary" onclick="qmsDevBuilderAddStep(${id})" ${busy}>+ Add Step</button>
       </div>
       <div class="qms-form-actions">
-        <button class="btn-secondary" onclick="qmsDevBuilderSave(${id})">Save Workflow</button>
-        <button class="btn-primary" onclick="qmsDevSubmitForReview(${id})">Submit for Review</button>
+        <button class="btn-secondary" onclick="qmsDevBuilderSave(${id})" ${busy}>Save Workflow</button>
+        <button class="btn-primary" onclick="qmsDevSubmitForReview(${id})" ${busy}>Submit for Review</button>
       </div>
     </div>
   `;
 }
 window.qmsDevRenderWorkflowBuilder = qmsDevRenderWorkflowBuilder;
 
-function qmsDevBuilderStepHTML(step, i, isFinal) {
+function qmsDevBuilderStepHTML(step, i, isFinal, busy) {
   return `
     <div class="qms-stat-card ${isFinal ? "info" : ""}" style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
         <strong>${i + 2}. ${isFinal ? "QA Approval (mandatory, final)" : `Review Step ${i + 2}`}</strong>
         <div>
-          <button class="btn-secondary" style="padding:3px 8px;font-size:11px" onclick="qmsDevBuilderMoveStep(${i}, -1)" ${isFinal || i === 0 ? "disabled" : ""}>&uarr;</button>
-          <button class="btn-secondary" style="padding:3px 8px;font-size:11px" onclick="qmsDevBuilderMoveStep(${i}, 1)" ${isFinal || i >= qmsDevBuilderSteps.length - 2 ? "disabled" : ""}>&darr;</button>
-          <button class="btn-secondary" style="padding:3px 8px;font-size:11px" onclick="qmsDevBuilderRemoveStep(${i})" ${isFinal ? "disabled" : ""}>Remove</button>
+          <button class="btn-secondary" style="padding:3px 8px;font-size:11px" onclick="qmsDevBuilderMoveStep(${i}, -1)" ${isFinal || i === 0 ? "disabled" : busy}>&uarr;</button>
+          <button class="btn-secondary" style="padding:3px 8px;font-size:11px" onclick="qmsDevBuilderMoveStep(${i}, 1)" ${isFinal || i >= qmsDevBuilderSteps.length - 2 ? "disabled" : busy}>&darr;</button>
+          <button class="btn-secondary" style="padding:3px 8px;font-size:11px" onclick="qmsDevBuilderRemoveStep(${i})" ${isFinal ? "disabled" : busy}>Remove</button>
         </div>
       </div>
       <div class="form-grid">
-        <div class="form-field"><label>Step Name</label><input type="text" id="qms-wfb-name-${i}" value="${step.step_name || ""}" ${isFinal ? "disabled" : ""} /></div>
-        <div class="form-field"><label>Department</label><input type="text" id="qms-wfb-dept-${i}" value="${step.department || ""}" placeholder="e.g. Production, QA, Engineering, Warehouse" /></div>
-        <div class="form-field"><label>Approver User ID</label><input type="text" id="qms-wfb-uid-${i}" value="${step.approver_user_id || ""}" placeholder="Supabase user id" /></div>
-        <div class="form-field"><label>Approver Display Name</label><input type="text" id="qms-wfb-dname-${i}" value="${step.approver_display_name || ""}" placeholder="Full name" /></div>
+        <div class="form-field"><label>Step Name</label><input type="text" id="qms-wfb-name-${i}" value="${step.step_name || ""}" ${isFinal ? "disabled" : busy} /></div>
+        <div class="form-field"><label>Department</label><input type="text" id="qms-wfb-dept-${i}" value="${step.department || ""}" placeholder="e.g. Production, QA, Engineering, Warehouse" ${busy} /></div>
+        <div class="form-field"><label>Approver User ID</label><input type="text" id="qms-wfb-uid-${i}" value="${step.approver_user_id || ""}" placeholder="Supabase user id" ${busy} /></div>
+        <div class="form-field"><label>Approver Display Name</label><input type="text" id="qms-wfb-dname-${i}" value="${step.approver_display_name || ""}" placeholder="Full name" ${busy} /></div>
       </div>
     </div>
   `;
@@ -686,41 +697,60 @@ function qmsDevBuilderSyncFromDOM() {
   }));
 }
 
+// Every structural edit (add/remove/reorder) persists immediately via PUT —
+// not just the explicit "Save Workflow" button — so switching tabs or
+// reloading mid-edit can never silently drop a step. qmsDevBuilderSteps is
+// always replaced with the server's response (canonical step_order/ids),
+// never trusted from the client-side splice/swap alone. Serialized by
+// qmsDevBuilderSaving (see above) so overlapping mutations can't race.
+async function qmsDevBuilderPersist(id, { toast } = {}) {
+  qmsDevBuilderSaving = true;
+  qmsDevRenderWorkflowBuilder(id);
+  try {
+    qmsDevBuilderSteps = await qmsPutJSON(`/qms/deviations/${id}/workflow-builder`, { steps: qmsDevBuilderSteps });
+    if (toast) qmsToast(toast);
+  } catch (e) {
+    qmsToast("Failed to save workflow: " + e.message);
+  } finally {
+    qmsDevBuilderSaving = false;
+    qmsDevRenderWorkflowBuilder(id);
+  }
+}
+
 function qmsDevBuilderAddStep(id) {
+  if (qmsDevBuilderSaving) return;
   qmsDevBuilderSyncFromDOM();
   qmsDevBuilderSteps.splice(qmsDevBuilderSteps.length - 1, 0, {
     step_name: "", department: "", approver_user_id: "", approver_display_name: "",
   });
-  qmsDevRenderWorkflowBuilder(id);
+  qmsDevBuilderPersist(id);
 }
 window.qmsDevBuilderAddStep = qmsDevBuilderAddStep;
 
 function qmsDevBuilderRemoveStep(i) {
+  if (qmsDevBuilderSaving) return;
   qmsDevBuilderSyncFromDOM();
   if (i === qmsDevBuilderSteps.length - 1 || qmsDevBuilderSteps.length <= 1) return;
   qmsDevBuilderSteps.splice(i, 1);
-  qmsDevRenderWorkflowBuilder(qmsDevCurrentId);
+  qmsDevBuilderPersist(qmsDevCurrentId);
 }
 window.qmsDevBuilderRemoveStep = qmsDevBuilderRemoveStep;
 
 function qmsDevBuilderMoveStep(i, dir) {
+  if (qmsDevBuilderSaving) return;
   qmsDevBuilderSyncFromDOM();
   const j = i + dir;
   const lastIdx = qmsDevBuilderSteps.length - 1;
   if (j < 0 || j >= lastIdx || i >= lastIdx) return; // never move the final QA Approval row, never move past it
   [qmsDevBuilderSteps[i], qmsDevBuilderSteps[j]] = [qmsDevBuilderSteps[j], qmsDevBuilderSteps[i]];
-  qmsDevRenderWorkflowBuilder(qmsDevCurrentId);
+  qmsDevBuilderPersist(qmsDevCurrentId);
 }
 window.qmsDevBuilderMoveStep = qmsDevBuilderMoveStep;
 
-async function qmsDevBuilderSave(id) {
+function qmsDevBuilderSave(id) {
+  if (qmsDevBuilderSaving) return;
   qmsDevBuilderSyncFromDOM();
-  try {
-    qmsDevBuilderSteps = await qmsPutJSON(`/qms/deviations/${id}/workflow-builder`, { steps: qmsDevBuilderSteps });
-    qmsToast("Workflow saved");
-  } catch (e) {
-    qmsToast("Failed to save workflow: " + e.message);
-  }
+  return qmsDevBuilderPersist(id, { toast: "Workflow saved" });
 }
 window.qmsDevBuilderSave = qmsDevBuilderSave;
 
@@ -807,6 +837,9 @@ async function qmsDevRefreshCurrentView(id) {
 }
 
 async function qmsDevSubmitForReview(id) {
+  if (qmsDevBuilderSaving) return;
+  qmsDevBuilderSaving = true;
+  qmsDevRenderWorkflowBuilder(id);
   try {
     qmsDevBuilderSyncFromDOM();
     await qmsPutJSON(`/qms/deviations/${id}/workflow-builder`, { steps: qmsDevBuilderSteps });
@@ -815,6 +848,8 @@ async function qmsDevSubmitForReview(id) {
     qmsDevRefreshCurrentView(id);
   } catch (e) {
     qmsToast("Failed to submit: " + e.message);
+    qmsDevBuilderSaving = false;
+    qmsDevRenderWorkflowBuilder(id);
   }
 }
 window.qmsDevSubmitForReview = qmsDevSubmitForReview;

@@ -123,6 +123,52 @@ def test_full_review_chain_still_reaches_qa_approval_and_unlocks_investigation(c
     assert client.get(f"/qms/deviations/{did}").get_json()["investigation_unlocked"] is True
 
 
+def test_get_workflow_builder_reflects_saved_state_on_a_separate_request(client):
+    """GET must reload the persisted rows from qms_deviation_workflow_steps —
+    not regenerate the default seed — even when read back on a request that
+    is entirely separate from the PUT that saved them."""
+    dev = _create_deviation(client)
+    did = dev["id"]
+    steps = client.get(f"/qms/deviations/{did}/workflow-builder").get_json()
+    steps.insert(1, {"step_name": "Engineering Review", "department": "Engineering",
+                      "approver_user_id": "", "approver_display_name": ""})
+    put_result = client.put(f"/qms/deviations/{did}/workflow-builder", json={"steps": steps}).get_json()
+
+    # A fresh GET (simulating a reload / tab switch) must match the PUT
+    # response exactly, not fall back to the 3-step default.
+    reloaded = client.get(f"/qms/deviations/{did}/workflow-builder").get_json()
+    assert [s["step_name"] for s in reloaded] == [s["step_name"] for s in put_result]
+    assert [s["step_name"] for s in reloaded] == ["Production Head", "Engineering Review", "QA Manager", "QA Approval"]
+
+
+def test_submit_compiles_customized_saved_steps_not_the_default_chain(client):
+    """Submit must build the runtime template from whatever is currently
+    saved in qms_deviation_workflow_steps — proving it does not silently
+    fall back to (or recreate) the 3-step default once the initiator has
+    customized the chain."""
+    dev = _create_deviation(client)
+    did = dev["id"]
+    steps = client.get(f"/qms/deviations/{did}/workflow-builder").get_json()
+    # Drop "Production Head", rename "QA Manager", add a new department step —
+    # nothing here matches the default seed's names/count anymore.
+    steps = steps[1:]  # drop Production Head
+    steps[0]["step_name"] = "Quality Lead Review"
+    steps.insert(1, {"step_name": "Engineering Sign-off", "department": "Engineering",
+                      "approver_user_id": "", "approver_display_name": ""})
+    r = client.put(f"/qms/deviations/{did}/workflow-builder", json={"steps": steps})
+    assert r.status_code == 200, r.get_json()
+
+    assert client.post(f"/qms/deviations/{did}/workflow/start").status_code == 201
+
+    wf = client.get(f"/qms/deviations/{did}/workflow").get_json()
+    by_order = {s["step_order"]: s["step_name"] for s in wf["steps"] if s["step_order"] in (2, 3, 4)}
+    assert by_order == {2: "Quality Lead Review", 3: "Engineering Sign-off", 4: "QA Approval"}
+    # The original default names must not appear anywhere in the compiled chain.
+    names = [s["step_name"] for s in wf["steps"]]
+    assert "Production Head" not in names
+    assert "QA Manager" not in names
+
+
 def test_overview_update_still_accepts_qa_reviewer_field_for_backward_compat(client):
     """The UI no longer sends qa_reviewer (Overview no longer shows it —
     reviewer assignment now belongs to the Workflow Builder), but the field
