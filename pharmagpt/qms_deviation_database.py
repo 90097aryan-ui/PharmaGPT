@@ -149,6 +149,69 @@ def set_deviation_postgres_id(deviation_id: int, postgres_id: str) -> None:
     conn.close()
 
 
+# ── Workflow Builder (Deviation UI & Workflow Refactor) ────────────────────
+# Draft-time configuration of the Review chain — see qms_database.py's
+# qms_deviation_workflow_steps docstring. Pure CRUD; the invariant that the
+# last step is always the mandatory QA Approval gate is enforced here
+# (replace_workflow_steps), not left to the caller.
+
+def seed_default_workflow_steps(deviation_id: int) -> list[dict]:
+    """Default Review chain written at deviation creation: Production Head ->
+    QA Manager -> QA Approval (mandatory, final). step_order starts at 2 —
+    order 1 is always the implicit 'submitted' activity step added when the
+    dynamic template is built at Submit for Review."""
+    return replace_workflow_steps(deviation_id, [
+        {"step_name": "Production Head", "department": "Production", "approver_user_id": "", "approver_display_name": ""},
+        {"step_name": "QA Manager", "department": "QA", "approver_user_id": "", "approver_display_name": ""},
+        {"step_name": "QA Approval", "department": "QA", "approver_user_id": "", "approver_display_name": "", "is_qa_approval": True},
+    ])
+
+
+def get_workflow_steps(deviation_id: int) -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM qms_deviation_workflow_steps WHERE deviation_id = ? ORDER BY step_order ASC",
+        (deviation_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def replace_workflow_steps(deviation_id: int, steps: list[dict]) -> list[dict]:
+    """Full replace (DELETE + INSERT), same pattern as
+    qms_workflow_database.set_step_approvers. Enforces the module's one hard
+    invariant regardless of what the caller sends: the *last* step is always
+    the mandatory QA Approval gate — its step_name is forced to "QA Approval"
+    and is_qa_approval is forced True; every other position is forced False.
+    Raises ValueError if `steps` is empty."""
+    if not steps:
+        raise ValueError("At least one workflow step is required")
+
+    conn = get_connection()
+    conn.execute("DELETE FROM qms_deviation_workflow_steps WHERE deviation_id = ?", (deviation_id,))
+    last_index = len(steps) - 1
+    for i, s in enumerate(steps):
+        is_final = i == last_index
+        conn.execute(
+            """INSERT INTO qms_deviation_workflow_steps
+               (deviation_id, step_order, step_name, department, approver_user_id,
+                approver_display_name, is_qa_approval)
+               VALUES (?,?,?,?,?,?,?)""",
+            (
+                deviation_id,
+                i + 2,  # step_order 2..N+1 — order 1 is reserved for 'submitted'
+                "QA Approval" if is_final else (s.get("step_name") or "").strip(),
+                s.get("department", "").strip(),
+                s.get("approver_user_id", "").strip(),
+                s.get("approver_display_name", "").strip(),
+                1 if is_final else 0,
+            ),
+        )
+    conn.commit()
+    conn.close()
+    return get_workflow_steps(deviation_id)
+
+
 def get_dashboard_stats(company_id: str) -> dict:
     """`company_id` must come from the authenticated TenantContext, never
     from client input (pharmagpt/tenancy.py)."""

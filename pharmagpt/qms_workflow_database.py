@@ -39,6 +39,42 @@ def get_template_steps(template_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+# Additive only (Deviation UI & Workflow Refactor): lets a caller build a
+# fresh template at runtime (e.g. one dynamic Review chain per deviation),
+# on top of the same tables the seeded templates above already live in — no
+# change to get_template_by_key/get_template_steps or to any function below.
+
+def create_template(workflow_key: str, name: str, module: str) -> dict:
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO qms_workflow_templates (workflow_key, name, module) VALUES (?,?,?)",
+        (workflow_key, name, module),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM qms_workflow_templates WHERE workflow_key = ?", (workflow_key,)
+    ).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def create_template_step(template_id: int, step_order: int, step_key: str, step_name: str,
+                          step_type: str, eligible_roles: str, gate_status: str) -> dict:
+    conn = get_connection()
+    cur = conn.execute(
+        """INSERT INTO qms_workflow_template_steps
+           (template_id, step_order, step_key, step_name, step_type, eligible_roles, gate_status)
+           VALUES (?,?,?,?,?,?,?)""",
+        (template_id, step_order, step_key, step_name, step_type, eligible_roles, gate_status),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM qms_workflow_template_steps WHERE id = ?", (cur.lastrowid,)
+    ).fetchone()
+    conn.close()
+    return dict(row)
+
+
 # ── Instances ────────────────────────────────────────────────────────────────
 
 def create_instance(template_id: int, record_type: str, record_id: int, company_id: str | None) -> dict:

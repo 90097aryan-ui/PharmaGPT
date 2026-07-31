@@ -423,6 +423,33 @@ QMS_SCHEMA = """
     );
     CREATE INDEX IF NOT EXISTS idx_qms_wf_step_approvers ON qms_workflow_step_approvers(instance_step_id);
 
+    -- ── Deviation Workflow Builder (Deviation UI & Workflow Refactor) ────────
+    -- Draft-time, per-deviation configuration of the Review chain (steps that
+    -- precede Investigation unlock) — one row per step, editable only while
+    -- the owning deviation is in Draft. At Submit for Review, this is used to
+    -- build a fresh, per-deviation qms_workflow_templates/_template_steps
+    -- pair handed to the unmodified services/workflow_engine.py (see
+    -- routes/qms_deviations.py::start_workflow) — no role name is hardcoded
+    -- into this schema, only into the default *seed values* written at
+    -- deviation-create time. is_qa_approval marks the mandatory, always-last
+    -- step (its step_key becomes 'qa_approval' in the generated template,
+    -- matching the engine's existing unlock/return-target constants).
+    CREATE TABLE IF NOT EXISTS qms_deviation_workflow_steps (
+        id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+        deviation_id            INTEGER NOT NULL,
+        step_order              INTEGER NOT NULL,
+        step_name               TEXT    NOT NULL DEFAULT '',
+        department              TEXT    NOT NULL DEFAULT '',
+        approver_user_id        TEXT    NOT NULL DEFAULT '',
+        approver_display_name   TEXT    NOT NULL DEFAULT '',
+        is_qa_approval          INTEGER NOT NULL DEFAULT 0,
+        created_at              TEXT    DEFAULT (datetime('now')),
+        updated_at              TEXT    DEFAULT (datetime('now')),
+        UNIQUE (deviation_id, step_order),
+        FOREIGN KEY (deviation_id) REFERENCES qms_deviations(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_dev_wf_steps ON qms_deviation_workflow_steps(deviation_id, step_order);
+
     -- Seed the Deviation Investigation workflow template (idempotent —
     -- workflow_key/step_key are UNIQUE, so re-running executescript on an
     -- already-migrated DB is a no-op). Step 1 ("submitted") is completed

@@ -212,7 +212,7 @@ async function qmsDevCreate() {
     const dev = await qmsPostJSON("/qms/deviations", data);
     document.getElementById("qms-dev-new-modal").remove();
     qmsToast(`Created ${dev.deviation_number}`);
-    qmsDevOpenDetail(dev.id);
+    qmsDevOpenDetail(dev.id, "lifecycle");
   } catch (e) {
     qmsToast("Failed to create deviation: " + e.message);
     btn.disabled = false;
@@ -222,9 +222,9 @@ window.qmsDevCreate = qmsDevCreate;
 
 // ── Detail view ─────────────────────────────────────────────────────────────
 
-async function qmsDevOpenDetail(id) {
+async function qmsDevOpenDetail(id, initialTab = "overview") {
   qmsDevCurrentId = id;
-  qmsDevActiveTab = "overview";
+  qmsDevActiveTab = initialTab;
   const body = document.getElementById("qms-deviations-body");
   body.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading deviation…</div>`;
   try {
@@ -291,22 +291,25 @@ function qmsDevRenderTab(dev) {
   const id = dev.id;
 
   if (qmsDevActiveTab === "overview") {
+    const isDraft = dev.status === "Draft";
+    const ro = isDraft ? "" : "disabled";
     el.innerHTML = `
       <div class="qms-section-card">
         <h3>Deviation Details</h3>
+        ${isDraft ? "" : `<p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Read-only — deviation details can only be edited while the deviation is in Draft.</p>`}
         <div class="form-grid">
-          <div class="form-field"><label>Area</label><input type="text" id="qms-dov-area" value="${dev.area || ""}" /></div>
-          <div class="form-field"><label>Product</label><input type="text" id="qms-dov-product" value="${dev.product || ""}" /></div>
-          <div class="form-field"><label>Batch/Lot</label><input type="text" id="qms-dov-batch" value="${dev.batch_lot || ""}" /></div>
-          <div class="form-field"><label>Equipment</label><input type="text" id="qms-dov-equipment" value="${dev.equipment || ""}" /></div>
-          <div class="form-field"><label>Risk Level</label><input type="text" id="qms-dov-risk" value="${dev.risk_level || ""}" /></div>
-          <div class="form-field"><label>QA Reviewer</label><input type="text" id="qms-dov-qa" value="${dev.qa_reviewer || ""}" /></div>
-          <div class="form-field span-2"><label>Description</label><textarea id="qms-dov-desc">${dev.description || ""}</textarea></div>
-          <div class="form-field span-2"><label>Immediate Action Taken</label><textarea id="qms-dov-action">${dev.immediate_action || ""}</textarea></div>
+          <div class="form-field"><label>Area</label><input type="text" id="qms-dov-area" value="${dev.area || ""}" ${ro} /></div>
+          <div class="form-field"><label>Product</label><input type="text" id="qms-dov-product" value="${dev.product || ""}" ${ro} /></div>
+          <div class="form-field"><label>Batch/Lot</label><input type="text" id="qms-dov-batch" value="${dev.batch_lot || ""}" ${ro} /></div>
+          <div class="form-field"><label>Equipment</label><input type="text" id="qms-dov-equipment" value="${dev.equipment || ""}" ${ro} /></div>
+          <div class="form-field"><label>Risk Level</label><input type="text" id="qms-dov-risk" value="${dev.risk_level || ""}" ${ro} /></div>
+          <div class="form-field span-2"><label>Description</label><textarea id="qms-dov-desc" ${ro}>${dev.description || ""}</textarea></div>
+          <div class="form-field span-2"><label>Immediate Action Taken</label><textarea id="qms-dov-action" ${ro}>${dev.immediate_action || ""}</textarea></div>
         </div>
+        ${isDraft ? `
         <div class="qms-form-actions">
           <button class="btn-primary" onclick="qmsDevSaveOverview(${id})">Save</button>
-        </div>
+        </div>` : ""}
       </div>
     `;
   } else if (qmsDevActiveTab === "lifecycle") {
@@ -348,7 +351,6 @@ async function qmsDevSaveOverview(id) {
     batch_lot: document.getElementById("qms-dov-batch").value.trim(),
     equipment: document.getElementById("qms-dov-equipment").value.trim(),
     risk_level: document.getElementById("qms-dov-risk").value.trim(),
-    qa_reviewer: document.getElementById("qms-dov-qa").value.trim(),
     description: document.getElementById("qms-dov-desc").value,
     immediate_action: document.getElementById("qms-dov-action").value,
   };
@@ -553,6 +555,8 @@ const QMS_DEV_STEP_BUTTON_LABELS = {
 // steps (unchanged from the underlying workflow) under one phase label.
 const QMS_DEV_LIFECYCLE_PHASES = ["Draft", "Submitted", "Review", "Investigation", "CAPA", "Effectiveness Check", "Closure"];
 
+let qmsDevBuilderSteps = [];
+
 async function qmsDevRenderLifecycleTab(dev) {
   const id = dev.id;
   const el = document.getElementById("qms-dev-tab-body");
@@ -566,15 +570,13 @@ async function qmsDevRenderLifecycleTab(dev) {
   }
 
   if (!wf.instance) {
-    el.innerHTML = `
-      <div class="qms-section-card">
-        <h3>Draft</h3>
-        <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px">
-          This deviation has not been submitted yet. Submitting starts the Review gate (Initiator Manager
-          Review → QA Manager Review → QA Approval) — the Investigation Case stays locked until QA Approval clears.
-        </p>
-        <button class="btn-primary" onclick="qmsDevSubmitForReview(${id})">Submit for Review</button>
-      </div>`;
+    try {
+      qmsDevBuilderSteps = await qmsFetch(`/qms/deviations/${id}/workflow-builder`);
+    } catch (e) {
+      el.innerHTML = `<div class="qms-empty"><p>Failed to load workflow builder: ${e.message}</p></div>`;
+      return;
+    }
+    qmsDevRenderWorkflowBuilder(id);
     return;
   }
 
@@ -619,6 +621,108 @@ async function qmsDevRenderLifecycleTab(dev) {
   `;
 }
 window.qmsDevRenderLifecycleTab = qmsDevRenderLifecycleTab;
+
+// ── Workflow Builder: Draft-time Review chain configuration ──────────────────
+// Replaces the fixed approval chain — the initiator adds/removes/reorders
+// steps and picks a Department + Approver for each. QA Approval (the last
+// row) is always present, always final, and cannot be removed or reordered
+// — see routes/qms_deviations.py::replace_workflow_steps for the
+// server-side enforcement this UI mirrors.
+
+function qmsDevRenderWorkflowBuilder(id) {
+  const el = document.getElementById("qms-dev-tab-body");
+  const lastIdx = qmsDevBuilderSteps.length - 1;
+  el.innerHTML = `
+    <div class="qms-section-card">
+      <h3>Workflow Builder</h3>
+      <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px">
+        This deviation has not been submitted yet. Configure the Review chain below — add, remove, and
+        reorder steps, and choose a Department and Approver for each. QA Approval is mandatory and always
+        the final step; the Investigation Case stays locked until it clears.
+      </p>
+      <div id="qms-wfb-steps">
+        ${qmsDevBuilderSteps.map((s, i) => qmsDevBuilderStepHTML(s, i, i === lastIdx)).join("")}
+      </div>
+      <div class="qms-form-actions" style="margin-top:10px">
+        <button class="btn-secondary" onclick="qmsDevBuilderAddStep(${id})">+ Add Step</button>
+      </div>
+      <div class="qms-form-actions">
+        <button class="btn-secondary" onclick="qmsDevBuilderSave(${id})">Save Workflow</button>
+        <button class="btn-primary" onclick="qmsDevSubmitForReview(${id})">Submit for Review</button>
+      </div>
+    </div>
+  `;
+}
+window.qmsDevRenderWorkflowBuilder = qmsDevRenderWorkflowBuilder;
+
+function qmsDevBuilderStepHTML(step, i, isFinal) {
+  return `
+    <div class="qms-stat-card ${isFinal ? "info" : ""}" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <strong>${i + 2}. ${isFinal ? "QA Approval (mandatory, final)" : `Review Step ${i + 2}`}</strong>
+        <div>
+          <button class="btn-secondary" style="padding:3px 8px;font-size:11px" onclick="qmsDevBuilderMoveStep(${i}, -1)" ${isFinal || i === 0 ? "disabled" : ""}>&uarr;</button>
+          <button class="btn-secondary" style="padding:3px 8px;font-size:11px" onclick="qmsDevBuilderMoveStep(${i}, 1)" ${isFinal || i >= qmsDevBuilderSteps.length - 2 ? "disabled" : ""}>&darr;</button>
+          <button class="btn-secondary" style="padding:3px 8px;font-size:11px" onclick="qmsDevBuilderRemoveStep(${i})" ${isFinal ? "disabled" : ""}>Remove</button>
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="form-field"><label>Step Name</label><input type="text" id="qms-wfb-name-${i}" value="${step.step_name || ""}" ${isFinal ? "disabled" : ""} /></div>
+        <div class="form-field"><label>Department</label><input type="text" id="qms-wfb-dept-${i}" value="${step.department || ""}" placeholder="e.g. Production, QA, Engineering, Warehouse" /></div>
+        <div class="form-field"><label>Approver User ID</label><input type="text" id="qms-wfb-uid-${i}" value="${step.approver_user_id || ""}" placeholder="Supabase user id" /></div>
+        <div class="form-field"><label>Approver Display Name</label><input type="text" id="qms-wfb-dname-${i}" value="${step.approver_display_name || ""}" placeholder="Full name" /></div>
+      </div>
+    </div>
+  `;
+}
+
+function qmsDevBuilderSyncFromDOM() {
+  qmsDevBuilderSteps = qmsDevBuilderSteps.map((s, i) => ({
+    ...s,
+    step_name: (document.getElementById(`qms-wfb-name-${i}`) || { value: s.step_name || "" }).value.trim(),
+    department: (document.getElementById(`qms-wfb-dept-${i}`) || { value: "" }).value.trim(),
+    approver_user_id: (document.getElementById(`qms-wfb-uid-${i}`) || { value: "" }).value.trim(),
+    approver_display_name: (document.getElementById(`qms-wfb-dname-${i}`) || { value: "" }).value.trim(),
+  }));
+}
+
+function qmsDevBuilderAddStep(id) {
+  qmsDevBuilderSyncFromDOM();
+  qmsDevBuilderSteps.splice(qmsDevBuilderSteps.length - 1, 0, {
+    step_name: "", department: "", approver_user_id: "", approver_display_name: "",
+  });
+  qmsDevRenderWorkflowBuilder(id);
+}
+window.qmsDevBuilderAddStep = qmsDevBuilderAddStep;
+
+function qmsDevBuilderRemoveStep(i) {
+  qmsDevBuilderSyncFromDOM();
+  if (i === qmsDevBuilderSteps.length - 1 || qmsDevBuilderSteps.length <= 1) return;
+  qmsDevBuilderSteps.splice(i, 1);
+  qmsDevRenderWorkflowBuilder(qmsDevCurrentId);
+}
+window.qmsDevBuilderRemoveStep = qmsDevBuilderRemoveStep;
+
+function qmsDevBuilderMoveStep(i, dir) {
+  qmsDevBuilderSyncFromDOM();
+  const j = i + dir;
+  const lastIdx = qmsDevBuilderSteps.length - 1;
+  if (j < 0 || j >= lastIdx || i >= lastIdx) return; // never move the final QA Approval row, never move past it
+  [qmsDevBuilderSteps[i], qmsDevBuilderSteps[j]] = [qmsDevBuilderSteps[j], qmsDevBuilderSteps[i]];
+  qmsDevRenderWorkflowBuilder(qmsDevCurrentId);
+}
+window.qmsDevBuilderMoveStep = qmsDevBuilderMoveStep;
+
+async function qmsDevBuilderSave(id) {
+  qmsDevBuilderSyncFromDOM();
+  try {
+    qmsDevBuilderSteps = await qmsPutJSON(`/qms/deviations/${id}/workflow-builder`, { steps: qmsDevBuilderSteps });
+    qmsToast("Workflow saved");
+  } catch (e) {
+    qmsToast("Failed to save workflow: " + e.message);
+  }
+}
+window.qmsDevBuilderSave = qmsDevBuilderSave;
 
 function qmsDevWorkflowStepHTML(id, step, instance, user) {
   const isCurrent = instance.status === "in_progress" && step.step_order === instance.current_step_order;
@@ -671,12 +775,14 @@ function qmsDevWorkflowActionHTML(id, step, user) {
     if (!isApprover) {
       return `<div class="qms-panel-item-meta">Waiting for ${approvers.map(a => a.display_name || a.user_id).join(" or ")} to decide.</div>`;
     }
+    const safeStepName = String(step.step_name || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
     return `
       <div class="form-field" style="margin-top:8px"><label>Comments</label><input type="text" id="${formId}-comments" placeholder="Optional comments" /></div>
       <div class="qms-form-actions">
         <button class="btn-primary" onclick="qmsDevDecide(${id}, ${step.step_order}, 'approve', '${formId}')">Approve</button>
         <button class="btn-secondary" onclick="qmsDevDecide(${id}, ${step.step_order}, 'reject', '${formId}')">Reject</button>
         ${step.step_key === "qa_review" ? `<button class="btn-secondary" onclick="qmsDevDecide(${id}, ${step.step_order}, 'return', '${formId}')">Return for Investigation</button>` : ""}
+        <button class="btn-secondary" onclick="qmsDevRequestInfo(${id}, '${safeStepName}')">Request Information</button>
       </div>
     `;
   }
@@ -702,6 +808,8 @@ async function qmsDevRefreshCurrentView(id) {
 
 async function qmsDevSubmitForReview(id) {
   try {
+    qmsDevBuilderSyncFromDOM();
+    await qmsPutJSON(`/qms/deviations/${id}/workflow-builder`, { steps: qmsDevBuilderSteps });
     await qmsPostJSON(`/qms/deviations/${id}/workflow/start`, {});
     qmsToast("Submitted for review");
     qmsDevRefreshCurrentView(id);
@@ -710,6 +818,18 @@ async function qmsDevSubmitForReview(id) {
   }
 }
 window.qmsDevSubmitForReview = qmsDevSubmitForReview;
+
+async function qmsDevRequestInfo(id, stepName) {
+  const text = window.prompt(`Request information for "${stepName}" — what's needed?`);
+  if (!text || !text.trim()) return;
+  try {
+    await qmsPostJSON(`/qms/deviation/${id}/comments`, { comment: `[Request Information — ${stepName}] ${text.trim()}` });
+    qmsToast("Information request added as a comment");
+  } catch (e) {
+    qmsToast("Failed: " + e.message);
+  }
+}
+window.qmsDevRequestInfo = qmsDevRequestInfo;
 
 async function qmsDevAssignApprover(id, stepOrder, formId) {
   const user_id = document.getElementById(`${formId}-uid`).value.trim();

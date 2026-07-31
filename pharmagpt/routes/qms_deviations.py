@@ -30,7 +30,10 @@ PUT    /qms/deviations/<id>                  update deviation fields
 DELETE /qms/deviations/<id>                  delete deviation
 
 GET    /qms/deviations/<id>/workflow                       lifecycle state: instance + steps + phase grouping + dashboard fields
-POST   /qms/deviations/<id>/workflow/start                 submit for review (instantiates the workflow)
+GET    /qms/deviations/<id>/workflow-builder                Draft-time Review chain configuration (Workflow Builder)
+PUT    /qms/deviations/<id>/workflow-builder                replace the Review chain (Draft only; last step always QA Approval)
+POST   /qms/deviations/<id>/workflow/start                 submit for review (compiles the Workflow Builder into a fresh
+                                                             per-deviation template and instantiates it)
 POST   /qms/deviations/<id>/workflow/steps/<order>/assign   assign named approver(s) to an approval step
 POST   /qms/deviations/<id>/workflow/steps/<order>/decide   approve / reject / return / advance the current step
 
@@ -64,6 +67,7 @@ POST   /qms/deviations/<id>/export/docx      DOCX export
 import io
 import logging
 import re
+import uuid
 from flask import Blueprint, g, jsonify, request, send_file
 
 from pharmagpt import audit
@@ -73,6 +77,7 @@ from pharmagpt import equipment_database as equipdb
 from pharmagpt import qms_deviation_database as ddb
 from pharmagpt import qms_capa_database as cdb
 from pharmagpt import qms_database as qmsdb
+from pharmagpt import qms_workflow_database as wfdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import qms_repo
@@ -93,8 +98,8 @@ UNLOCK_STEP_KEY = "qa_approval"
 # controls what phase label the Lifecycle tab shows.
 PHASE_GROUPS = {
     "submitted": "Submitted",
-    "initiator_mgr_review": "Review",
-    "qa_mgr_review": "Review",
+    "initiator_mgr_review": "Review",  # legacy DEVIATION_LIFECYCLE_V2 key — kept for any instance started before the Workflow Builder
+    "qa_mgr_review": "Review",         # legacy DEVIATION_LIFECYCLE_V2 key — kept for any instance started before the Workflow Builder
     "qa_approval": "Review",
     "evidence_collection": "Investigation",  # step_key kept from V1 for engine compat; displays as "Investigation"
     "qa_review": "CAPA",
@@ -102,6 +107,18 @@ PHASE_GROUPS = {
     "effectiveness_check": "Effectiveness Check",
     "closed": "Closure",
 }
+
+
+def _phase_for_step_key(step_key: str) -> str:
+    """PHASE_GROUPS lookup, generalized for the Workflow Builder's dynamic
+    (unlimited, per-deviation) Review steps: only their step_key
+    ('review_step_<order>') isn't a fixed dict entry — everything else
+    (including 'qa_approval', still the mandatory final step) is unchanged."""
+    if step_key in PHASE_GROUPS:
+        return PHASE_GROUPS[step_key]
+    if step_key.startswith("review_step_"):
+        return "Review"
+    return step_key
 
 
 # ── Phase 3.5 dual-write (docs/PHASE3_EXECUTION_PLAN.md) ───────────────────────
@@ -194,6 +211,7 @@ def create_deviation():
     if not data.get("title", "").strip():
         return jsonify({"error": "Deviation title is required"}), 400
     deviation = ddb.create_deviation(data, company_id=g.tenant.company_id)
+    ddb.seed_default_workflow_steps(deviation["id"])
     performed_by = tenancy.signing_identity(g.tenant)["performed_by"]
     audit.log("deviation", deviation["id"], "Deviation initiated", new=deviation)
     _dual_write_create(deviation, "Deviation initiated", performed_by)
@@ -649,7 +667,7 @@ def _enrich_workflow_state(state: dict) -> dict:
     on qms_deviations) — omitted rather than fabricated."""
     steps = state.get("steps") or []
     for s in steps:
-        s["phase"] = PHASE_GROUPS.get(s["step_key"], s["step_key"])
+        s["phase"] = _phase_for_step_key(s["step_key"])
 
     instance = state.get("instance")
     if not instance:
@@ -691,6 +709,81 @@ def get_workflow(did):
     return jsonify(_enrich_workflow_state(wfe.get_instance_state(RECORD_TYPE, did)))
 
 
+# ── Workflow Builder: Draft-time Review chain configuration ──────────────────
+# One record per step (qms_deviation_workflow_steps), editable only while the
+# deviation is in Draft. At Submit for Review this is compiled into a fresh
+# per-deviation workflow template (see _build_dynamic_workflow_key) handed to
+# the unmodified services/workflow_engine.py — no engine change.
+
+@bp.route("/<int:did>/workflow-builder", methods=["GET"])
+def get_workflow_builder(did):
+    if not _record_scoped_or_404(did):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(ddb.get_workflow_steps(did))
+
+
+@bp.route("/<int:did>/workflow-builder", methods=["PUT"])
+def update_workflow_builder(did):
+    deviation = _record_scoped_or_404(did)
+    if not deviation:
+        return jsonify({"error": "Not found"}), 404
+    if deviation["status"] != "Draft":
+        return jsonify({"error": "The workflow can only be edited while the deviation is in Draft"}), 409
+    data = request.get_json() or {}
+    try:
+        updated = ddb.replace_workflow_steps(did, data.get("steps") or [])
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    audit.log("deviation", did, "Workflow configuration updated")
+    return jsonify(updated)
+
+
+def _build_dynamic_workflow_key(did: int) -> str:
+    """Compile this deviation's configured Review chain
+    (qms_deviation_workflow_steps) plus the fixed post-Review tail (copied
+    verbatim from WORKFLOW_KEY's own template) into a fresh, per-deviation
+    workflow template — new qms_workflow_templates/_template_steps rows,
+    created via the purely-additive qms_workflow_database.create_template()/
+    create_template_step(). The engine (services/workflow_engine.py) is only
+    ever handed a workflow_key and reads templates generically, so it needs
+    no change; step 1 ('submitted') and the tail
+    (evidence_collection/qa_review/final_approval/effectiveness_check/closed)
+    are identical to today's DEVIATION_LIFECYCLE_V2, keeping 'Return for
+    Investigation' (hardcoded to step_key=='evidence_collection' in the
+    engine) and UNLOCK_STEP_KEY=='qa_approval' working unmodified."""
+    base_template = wfdb.get_template_by_key(WORKFLOW_KEY)
+    base_steps = wfdb.get_template_steps(base_template["id"])
+    submitted_step = next(s for s in base_steps if s["step_key"] == "submitted")
+    tail_steps = [s for s in base_steps if s["step_order"] >= 5]  # evidence_collection .. closed
+
+    configured = ddb.get_workflow_steps(did)
+    if not configured:
+        raise wfe.WorkflowError("No workflow steps configured for this deviation")
+
+    dynamic_key = f"DEVIATION_DYNAMIC_{did}_{uuid.uuid4().hex[:8]}"
+    template = wfdb.create_template(dynamic_key, f"Deviation {did} Review Chain", "deviation")
+
+    wfdb.create_template_step(
+        template["id"], 1, submitted_step["step_key"], submitted_step["step_name"],
+        submitted_step["step_type"], submitted_step["eligible_roles"], submitted_step["gate_status"],
+    )
+
+    order = 2
+    for step in configured:
+        step_key = "qa_approval" if step["is_qa_approval"] else f"review_step_{order}"
+        wfdb.create_template_step(template["id"], order, step_key, step["step_name"], "approval", "", "Review")
+        order += 1
+
+    for tail in tail_steps:
+        wfdb.create_template_step(
+            template["id"], order, tail["step_key"], tail["step_name"],
+            tail["step_type"], tail["eligible_roles"], tail["gate_status"],
+        )
+        order += 1
+
+    return dynamic_key
+
+
 @bp.route("/<int:did>/workflow/start", methods=["POST"])
 def start_workflow(did):
     deviation = _record_scoped_or_404(did)
@@ -698,11 +791,24 @@ def start_workflow(did):
         return jsonify({"error": "Not found"}), 404
     sig = tenancy.signing_identity(g.tenant)
     try:
-        state = wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, did, g.tenant.company_id, sig["performed_by"])
+        dynamic_key = _build_dynamic_workflow_key(did)
+        wfe.start_instance(dynamic_key, RECORD_TYPE, did, g.tenant.company_id, sig["performed_by"])
     except wfe.WorkflowError as e:
         audit.log_failure("deviation", did, "Workflow start blocked", reason=str(e))
         return jsonify({"error": str(e)}), 409
-    return jsonify(state), 201
+
+    # Steps already carrying a chosen approver (Workflow Builder) are
+    # assigned immediately — "create approval tasks" / "notify the first
+    # approver": the first step's approver now appears in the existing,
+    # unchanged Workflow Inbox without any new notification code. Steps left
+    # blank fall back to the pre-existing manual "Assign Approver" action.
+    for step in ddb.get_workflow_steps(did):
+        if step.get("approver_user_id"):
+            wfe.assign_approvers(RECORD_TYPE, did, step["step_order"], [
+                {"user_id": step["approver_user_id"], "display_name": step.get("approver_display_name", "")}
+            ])
+
+    return jsonify(wfe.get_instance_state(RECORD_TYPE, did)), 201
 
 
 @bp.route("/<int:did>/workflow/steps/<int:step_order>/assign", methods=["POST"])

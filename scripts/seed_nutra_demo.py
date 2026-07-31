@@ -38,19 +38,26 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
-from pharmagpt.services.identity_admin import IdentityProvisioningError, provision_user
-from pharmagpt.services.module_permissions import set_module_permission
-from pharmagpt.services.org_directory import (
+# Same convention as scripts/backfill_projects.py, scripts/backfill_qms.py, etc.:
+# `python scripts/seed_nutra_demo.py` run directly puts only this file's own
+# directory on sys.path, not the repository root, so `pharmagpt` and `scripts`
+# (used below as packages) would not otherwise be importable.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from pharmagpt.services.identity_admin import IdentityProvisioningError, provision_user  # noqa: E402
+from pharmagpt.services.module_permissions import set_module_permission  # noqa: E402
+from pharmagpt.services.org_directory import (  # noqa: E402
     find_or_create_department,
     get_workflow_role_id,
     set_primary_department,
 )
-from scripts.bootstrap_super_admin import find_auth_user_by_email
+from scripts.bootstrap_super_admin import find_auth_user_by_email  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -337,8 +344,6 @@ def main() -> int:
         help="Remove Nutra's existing demo users and departments before reseeding.",
     )
     args = parser.parse_args()
-
-    import os
 
     try:
         config = load_config(os.environ)
