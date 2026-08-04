@@ -497,6 +497,74 @@
 .urs-equip-item:hover { border-color: var(--blue); background: #F1ECE6; }
 .urs-equip-item.selected { border-color: var(--blue); background: #F1ECE6; font-weight: 600; }
 
+/* ── Greenfield Facility URS (Stage 1) ─────────────────────────────────────── */
+.urs-facility-node-adder {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.urs-facility-node-tree {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.urs-facility-node-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+.urs-facility-node-row:last-child { border-bottom: none; }
+
+.urs-facility-systems-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.urs-facility-system-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.urs-facility-system-group-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+/* ── Stage 1.1 — business-intelligence metadata ────────────────────────────── */
+.urs-checkbox-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.urs-design-basis-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.urs-design-basis-panel summary {
+  list-style: none;
+}
+.urs-design-basis-panel summary::-webkit-details-marker { display: none; }
+.urs-design-basis-panel[open] summary { margin-bottom: 4px; }
+
 /* ── Requirements Table ──────────────────────────────────────────────────────── */
 .urs-req-toolbar {
   display: flex;

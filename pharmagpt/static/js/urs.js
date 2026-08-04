@@ -18,6 +18,13 @@ let ursState = {
   selectedEquipmentType: null,
   generating: false,
   activeDetailTab: "overview",
+  // Greenfield Facility URS (Stage 1) — set once the user picks "Facility
+  // URS" from the type chooser (see startNewURS/chooseURSType below).
+  // ursType stays "equipment" for the original flow so every existing
+  // equipment code path below is unaffected when it's unset/"equipment".
+  ursType: "equipment",
+  selectedFacility: null,
+  selectedFacilityType: null,
 };
 
 /* ── Category definitions ───────────────────────────────────────────────────── */
@@ -187,6 +194,42 @@ const REQUIREMENT_SECTIONS = [
   "Cybersecurity",
   "Custom Requirements",
 ];
+
+// Greenfield Facility URS (Stage 1) requirement-library sections — mirrors
+// pharmagpt/services/facility_requirement_library.py's FACILITY_SECTION_
+// PREFIX key order exactly, so section names sent by the AI/library engine
+// always match an option in this list.
+const FACILITY_REQUIREMENT_SECTIONS = [
+  "General Requirements", "Site Information", "Building Requirements",
+  "Architectural Requirements", "Cleanroom Requirements", "HVAC Requirements",
+  "Utilities Requirements", "Water Systems", "Compressed Air Requirements",
+  "Nitrogen Requirements", "Electrical Requirements", "BMS Requirements",
+  "EMS Requirements", "Material Flow", "Personnel Flow", "Waste Flow",
+  "GMP Requirements", "Regulatory Requirements", "Data Integrity Requirements",
+  "Automation Requirements", "Safety Requirements", "Maintenance Requirements",
+  "Training Requirements", "Documentation", "Sustainability Requirements",
+  "Risk Considerations", "Future Expansion Requirements",
+];
+
+// Facility systems offered as a checklist in the Facility wizard — mirrors
+// pharmagpt/facility_systems/'s registry (15 profiles across 3 categories).
+const FACILITY_SYSTEMS_BY_CATEGORY = {
+  "HVAC & Environmental": ["HVAC", "EMS"],
+  "Process Utilities": [
+    "Purified Water", "Water For Injection", "Clean Steam", "Compressed Air",
+    "Nitrogen", "Vacuum", "CIP", "SIP",
+  ],
+  "Controls & Electrical": ["BMS", "Electrical Distribution", "Fire Alarm", "Access Control"],
+};
+
+/** Section list for the currently active URS (wizard or detail view) —
+ * every place that used to hardcode REQUIREMENT_SECTIONS for a per-row
+ * section <select> now calls this instead, so the same row-editor markup
+ * (buildReqRow/buildDetailRow) works correctly for both URS types. */
+function currentSectionList() {
+  const type = (ursState.currentURS && ursState.currentURS.urs_type) || ursState.ursType;
+  return type === "facility" ? FACILITY_REQUIREMENT_SECTIONS : REQUIREMENT_SECTIONS;
+}
 
 /* ── Init ───────────────────────────────────────────────────────────────────── */
 window.initURS = function () {
@@ -420,7 +463,7 @@ function buildDashboardHTML(stats, allURS) {
       html += `<div class="urs-card status-${u.status}" onclick="openURS(${u.id})" style="margin-bottom:12px;cursor:pointer">
         <div class="urs-card-number">${u.urs_number || "—"}</div>
         <div class="urs-card-title">${escHtml(u.title)}</div>
-        <div class="urs-card-equipment">${escHtml(u.equipment_name || "—")}</div>
+        <div class="urs-card-equipment">${u.urs_type === "facility" ? "<span class='icon' data-lucide='factory'></span> " : ""}${escHtml(u.equipment_name || (u.urs_type === "facility" ? "Facility URS" : "—"))}</div>
         <div class="urs-card-tags">
           <span class="urs-tag urs-tag-status ${u.status}">${formatStatus(u.status)}</span>
           ${u.category ? `<span class="urs-tag urs-tag-category">${u.category}</span>` : ""}
@@ -505,7 +548,7 @@ async function fetchAndRenderURSList(filters = {}) {
       card.innerHTML = `
         <div class="urs-card-number">${escHtml(u.urs_number || "—")}</div>
         <div class="urs-card-title">${escHtml(u.title)}</div>
-        <div class="urs-card-equipment"><span class=\'icon\' data-lucide=\'package\'></span> ${escHtml(u.equipment_name || "Not specified")}</div>
+        <div class="urs-card-equipment"><span class=\'icon\' data-lucide=\'${u.urs_type === "facility" ? "factory" : "package"}\'></span> ${escHtml(u.equipment_name || (u.urs_type === "facility" ? "Facility URS" : "Not specified"))}</div>
         <div class="urs-card-tags">
           <span class="urs-tag urs-tag-status ${u.status}">${formatStatus(u.status)}</span>
           ${u.category ? `<span class="urs-tag urs-tag-category">${u.category}</span>` : ""}
@@ -557,12 +600,53 @@ window.applyURSFilters = function () {
 window.startNewURS = function () {
   ursState.wizardStep = 1;
   ursState.wizardData = {};
+  ursState.ursType = "equipment";
   ursState.selectedCategory = null;
   ursState.selectedEquipmentType = null;
+  ursState.selectedFacility = null;
+  ursState.selectedFacilityType = null;
   ursState.currentURS = null;
   ursState.requirements = [];
   showView("view-urs-new");
-  renderWizardStep(1);
+  renderURSTypeChooser();
+};
+
+/* ── URS type chooser (Equipment vs. Facility) ─────────────────────────────── */
+function renderURSTypeChooser(body) {
+  const stepsEl = document.getElementById("urs-wizard-steps");
+  if (stepsEl) stepsEl.style.display = "none";
+  body = body || document.getElementById("urs-wizard-body");
+  if (!body) return;
+  body.innerHTML = `
+  <div class="urs-section-header"><div class="section-icon"><span class='icon' data-lucide='clipboard-list'></span></div>What are you creating a URS for?</div>
+  <div class="urs-category-grid">
+    <div class="urs-category-card" onclick="chooseURSType('equipment')">
+      <div class="urs-category-icon"><span class='icon' data-lucide='settings'></span></div>
+      <div class="urs-category-name">Equipment URS</div>
+      <div class="urs-category-sub">A single piece of equipment or computerized system (HPLC, tablet press, BMS, ...)</div>
+    </div>
+    <div class="urs-category-card" onclick="chooseURSType('facility')">
+      <div class="urs-category-icon"><span class='icon' data-lucide='factory'></span></div>
+      <div class="urs-category-name">Facility URS</div>
+      <div class="urs-category-sub">A new greenfield pharmaceutical facility — building, cleanroom, HVAC, utilities, and flows</div>
+    </div>
+  </div>`;
+}
+
+window.chooseURSType = function (type) {
+  ursState.ursType = type;
+  const stepsEl = document.getElementById("urs-wizard-steps");
+  if (stepsEl) stepsEl.style.display = "";
+  const lbl1 = document.getElementById("urs-step-lbl-1");
+  const lbl2 = document.getElementById("urs-step-lbl-2");
+  if (type === "facility") {
+    if (lbl1) lbl1.textContent = "Facility";
+    if (lbl2) lbl2.textContent = "Building & Systems";
+  } else {
+    if (lbl1) lbl1.textContent = "Category";
+    if (lbl2) lbl2.textContent = "Project Info";
+  }
+  wizardGoTo(1);
 };
 
 function renderWizardStep(step) {
@@ -570,6 +654,15 @@ function renderWizardStep(step) {
   const body = document.getElementById("urs-wizard-body");
   if (!body) return;
   body.innerHTML = "";
+
+  if (ursState.ursType === "facility") {
+    if (step === 1) renderFacilityStep1(body);
+    else if (step === 2) renderFacilityStep2(body);
+    else if (step === 3) renderStep3(body);
+    else if (step === 4) renderStep4(body);
+    else if (step === 5) renderStep5(body);
+    return;
+  }
 
   if (step === 1) renderStep1(body);
   else if (step === 2) renderStep2(body);
@@ -649,6 +742,502 @@ function renderEquipmentList(catKey) {
     };
     list.appendChild(item);
   });
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   GREENFIELD FACILITY URS (Stage 1) — Steps 1–2 of the wizard.
+   Steps 3 (Generate), 4 (Requirements Editor) and 5 (Submit) are the SAME
+   renderStep3/renderStep4/renderStep5 used by the equipment flow — see
+   renderWizardStep()/wizardNext() for the ursType branch and
+   currentSectionList() for the section-list swap that makes that reuse
+   correct rather than just visually similar.
+────────────────────────────────────────────────────────────────────────────── */
+const FACILITY_TYPE_OPTIONS = [
+  "OSD (Oral Solid Dosage)", "Injectable (Sterile)",
+  "API (Active Pharmaceutical Ingredient)", "Warehouse / Distribution Center",
+  "QC Laboratory", "R&D Facility", "Multi-Product / General Manufacturing",
+];
+
+// Stage 1.1 — Facility Classification is a distinct, mandatory axis from
+// Facility Type above (see facility_database.py's module docstring).
+const FACILITY_CLASSIFICATION_OPTIONS = [
+  "Greenfield", "Brownfield", "Expansion", "Contract Manufacturing",
+  "Warehouse", "Distribution Center", "QC Laboratory", "R&D Center",
+  "Pilot Plant", "Manufacturing Facility",
+];
+
+const PRODUCT_CATEGORY_OPTIONS = [
+  "Tablets", "Capsules", "Oral Liquids", "Ointments", "Injectables",
+  "Ophthalmic", "API", "Biologics", "Nutraceuticals", "Medical Devices",
+  "Multiple Products",
+];
+
+const REGULATORY_PACKAGE_OPTIONS = [
+  "US FDA", "EU GMP", "WHO GMP", "PIC/S", "MHRA", "TGA", "ANVISA",
+  "Schedule M", "ISO 14644", "Annex 1", "Annex 15",
+];
+
+const UTILITY_PHILOSOPHY_SYSTEMS = [
+  "HVAC", "Purified Water", "WFI", "Compressed Air", "Nitrogen",
+  "Vacuum", "Steam", "Electrical",
+];
+
+const UTILITY_PHILOSOPHY_OPTIONS = [
+  "Centralized", "Dedicated", "Shared", "N+1 Redundancy",
+  "2N Redundancy", "Standby Only",
+];
+
+const VALIDATION_STRATEGY_OPTIONS = [
+  "Traditional Validation", "ASTM E2500", "CSA", "Risk-Based Validation",
+];
+
+const REQUIREMENT_SOURCE_OPTIONS = [
+  "Corporate Standard", "Customer Requirement", "Regulatory Requirement",
+  "Internal SOP", "Engineering Standard", "User Defined",
+];
+
+const CAPACITY_UNIT_OPTIONS = [
+  "Tablets/day", "Capsules/day", "Bottles/day", "Vials/day", "Units/day",
+  "Tablets/year", "Tons/year", "Other",
+];
+
+/* ── Facility Step 1: Facility Identity ────────────────────────────────────── */
+async function renderFacilityStep1(body) {
+  const d = ursState.wizardData;
+  const f = ursState.selectedFacility || {};
+  const currentRegSet = new Set(
+    (f.regulatory_market || d.regulatory_market || "").split(",").map(s => s.trim()).filter(Boolean)
+  );
+
+  body.innerHTML = `
+  <div class="urs-section-header"><div class="section-icon"><span class='icon' data-lucide='factory'></span></div>Facility Identity</div>
+  <div class="urs-form-grid">
+    <div class="urs-field full">
+      <label class="urs-label">Project <span class="req-star">*</span></label>
+      <select class="urs-select" id="fw-project-id"><option value="">Loading projects…</option></select>
+    </div>
+    <div class="urs-field full">
+      <label class="urs-label">Facility Name <span class="req-star">*</span></label>
+      <input class="urs-input" id="fw-facility-name" value="${escHtml(f.facility_name || d.facility_name || '')}" placeholder="e.g. Nutra Greenfield OSD Plant">
+    </div>
+    <div class="urs-field">
+      <label class="urs-label">Facility Classification <span class="req-star">*</span></label>
+      <select class="urs-select" id="fw-classification">
+        <option value="">Select…</option>
+        ${FACILITY_CLASSIFICATION_OPTIONS.map(c => `<option ${((f.classification||d.classification)===c)?'selected':''}>${c}</option>`).join("")}
+      </select>
+    </div>
+    <div class="urs-field">
+      <label class="urs-label">Facility Type <span class="req-star">*</span></label>
+      <select class="urs-select" id="fw-facility-type">
+        <option value="">Select…</option>
+        ${FACILITY_TYPE_OPTIONS.map(t => `<option ${((f.facility_type||d.facility_type)===t)?'selected':''}>${t}</option>`).join("")}
+      </select>
+    </div>
+    <div class="urs-field">
+      <label class="urs-label">Product Category</label>
+      <select class="urs-select" id="fw-product-category">
+        <option value="">Select…</option>
+        ${PRODUCT_CATEGORY_OPTIONS.map(p => `<option ${((f.product_category||d.product_category)===p)?'selected':''}>${p}</option>`).join("")}
+      </select>
+    </div>
+    <div class="urs-field">
+      <label class="urs-label">Country</label>
+      <input class="urs-input" id="fw-country" value="${escHtml(f.country || d.country || '')}" placeholder="e.g. India">
+    </div>
+    <div class="urs-field full">
+      <label class="urs-label">Regulatory Package</label>
+      <div class="urs-checkbox-row">
+        ${REGULATORY_PACKAGE_OPTIONS.map(r => `
+          <label class="urs-section-checkbox">
+            <input type="checkbox" name="fw-regulatory-package" value="${r}" ${currentRegSet.has(r) ? "checked" : ""}>
+            ${r}
+          </label>`).join("")}
+      </div>
+    </div>
+    <div class="urs-field">
+      <label class="urs-label">Site Capacity</label>
+      <input class="urs-input" id="fw-site-capacity" value="${escHtml(f.site_capacity || d.site_capacity || '')}" placeholder="e.g. 2 billion tablets/year">
+    </div>
+    <div class="urs-field">
+      <label class="urs-label">Manufacturing Type</label>
+      <input class="urs-input" id="fw-manufacturing-type" value="${escHtml(f.manufacturing_type || d.manufacturing_type || '')}" placeholder="e.g. Batch, Continuous">
+    </div>
+    <div class="urs-field full">
+      <label class="urs-label">Design Standards Referenced</label>
+      <input class="urs-input" id="fw-design-standards" value="${escHtml(f.design_standards || d.design_standards || '')}" placeholder="e.g. GAMP 5, ISPE Baseline Guides, ASTM E2500">
+    </div>
+    <div class="urs-field full">
+      <label class="urs-label">Description</label>
+      <textarea class="urs-textarea" id="fw-description" placeholder="Brief description of the facility and its purpose…">${escHtml(f.description || d.description || '')}</textarea>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;margin-top:24px">
+    <button class="btn-urs-secondary" style="background:rgba(61,47,33,.06);color:var(--navy);border-color:var(--border)" onclick="renderURSTypeChooser()"><span class='icon' data-lucide='arrow-left'></span> Back</button>
+    <button class="btn-urs-primary" onclick="wizardNext()">Next: Building & Systems <span class='icon' data-lucide='arrow-right'></span></button>
+  </div>`;
+
+  const projSel = document.getElementById("fw-project-id");
+  try {
+    const projects = await fetch("/projects").then(r => r.json());
+    const currentId = f.project_id || d.project_id || "";
+    projSel.innerHTML = `<option value="">Select a project…</option>` +
+      (projects || []).map(p => `<option value="${p.id}" ${String(p.id)===String(currentId)?'selected':''}>${escHtml(p.name)}</option>`).join("");
+  } catch (e) {
+    projSel.innerHTML = `<option value="">Failed to load projects</option>`;
+  }
+}
+
+/** Reads Step 1 fields, creates (or updates) the Facility record, and
+ * returns true on success — false leaves the wizard on Step 1 with a
+ * toast explaining what's missing. Mirrors createURSRecord()'s
+ * create-once/update-thereafter pattern, one level up the hierarchy
+ * (Facility, not URS, is what Step 1 persists). */
+async function collectFacilityStep1Data() {
+  const projectId = document.getElementById("fw-project-id")?.value || "";
+  const facilityName = document.getElementById("fw-facility-name")?.value.trim() || "";
+  const facilityType = document.getElementById("fw-facility-type")?.value || "";
+  const classification = document.getElementById("fw-classification")?.value || "";
+  if (!projectId) { ursToast("Select a project", "error"); return false; }
+  if (!facilityName) { ursToast("Facility name is required", "error"); return false; }
+  if (!facilityType) { ursToast("Select a facility type", "error"); return false; }
+  if (!classification) { ursToast("Select a facility classification", "error"); return false; }
+
+  const regulatoryPackage = [...document.querySelectorAll('input[name="fw-regulatory-package"]:checked')].map(cb => cb.value);
+
+  const payload = {
+    facility_name: facilityName,
+    facility_type: facilityType,
+    classification,
+    product_category: document.getElementById("fw-product-category")?.value || "",
+    country: document.getElementById("fw-country")?.value.trim() || "",
+    regulatory_market: regulatoryPackage.join(", "),
+    site_capacity: document.getElementById("fw-site-capacity")?.value.trim() || "",
+    manufacturing_type: document.getElementById("fw-manufacturing-type")?.value.trim() || "",
+    design_standards: document.getElementById("fw-design-standards")?.value.trim() || "",
+    description: document.getElementById("fw-description")?.value.trim() || "",
+  };
+  ursState.wizardData = { ...ursState.wizardData, ...payload, project_id: projectId };
+  ursState.selectedFacilityType = facilityType;
+
+  try {
+    let facility;
+    if (ursState.selectedFacility && ursState.selectedFacility.id) {
+      facility = await fetch(`/facility/${ursState.selectedFacility.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      }).then(r => r.json());
+    } else {
+      facility = await fetch(`/projects/${projectId}/facility`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      }).then(r => r.json());
+    }
+    if (!facility || !facility.id) throw new Error((facility && facility.error) || "Unknown error");
+    ursState.selectedFacility = facility;
+    return true;
+  } catch (e) {
+    ursToast(`Failed to save facility: ${e.message}`, "error");
+    return false;
+  }
+}
+
+/* ── Facility Step 2: Building/Floor/Area/Room + Systems + Flows ──────────── */
+async function renderFacilityStep2(body) {
+  const facilityId = ursState.selectedFacility?.id;
+  const d = ursState.wizardData;
+
+  const systemsHtml = Object.entries(FACILITY_SYSTEMS_BY_CATEGORY).map(([cat, systems]) => `
+    <div class="urs-facility-system-group">
+      <div class="urs-facility-system-group-title">${cat}</div>
+      ${systems.map(s => `
+        <label class="urs-section-checkbox">
+          <input type="checkbox" name="facility-system" value="${s}" ${(d.utilities_required || []).includes(s) ? "checked" : ""}>
+          ${s}
+        </label>`).join("")}
+    </div>`).join("");
+
+  body.innerHTML = `
+  <div class="urs-section-header"><div class="section-icon"><span class='icon' data-lucide='building-2'></span></div>Building Hierarchy</div>
+  <div class="urs-facility-node-adder">
+    <select class="urs-select" id="fw-node-type" style="max-width:140px">
+      <option value="building">Building</option>
+      <option value="floor">Floor</option>
+      <option value="area">Area</option>
+      <option value="room">Room</option>
+    </select>
+    <select class="urs-select" id="fw-node-parent" style="max-width:220px"><option value="">No parent (top-level)</option></select>
+    <input class="urs-input" id="fw-node-name" placeholder="Name (e.g. Building A, Granulation Room)" style="flex:1">
+    <input class="urs-input" id="fw-node-classification" placeholder="Classification (optional, e.g. Grade C)" style="max-width:180px">
+    <button class="btn-urs-outline" onclick="addFacilityNode()"><span class='icon' data-lucide='plus'></span> Add</button>
+  </div>
+  <div id="fw-node-tree" class="urs-facility-node-tree"></div>
+
+  <div class="urs-section-header" style="margin-top:24px"><div class="section-icon"><span class='icon' data-lucide='droplet'></span></div>Facility Systems Required</div>
+  <div class="urs-facility-systems-grid">${systemsHtml}</div>
+
+  <div class="urs-section-header" style="margin-top:24px"><div class="section-icon"><span class='icon' data-lucide='wind'></span></div>Design Philosophy &amp; Flows</div>
+  <div class="urs-form-grid">
+    <div class="urs-field">
+      <label class="urs-label">Manufacturing Areas</label>
+      <input class="urs-input" id="fw-manufacturing-areas" value="${escHtml(d.manufacturing_areas || '')}" placeholder="e.g. Granulation, Compression, Coating">
+    </div>
+    <div class="urs-field">
+      <label class="urs-label">Warehouse Areas</label>
+      <input class="urs-input" id="fw-warehouse-areas" value="${escHtml(d.warehouse_areas || '')}" placeholder="e.g. Raw material, Finished goods, Quarantine">
+    </div>
+    <div class="urs-field">
+      <label class="urs-label">QC Areas</label>
+      <input class="urs-input" id="fw-qc-areas" value="${escHtml(d.qc_areas || '')}" placeholder="e.g. Chemical lab, Microbiology lab">
+    </div>
+    <div class="urs-field full">
+      <label class="urs-label">HVAC Philosophy</label>
+      <textarea class="urs-textarea" id="fw-hvac-philosophy" placeholder="e.g. Dedicated AHUs per classified area, once-through for beta-lactam segregation…">${escHtml(d.hvac_philosophy || '')}</textarea>
+    </div>
+    <div class="urs-field full">
+      <label class="urs-label">Cleanroom Classification</label>
+      <textarea class="urs-textarea" id="fw-cleanroom-classification" placeholder="e.g. Grade D general manufacturing, Grade C dispensing…">${escHtml(d.cleanroom_classification || '')}</textarea>
+    </div>
+    <div class="urs-field">
+      <label class="urs-label">Material Flow</label>
+      <textarea class="urs-textarea" id="fw-material-flow" placeholder="Receipt → dispensing → processing → packaging → release…">${escHtml(d.material_flow || '')}</textarea>
+    </div>
+    <div class="urs-field">
+      <label class="urs-label">Personnel Flow</label>
+      <textarea class="urs-textarea" id="fw-personnel-flow" placeholder="Gowning sequence, entry/exit routes…">${escHtml(d.personnel_flow || '')}</textarea>
+    </div>
+    <div class="urs-field">
+      <label class="urs-label">Waste Flow</label>
+      <textarea class="urs-textarea" id="fw-waste-flow" placeholder="Segregation, disposal route…">${escHtml(d.waste_flow || '')}</textarea>
+    </div>
+    <div class="urs-field">
+      <label class="urs-label">Expansion Requirements</label>
+      <textarea class="urs-textarea" id="fw-expansion-requirements" placeholder="Future capacity/space to reserve…">${escHtml(d.expansion_requirements || '')}</textarea>
+    </div>
+    <div class="urs-field">
+      <label class="urs-label">Automation Requirements</label>
+      <textarea class="urs-textarea" id="fw-automation-requirements" placeholder="Manual / semi-automated / fully automated…">${escHtml(d.automation_requirements || '')}</textarea>
+    </div>
+    <div class="urs-field">
+      <label class="urs-label">Validation Expectations</label>
+      <textarea class="urs-textarea" id="fw-validation-expectations" placeholder="Leave blank for the standard GAMP 5 risk-based lifecycle (Stage 2)">${escHtml(d.validation_expectations || '')}</textarea>
+    </div>
+  </div>
+
+  ${renderDesignBasisPanel(ursState.selectedFacility?.design_basis || {})}
+
+  <div style="display:flex;justify-content:space-between;margin-top:24px">
+    <button class="btn-urs-secondary" style="background:rgba(61,47,33,.06);color:var(--navy);border-color:var(--border)" onclick="wizardBack()"><span class='icon' data-lucide='arrow-left'></span> Back</button>
+    <button class="btn-urs-primary" onclick="wizardNext()">Next: Generate Requirements <span class='icon' data-lucide='arrow-right'></span></button>
+  </div>`;
+
+  if (facilityId) await refreshFacilityNodeTree(facilityId);
+}
+
+/** Stage 1.1 — progressive-disclosure panel (native <details>, no extra JS
+ * needed to expand/collapse) holding the facility's durable design-basis
+ * metadata: capacity, future expansion, per-utility design philosophy,
+ * validation strategy, and default requirement source. Collapsed by
+ * default so Step 2 doesn't grow visually busier for a wizard that leaves
+ * these optional. */
+function renderDesignBasisPanel(db) {
+  const utilityPhilosophyRows = UTILITY_PHILOSOPHY_SYSTEMS.map(system => `
+    <div class="urs-field">
+      <label class="urs-label">${system}</label>
+      <select class="urs-select" data-utility-philosophy="${system}">
+        <option value="">Not specified</option>
+        ${UTILITY_PHILOSOPHY_OPTIONS.map(p => `<option ${(db.utility_philosophy || {})[system] === p ? "selected" : ""}>${p}</option>`).join("")}
+      </select>
+    </div>`).join("");
+
+  return `
+  <details class="urs-design-basis-panel" style="margin-top:24px">
+    <summary class="urs-section-header" style="cursor:pointer;margin:0"><div class="section-icon"><span class='icon' data-lucide='sliders'></span></div>Design Basis (Capacity, Expansion, Utility Philosophy, Validation Strategy) — optional, expand to add</summary>
+    <div style="padding-top:16px">
+      <div class="urs-form-grid">
+        <div class="urs-field">
+          <label class="urs-label">Current Capacity</label>
+          <div style="display:flex;gap:8px">
+            <input class="urs-input" id="fw-current-capacity-value" value="${escHtml(db.current_capacity_value || '')}" placeholder="e.g. 500,000" style="flex:1">
+            <select class="urs-select" id="fw-current-capacity-unit" style="max-width:140px">
+              <option value="">Unit…</option>
+              ${CAPACITY_UNIT_OPTIONS.map(u => `<option ${db.current_capacity_unit === u ? "selected" : ""}>${u}</option>`).join("")}
+            </select>
+          </div>
+        </div>
+        <div class="urs-field">
+          <label class="urs-label">Annual Capacity</label>
+          <div style="display:flex;gap:8px">
+            <input class="urs-input" id="fw-annual-capacity-value" value="${escHtml(db.annual_capacity_value || '')}" placeholder="e.g. 150,000,000" style="flex:1">
+            <select class="urs-select" id="fw-annual-capacity-unit" style="max-width:140px">
+              <option value="">Unit…</option>
+              ${CAPACITY_UNIT_OPTIONS.map(u => `<option ${db.annual_capacity_unit === u ? "selected" : ""}>${u}</option>`).join("")}
+            </select>
+          </div>
+        </div>
+        <div class="urs-field">
+          <label class="urs-label">Expandable Design</label>
+          <select class="urs-select" id="fw-expandable-design">
+            <option value="no" ${!db.expandable_design ? "selected" : ""}>No</option>
+            <option value="yes" ${db.expandable_design ? "selected" : ""}>Yes</option>
+          </select>
+        </div>
+        <div class="urs-field">
+          <label class="urs-label">Future Capacity</label>
+          <div style="display:flex;gap:8px">
+            <input class="urs-input" id="fw-future-capacity-value" value="${escHtml(db.future_capacity_value || '')}" placeholder="e.g. 750,000" style="flex:1">
+            <select class="urs-select" id="fw-future-capacity-unit" style="max-width:140px">
+              <option value="">Unit…</option>
+              ${CAPACITY_UNIT_OPTIONS.map(u => `<option ${db.future_capacity_unit === u ? "selected" : ""}>${u}</option>`).join("")}
+            </select>
+          </div>
+        </div>
+        <div class="urs-field">
+          <label class="urs-label">Planned Expansion %</label>
+          <input class="urs-input" id="fw-planned-expansion-pct" value="${escHtml(db.planned_expansion_pct || '')}" placeholder="e.g. 50">
+        </div>
+        <div class="urs-field">
+          <label class="urs-label">Validation Strategy</label>
+          <select class="urs-select" id="fw-validation-strategy">
+            <option value="">Not specified</option>
+            ${VALIDATION_STRATEGY_OPTIONS.map(v => `<option ${db.validation_strategy === v ? "selected" : ""}>${v}</option>`).join("")}
+          </select>
+        </div>
+        <div class="urs-field">
+          <label class="urs-label">Requirement Source</label>
+          <select class="urs-select" id="fw-requirement-source">
+            <option value="">Not specified</option>
+            ${REQUIREMENT_SOURCE_OPTIONS.map(r => `<option ${db.requirement_source === r ? "selected" : ""}>${r}</option>`).join("")}
+          </select>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Applied to every library/AI-generated requirement for traceability (RTM).</div>
+        </div>
+      </div>
+      <div class="urs-label" style="margin:16px 0 10px">Utility Design Philosophy (per system, optional)</div>
+      <div class="urs-form-grid">${utilityPhilosophyRows}</div>
+    </div>
+  </details>`;
+}
+
+async function refreshFacilityNodeTree(facilityId) {
+  const treeEl = document.getElementById("fw-node-tree");
+  const parentSel = document.getElementById("fw-node-parent");
+  if (!treeEl) return;
+  try {
+    const nodes = await fetch(`/facility/${facilityId}/nodes`).then(r => r.json());
+    ursState.facilityNodes = nodes || [];
+    if (!nodes.length) {
+      treeEl.innerHTML = `<p style="font-size:13px;color:var(--text-muted);padding:8px 0">No building/floor/area/room hierarchy added yet — optional, but recommended for a more specific URS.</p>`;
+    } else {
+      treeEl.innerHTML = nodes.map(n => `
+        <div class="urs-facility-node-row" style="padding-left:${(n.parent_id ? 20 : 0)}px">
+          <span class="urs-tag urs-tag-category">${n.node_type}</span>
+          <span>${escHtml(n.name)}</span>
+          ${n.attributes && n.attributes.classification ? `<span class="urs-tag" style="background:#F1ECE6;color:#66615B">${escHtml(n.attributes.classification)}</span>` : ""}
+          <button class="req-action-btn delete" title="Delete" onclick="deleteFacilityNode(${n.id}, ${facilityId})" style="margin-left:auto"></button>
+        </div>`).join("");
+    }
+    if (parentSel) {
+      parentSel.innerHTML = `<option value="">No parent (top-level)</option>` +
+        nodes.map(n => `<option value="${n.id}">${"— ".repeat(n.parent_id ? 1 : 0)}${escHtml(n.name)} (${n.node_type})</option>`).join("");
+    }
+  } catch (e) {
+    treeEl.innerHTML = ursErrorStateHTML("Couldn't load the building hierarchy", e.message, `refreshFacilityNodeTree(${facilityId})`);
+  }
+}
+
+window.addFacilityNode = async function () {
+  const facilityId = ursState.selectedFacility?.id;
+  if (!facilityId) { ursToast("Save the facility (Step 1) first", "error"); return; }
+  const nodeType = document.getElementById("fw-node-type")?.value || "building";
+  const parentId = document.getElementById("fw-node-parent")?.value || null;
+  const name = document.getElementById("fw-node-name")?.value.trim() || "";
+  const classification = document.getElementById("fw-node-classification")?.value.trim() || "";
+  if (!name) { ursToast("Enter a name for the node", "error"); return; }
+  try {
+    await fetch(`/facility/${facilityId}/nodes`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        node_type: nodeType, parent_id: parentId || null, name,
+        attributes: classification ? { classification } : {},
+      }),
+    }).then(r => r.json());
+    document.getElementById("fw-node-name").value = "";
+    document.getElementById("fw-node-classification").value = "";
+    await refreshFacilityNodeTree(facilityId);
+  } catch (e) {
+    ursToast(`Failed to add node: ${e.message}`, "error");
+  }
+};
+
+window.deleteFacilityNode = async function (nodeId, facilityId) {
+  if (!confirm("Delete this node and everything under it?")) return;
+  try {
+    await fetch(`/facility/nodes/${nodeId}`, { method: "DELETE" });
+    await refreshFacilityNodeTree(facilityId);
+  } catch (e) {
+    ursToast(`Failed to delete node: ${e.message}`, "error");
+  }
+};
+
+/** Reads Step 2 fields into wizardData (facility_data shape expected by
+ * routes/urs.py's create_urs facility branch) and sets urs_type/facility_id
+ * so createURSRecord()'s generic POST body is complete without any change
+ * to createURSRecord() itself. Also (Stage 1.1) persists the Design Basis
+ * panel's fields onto the Facility record itself via PUT /facility/<id> —
+ * capacity/expansion/utility-philosophy/validation-strategy/requirement-
+ * source are durable facility attributes, not just this URS document's
+ * wizard snapshot (see facility_database.py's module docstring), so they
+ * belong on the Facility, matching where classification/product_category/
+ * regulatory_market already live. Async now (Stage 1.1) — wizardNext()
+ * awaits it the same way it already awaits collectFacilityStep1Data(). */
+async function collectFacilityStep2Data() {
+  const d = ursState.wizardData;
+  const checkedSystems = [...document.querySelectorAll('input[name="facility-system"]:checked')].map(cb => cb.value);
+  Object.assign(d, {
+    urs_type: "facility",
+    facility_id: ursState.selectedFacility?.id,
+    title: d.title || `Facility URS – ${d.facility_name || ""}`,
+    manufacturing_areas: document.getElementById("fw-manufacturing-areas")?.value.trim() || "",
+    warehouse_areas: document.getElementById("fw-warehouse-areas")?.value.trim() || "",
+    qc_areas: document.getElementById("fw-qc-areas")?.value.trim() || "",
+    utilities_required: checkedSystems,
+    hvac_philosophy: document.getElementById("fw-hvac-philosophy")?.value.trim() || "",
+    cleanroom_classification: document.getElementById("fw-cleanroom-classification")?.value.trim() || "",
+    material_flow: document.getElementById("fw-material-flow")?.value.trim() || "",
+    personnel_flow: document.getElementById("fw-personnel-flow")?.value.trim() || "",
+    waste_flow: document.getElementById("fw-waste-flow")?.value.trim() || "",
+    expansion_requirements: document.getElementById("fw-expansion-requirements")?.value.trim() || "",
+    automation_requirements: document.getElementById("fw-automation-requirements")?.value.trim() || "",
+    validation_expectations: document.getElementById("fw-validation-expectations")?.value.trim() || "",
+  });
+
+  const utilityPhilosophy = {};
+  document.querySelectorAll('[data-utility-philosophy]').forEach(sel => {
+    if (sel.value) utilityPhilosophy[sel.dataset.utilityPhilosophy] = sel.value;
+  });
+  const designBasis = {
+    current_capacity_value: document.getElementById("fw-current-capacity-value")?.value.trim() || "",
+    current_capacity_unit: document.getElementById("fw-current-capacity-unit")?.value || "",
+    annual_capacity_value: document.getElementById("fw-annual-capacity-value")?.value.trim() || "",
+    annual_capacity_unit: document.getElementById("fw-annual-capacity-unit")?.value || "",
+    future_capacity_value: document.getElementById("fw-future-capacity-value")?.value.trim() || "",
+    future_capacity_unit: document.getElementById("fw-future-capacity-unit")?.value || "",
+    planned_expansion_pct: document.getElementById("fw-planned-expansion-pct")?.value.trim() || "",
+    expandable_design: document.getElementById("fw-expandable-design")?.value === "yes",
+    utility_philosophy: utilityPhilosophy,
+    validation_strategy: document.getElementById("fw-validation-strategy")?.value || "",
+    requirement_source: document.getElementById("fw-requirement-source")?.value || "",
+  };
+
+  if (ursState.selectedFacility?.id) {
+    try {
+      const updated = await fetch(`/facility/${ursState.selectedFacility.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ design_basis: designBasis }),
+      }).then(r => r.json());
+      ursState.selectedFacility = updated;
+    } catch (e) {
+      ursToast(`Failed to save design basis: ${e.message}`, "error");
+    }
+  }
 }
 
 /* ── Step 2: Project Information ───────────────────────────────────────────── */
@@ -776,9 +1365,12 @@ function collectStep2Data() {
 
 /* ── Step 3: Generation Options ────────────────────────────────────────────── */
 function renderStep3(body) {
-  const isComputerized = ["computerized", "hvac"].includes(ursState.wizardData.category);
+  const isFacility = ursState.ursType === "facility";
+  const isComputerized = !isFacility && ["computerized", "hvac"].includes(ursState.wizardData.category);
+  const entityName = isFacility ? (ursState.wizardData.facility_name || "the facility") : (ursState.wizardData.equipment_name || "the equipment");
+  const sectionList = currentSectionList();
 
-  const defaultSections = [
+  const defaultSections = isFacility ? sectionList : [
     "General Requirements",
     "Functional Requirements",
     "Performance Requirements",
@@ -790,7 +1382,7 @@ function renderStep3(body) {
     ...(isComputerized ? ["Security Requirements", "Electronic Records", "Electronic Signature", "Backup & Recovery", "Cybersecurity"] : []),
   ];
 
-  let sectionsHtml = REQUIREMENT_SECTIONS.map(s => `
+  let sectionsHtml = sectionList.map(s => `
     <label class="urs-section-checkbox">
       <input type="checkbox" name="section" value="${s}" ${defaultSections.includes(s) ? "checked" : ""}>
       ${s}
@@ -803,7 +1395,7 @@ function renderStep3(body) {
       <div class="urs-ai-icon"><span class=\'icon\' data-lucide=\'sparkles\'></span></div>
       <div>
         <div class="urs-ai-panel-title">AI-Powered Requirement Generation</div>
-        <div class="urs-ai-panel-sub">Gemini 2.5 Flash will generate pharmaceutical-grade requirements for: <strong>${escHtml(ursState.wizardData.equipment_name || "the equipment")}</strong></div>
+        <div class="urs-ai-panel-sub">Gemini 2.5 Flash will generate pharmaceutical-grade requirements for: <strong>${escHtml(entityName)}</strong></div>
       </div>
     </div>
     <div style="margin-bottom:12px">
@@ -821,11 +1413,11 @@ function renderStep3(body) {
       <div class="urs-ai-icon" style="background:linear-gradient(135deg,#5F8A61,#5F8A61)"><span class=\'icon\' data-lucide=\'book-open\'></span></div>
       <div>
         <div class="urs-ai-panel-title">Requirement Library</div>
-        <div class="urs-ai-panel-sub">Load pre-built GMP requirements from the equipment library (instant, no AI needed)</div>
+        <div class="urs-ai-panel-sub">Load pre-built GMP requirements from the ${isFacility ? "facility" : "equipment"} library (instant, no AI needed)</div>
       </div>
     </div>
     <button class="btn-urs-outline" style="border-color:#5F8A61;color:#5F8A61" onclick="loadLibraryRequirements()">
-      <span class=\'icon\' data-lucide=\'book-open\'></span> Load Library Requirements for ${escHtml(ursState.wizardData.equipment_name || "this equipment")}
+      <span class=\'icon\' data-lucide=\'book-open\'></span> Load Library Requirements for ${escHtml(entityName)}
     </button>
   </div>
 
@@ -856,7 +1448,10 @@ window.loadLibraryRequirements = async function () {
     const res = await fetch(`/urs/${ursState.currentURS.id}/library`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ equipment_type: ursState.selectedEquipmentType }),
+      body: JSON.stringify({
+        equipment_type: ursState.selectedEquipmentType,
+        facility_type: ursState.selectedFacilityType,
+      }),
     }).then(r => r.json());
     ursState.requirements = res.requirements || [];
  ursToast(`${res.loaded} library requirements loaded`, "success");
@@ -1153,7 +1748,7 @@ function buildReqRow(req, idx) {
   return `<tr data-idx="${idx}" data-id="${req.id || ''}">
     <td class="req-id"><span contenteditable="true" class="editable" data-field="req_id">${escHtml(req.req_id || '')}</span></td>
     <td class="req-section"><select class="urs-req-filter" style="width:100%;font-size:12px" data-field="section" onchange="markRowDirty(this)">
-      ${REQUIREMENT_SECTIONS.map(s => `<option ${s===req.section?'selected':''}>${s}</option>`).join("")}
+      ${currentSectionList().map(s => `<option ${s===req.section?'selected':''}>${s}</option>`).join("")}
     </select></td>
     <td class="req-text"><span contenteditable="true" class="editable" data-field="requirement">${escHtml(req.requirement || '')}</span></td>
     <td><select class="urs-req-filter" style="width:80px;font-size:12px" data-field="priority" onchange="markRowDirty(this)">
@@ -1250,13 +1845,17 @@ window.saveAllRequirements = async function () {
 function renderStep5(body) {
   const urs = ursState.currentURS || {};
   const reqCount = ursState.requirements.length;
+  const isFacility = ursState.ursType === "facility";
+  const entityName = isFacility
+    ? (urs.title || ursState.wizardData.title || ursState.wizardData.facility_name || "")
+    : (urs.equipment_name || ursState.wizardData.equipment_name || "");
   body.innerHTML = `
   <div class="urs-section-header"><div class="section-icon"><span class=\'icon\' data-lucide=\'check-circle-2\'></span></div>URS Ready for Submission</div>
 
   <div style="background:linear-gradient(135deg,#E8F2EA,#E8F2EA);border:1px solid #E8F2EA;border-radius:12px;padding:24px;margin-bottom:24px;text-align:center">
     <div style="font-size:48px;margin-bottom:12px"><span class=\'icon\' data-lucide=\'party-popper\'></span></div>
     <div style="font-size:20px;font-weight:700;color:#5F8A61;margin-bottom:8px">URS Successfully Created!</div>
-    <div style="font-size:14px;color:#5F8A61">${reqCount} requirements captured for <strong>${escHtml(urs.equipment_name || ursState.wizardData.equipment_name || "")}</strong></div>
+    <div style="font-size:14px;color:#5F8A61">${reqCount} requirements captured for <strong>${escHtml(entityName)}</strong></div>
   </div>
 
   <div class="urs-info-grid">
@@ -1309,11 +1908,19 @@ function renderStep5(body) {
 /* ── Wizard Navigation ──────────────────────────────────────────────────────── */
 window.wizardNext = async function () {
   const step = ursState.wizardStep;
+  const isFacility = ursState.ursType === "facility";
+
   if (step === 1) {
-    if (!ursState.selectedEquipmentType) { ursToast("Select an equipment type", "error"); return; }
+    if (isFacility) {
+      if (!(await collectFacilityStep1Data())) return;
+    } else if (!ursState.selectedEquipmentType) {
+      ursToast("Select an equipment type", "error");
+      return;
+    }
     wizardGoTo(2);
   } else if (step === 2) {
-    collectStep2Data();
+    if (isFacility) await collectFacilityStep2Data();
+    else collectStep2Data();
     if (!ursState.wizardData.title?.trim()) { ursToast("URS title is required", "error"); return; }
     if (!ursState.currentURS) await createURSRecord();
     else await fetch(`/urs/${ursState.currentURS.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ursState.wizardData) });
@@ -1401,6 +2008,8 @@ function renderOverviewPanel(panel, urs, reqs) {
   const gmpCritical = reqs.filter(r => r.gmp_criticality === "GMP-Critical").length;
   const sectionCounts = {};
   reqs.forEach(r => { sectionCounts[r.section] = (sectionCounts[r.section] || 0) + 1; });
+  const isFacility = urs.urs_type === "facility";
+  const fd = urs.facility_data || {};
 
   panel.innerHTML = `
   <div class="urs-info-grid">
@@ -1412,18 +2021,27 @@ function renderOverviewPanel(panel, urs, reqs) {
       ${infoRow("Revision", urs.revision)}
       ${infoRow("Status", formatStatus(urs.status))}
       ${infoRow("Category", urs.category)}
-      ${infoRow("Equipment Type", urs.equipment_type)}
-      ${infoRow("Validation Type", urs.validation_type)}
+      ${infoRow(isFacility ? "Facility Type" : "Equipment Type", urs.equipment_type)}
+      ${isFacility ? "" : infoRow("Validation Type", urs.validation_type)}
     </div>
     <div class="urs-info-card">
-      <div class="urs-info-card-title">Equipment Details</div>
-      ${infoRow("Equipment Name", urs.equipment_name)}
-      ${infoRow("Equipment ID", urs.equipment_id)}
-      ${infoRow("Manufacturer", urs.manufacturer)}
-      ${infoRow("Model", urs.model)}
-      ${infoRow("Capacity", urs.capacity)}
-      ${infoRow("Department", urs.department)}
-      ${infoRow("Site / Location", [urs.site, urs.location].filter(Boolean).join(", "))}
+      <div class="urs-info-card-title">${isFacility ? "Facility Details" : "Equipment Details"}</div>
+      ${isFacility ? `
+        ${infoRow("Regulatory Market", fd.regulatory_market)}
+        ${infoRow("Site Capacity", fd.site_capacity)}
+        ${infoRow("Manufacturing Type", fd.manufacturing_type)}
+        ${infoRow("Design Standards", fd.design_standards)}
+        ${infoRow("Utilities / Systems", (fd.utilities_required || []).join(", "))}
+        ${infoRow("Cleanroom Classification", fd.cleanroom_classification)}
+      ` : `
+        ${infoRow("Equipment Name", urs.equipment_name)}
+        ${infoRow("Equipment ID", urs.equipment_id)}
+        ${infoRow("Manufacturer", urs.manufacturer)}
+        ${infoRow("Model", urs.model)}
+        ${infoRow("Capacity", urs.capacity)}
+        ${infoRow("Department", urs.department)}
+        ${infoRow("Site / Location", [urs.site, urs.location].filter(Boolean).join(", "))}
+      `}
     </div>
     <div class="urs-info-card">
       <div class="urs-info-card-title">Responsibility</div>
@@ -1513,7 +2131,7 @@ function buildDetailRow(req, idx) {
   return `<tr data-idx="${idx}" data-id="${req.id || ''}">
     <td class="req-id"><span contenteditable="true" data-field="req_id">${escHtml(req.req_id || '')}</span></td>
     <td class="req-section"><select class="urs-req-filter" style="width:100%;font-size:12px" data-field="section">
-      ${REQUIREMENT_SECTIONS.map(s => `<option ${s===req.section?'selected':''}>${s}</option>`).join("")}
+      ${currentSectionList().map(s => `<option ${s===req.section?'selected':''}>${s}</option>`).join("")}
     </select></td>
     <td class="req-text"><span contenteditable="true" data-field="requirement">${escHtml(req.requirement || '')}</span></td>
     <td><span contenteditable="true" data-field="rationale" style="font-size:12px">${escHtml(req.rationale || '')}</span></td>

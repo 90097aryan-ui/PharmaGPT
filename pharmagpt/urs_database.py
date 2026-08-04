@@ -159,11 +159,22 @@ def create_urs(data: dict, *, company_id: str) -> dict:
     responsible for populating it from the authenticated user before calling
     this function.
 
+    `data["urs_type"]` selects the document flavour: 'equipment' (default,
+    unchanged behaviour) or 'facility' (Greenfield Facility URS, Stage 1) —
+    both flavours share every table/column here; `facility_id` references
+    facility_database.py's `facilities` table (loose reference, same style
+    as `linked_project_id`/`equipment_id`) and `facility_data` is a JSON
+    blob holding the facility wizard's structured fields that don't fit the
+    equipment-shaped columns already on this table.
+
     `company_id` must be the caller's authenticated tenant
     (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py.
     """
     urs_number = _next_document_number("urs_number", "URS")
     doc_number = _next_document_number("doc_number", "QA-URS")
+    urs_type = data.get("urs_type") or "equipment"
+    facility_data = data.get("facility_data")
+    facility_data_json = json.dumps(facility_data) if isinstance(facility_data, dict) else "{}"
     conn = get_connection()
     with conn:
         cur = conn.execute(
@@ -171,8 +182,9 @@ def create_urs(data: dict, *, company_id: str) -> dict:
                (urs_number, doc_number, title, revision, version, status, department, site, location,
                 equipment_name, equipment_id, manufacturer, model, capacity, category,
                 equipment_type, validation_type, purpose, intended_use, process_description,
-                prepared_by, reviewed_by, approved_by, effective_date, linked_project_id, company_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                prepared_by, reviewed_by, approved_by, effective_date, linked_project_id, company_id,
+                urs_type, facility_id, facility_data)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 urs_number,
                 doc_number,
@@ -200,6 +212,9 @@ def create_urs(data: dict, *, company_id: str) -> dict:
                 "",
                 data.get("linked_project_id"),
                 company_id,
+                urs_type,
+                data.get("facility_id"),
+                facility_data_json,
             ),
         )
         new_id = cur.lastrowid
@@ -217,6 +232,7 @@ def get_urs(urs_id: int) -> dict | None:
         return None
     d = dict(row)
     d["ai_review_data"] = json.loads(d.get("ai_review_data") or "{}")
+    d["facility_data"] = json.loads(d.get("facility_data") or "{}")
     return d
 
 
@@ -245,6 +261,7 @@ def get_all_urs(company_id: str | None = None, filters: dict | None = None) -> l
     for r in rows:
         d = dict(r)
         d["ai_review_data"] = json.loads(d.get("ai_review_data") or "{}")
+        d["facility_data"] = json.loads(d.get("facility_data") or "{}")
         result.append(d)
     return result
 
@@ -256,12 +273,15 @@ def update_urs(urs_id: int, data: dict) -> dict | None:
         "category", "equipment_type", "validation_type", "purpose", "intended_use",
         "process_description", "prepared_by", "reviewed_by", "approved_by", "effective_date",
         "compliance_score", "completeness_score", "ai_review_data",
+        "facility_data",  # facility URS structured wizard fields (urs_type='facility')
     ]
     updates = {k: data[k] for k in allowed if k in data}
     if not updates:
         return get_urs(urs_id)
     if "ai_review_data" in updates and isinstance(updates["ai_review_data"], dict):
         updates["ai_review_data"] = json.dumps(updates["ai_review_data"])
+    if "facility_data" in updates and isinstance(updates["facility_data"], dict):
+        updates["facility_data"] = json.dumps(updates["facility_data"])
     set_clause = ", ".join(f"{k} = ?" for k in updates)
     values = list(updates.values()) + [urs_id]
     conn = get_connection()
@@ -428,8 +448,8 @@ def save_requirements(urs_id: int, requirements: list[dict]) -> list[dict]:
                    (urs_id, req_id, section, requirement, rationale, priority,
                     gmp_criticality, regulatory_ref, verification_method,
                     acceptance_criteria, risk_link, traceability_link,
-                    comments, status, source, sort_order)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    comments, status, source, sort_order, requirement_source)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     urs_id,
                     req.get("req_id", f"REQ-{i+1:03d}"),
@@ -447,6 +467,7 @@ def save_requirements(urs_id: int, requirements: list[dict]) -> list[dict]:
                     req.get("status", "draft"),
                     req.get("source", "ai"),
                     i,
+                    req.get("requirement_source", ""),
                 ),
             )
         conn.execute(
@@ -480,8 +501,8 @@ def append_requirements(urs_id: int, requirements: list[dict]) -> list[dict]:
                    (urs_id, req_id, section, requirement, rationale, priority,
                     gmp_criticality, regulatory_ref, verification_method,
                     acceptance_criteria, risk_link, traceability_link,
-                    comments, status, source, sort_order)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    comments, status, source, sort_order, requirement_source)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     urs_id,
                     req.get("req_id", ""),
@@ -499,6 +520,7 @@ def append_requirements(urs_id: int, requirements: list[dict]) -> list[dict]:
                     req.get("status", "draft"),
                     req.get("source", "ai"),
                     max_order + offset,
+                    req.get("requirement_source", ""),
                 ),
             )
         conn.execute(
@@ -519,8 +541,8 @@ def add_requirement(urs_id: int, req: dict) -> dict:
                (urs_id, req_id, section, requirement, rationale, priority,
                 gmp_criticality, regulatory_ref, verification_method,
                 acceptance_criteria, risk_link, traceability_link,
-                comments, status, source, sort_order)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                comments, status, source, sort_order, requirement_source)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 urs_id,
                 req.get("req_id", ""),
@@ -538,6 +560,7 @@ def add_requirement(urs_id: int, req: dict) -> dict:
                 req.get("status", "draft"),
                 req.get("source", "manual"),
                 max_order + 1,
+                req.get("requirement_source", ""),
             ),
         )
         new_id = cur.lastrowid
@@ -562,7 +585,7 @@ def update_requirement(req_id: int, data: dict) -> dict | None:
     allowed = [
         "req_id", "section", "requirement", "rationale", "priority", "gmp_criticality",
         "regulatory_ref", "verification_method", "acceptance_criteria",
-        "risk_link", "traceability_link", "comments", "status",
+        "risk_link", "traceability_link", "comments", "status", "requirement_source",
     ]
     updates = {k: data[k] for k in allowed if k in data}
     if not updates:

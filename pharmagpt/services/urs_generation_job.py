@@ -196,6 +196,12 @@ def _run_generation_job(
                 req["req_id"] = f"{prefix}-{section_counters[prefix]:03d}"
                 req["source"] = "ai"
                 req["status"] = "draft"
+                # Stage 1.1: stamp the facility's declared default Requirement
+                # Source (RTM traceability) onto every AI-generated
+                # requirement. Always '' for the equipment flow and for any
+                # facility with none declared — urs_info has no
+                # "requirement_source" key there, so .get() falls through.
+                req["requirement_source"] = urs_info.get("requirement_source", "")
                 numbered_batch.append(req)
 
             if numbered_batch:

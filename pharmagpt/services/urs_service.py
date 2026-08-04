@@ -17,7 +17,21 @@ import json
 # ── AI Prompt for requirement generation ──────────────────────────────────────
 
 def build_generation_prompt(urs_info: dict, sections: list[str]) -> str:
-    """Build a structured Gemini prompt for AI requirement generation."""
+    """Build a structured Gemini prompt for AI requirement generation.
+
+    Dispatches on urs_info["urs_type"]: 'facility' delegates to the
+    dedicated Facility URS prompt (prompts/facility_urs_prompt.py, distinct
+    wording per Stage 1 requirements — a facility document is not an
+    equipment document); anything else (including the default, unset case)
+    keeps the original equipment/system prompt below unmodified. Both
+    branches return a prompt whose output the SAME
+    services/urs_generation_job.py pipeline (batching, schema validation,
+    retry, partial recovery) consumes — only the prompt text differs.
+    """
+    if urs_info.get("urs_type") == "facility":
+        from pharmagpt.prompts.facility_urs_prompt import build_generation_prompt as _build_facility_prompt
+        return _build_facility_prompt(urs_info, sections)
+
     equipment_name = urs_info.get("equipment_name", "the equipment")
     equipment_type = urs_info.get("equipment_type", "")
     category = urs_info.get("category", "")
@@ -84,9 +98,9 @@ def build_ai_review_prompt(urs_info: dict, requirements: list[dict]) -> str:
 
 URS UNDER REVIEW:
 - Title: {urs_info.get('title', '')}
-- Equipment: {urs_info.get('equipment_name', '')}
+- Equipment/Facility: {urs_info.get('equipment_name') or urs_info.get('title', '')}
 - Category: {urs_info.get('category', '')}
-- Equipment Type: {urs_info.get('equipment_type', '')}
+- Equipment/Facility Type: {urs_info.get('equipment_type', '')}
 - Total Requirements: {len(requirements)}
 
 SECTIONS AND REQUIREMENT COUNTS:
@@ -126,11 +140,19 @@ OUTPUT FORMAT — Return ONLY a JSON object:
 # ── DOCX Export ───────────────────────────────────────────────────────────────
 
 def build_urs_markdown(urs: dict, requirements: list[dict]) -> str:
-    """Convert URS data to a professional Markdown document for DOCX export."""
+    """Convert URS data to a professional Markdown document for DOCX export.
+
+    Reuses the exact same requirements-grouping/summary/regulatory-framework/
+    traceability sections for both URS types (see requirement #8 — "reuse the
+    existing DOCX engine, do not duplicate export logic"); only the header
+    block differs (Facility Information vs. Equipment / System Information),
+    branched via urs["urs_type"].
+    """
+    is_facility = urs.get("urs_type") == "facility"
     lines = []
 
     # Title block
-    lines.append(f"# User Requirement Specification")
+    lines.append(f"# {'Facility ' if is_facility else ''}User Requirement Specification")
     lines.append(f"## {urs.get('title', 'Untitled URS')}")
     lines.append("")
 
@@ -151,18 +173,33 @@ def build_urs_markdown(urs: dict, requirements: list[dict]) -> str:
     lines.append(f"| Effective Date | {urs.get('effective_date', '—')} |")
     lines.append("")
 
-    lines.append("**Equipment / System Information**")
-    lines.append("")
-    lines.append("| Field | Value |")
-    lines.append("|-------|-------|")
-    lines.append(f"| Equipment Name | {urs.get('equipment_name', '—')} |")
-    lines.append(f"| Equipment ID | {urs.get('equipment_id', '—')} |")
-    lines.append(f"| Manufacturer | {urs.get('manufacturer', '—')} |")
-    lines.append(f"| Model | {urs.get('model', '—')} |")
-    lines.append(f"| Capacity | {urs.get('capacity', '—')} |")
-    lines.append(f"| Category | {urs.get('category', '—')} |")
-    lines.append(f"| Validation Type | {urs.get('validation_type', '—')} |")
-    lines.append("")
+    if is_facility:
+        fd = urs.get("facility_data") or {}
+        lines.append("**Facility Information**")
+        lines.append("")
+        lines.append("| Field | Value |")
+        lines.append("|-------|-------|")
+        lines.append(f"| Facility Name | {urs.get('title', '—')} |")
+        lines.append(f"| Facility Type | {urs.get('equipment_type') or fd.get('facility_type', '—')} |")
+        lines.append(f"| Product Category | {urs.get('category', '—')} |")
+        lines.append(f"| Regulatory Market | {fd.get('regulatory_market', '—')} |")
+        lines.append(f"| Site Capacity | {fd.get('site_capacity', '—')} |")
+        lines.append(f"| Manufacturing Type | {fd.get('manufacturing_type', '—')} |")
+        lines.append(f"| Design Standards | {fd.get('design_standards', '—')} |")
+        lines.append("")
+    else:
+        lines.append("**Equipment / System Information**")
+        lines.append("")
+        lines.append("| Field | Value |")
+        lines.append("|-------|-------|")
+        lines.append(f"| Equipment Name | {urs.get('equipment_name', '—')} |")
+        lines.append(f"| Equipment ID | {urs.get('equipment_id', '—')} |")
+        lines.append(f"| Manufacturer | {urs.get('manufacturer', '—')} |")
+        lines.append(f"| Model | {urs.get('model', '—')} |")
+        lines.append(f"| Capacity | {urs.get('capacity', '—')} |")
+        lines.append(f"| Category | {urs.get('category', '—')} |")
+        lines.append(f"| Validation Type | {urs.get('validation_type', '—')} |")
+        lines.append("")
 
     lines.append("**Approval**")
     lines.append("")

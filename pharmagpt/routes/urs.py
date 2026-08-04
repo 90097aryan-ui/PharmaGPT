@@ -44,6 +44,7 @@ from datetime import date, datetime
 from flask import Blueprint, g, jsonify, request
 
 from pharmagpt import audit
+from pharmagpt import facility_database as facdb
 from pharmagpt import urs_database as udb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
@@ -55,6 +56,11 @@ from pharmagpt.services.urs_requirement_library import (
     build_numbered_requirements,
     list_equipment_types,
     get_sections_for_type,
+)
+from pharmagpt.services.facility_requirement_library import (
+    build_numbered_facility_requirements,
+    list_facility_types,
+    get_sections_for_facility_type,
 )
 from pharmagpt.state import gemini_client
 from pharmagpt.config import GEMINI_MODEL
@@ -96,6 +102,27 @@ def _current_role(fallback: str = "") -> str:
 bp = Blueprint("urs", __name__, url_prefix="/urs")
 
 
+def _facility_design_basis_kwargs(facility: dict) -> dict:
+    """Flatten a Facility record's Stage 1.1 metadata (classification, plus
+    the design_basis JSON blob) into the keyword arguments
+    facility_requirement_library's get/build functions and the facility
+    prompt builder both expect. One place for this mapping so load_library()
+    and generate_requirements() below can't drift apart on field names."""
+    db_ = facility.get("design_basis") or {}
+    return {
+        "product_category": facility.get("product_category", ""),
+        "classification": facility.get("classification", ""),
+        "regulatory_package": facility.get("regulatory_market", ""),
+        "utility_philosophy": db_.get("utility_philosophy") or {},
+        "validation_strategy": db_.get("validation_strategy", ""),
+        "expandable_design": bool(db_.get("expandable_design")),
+        "future_capacity_value": db_.get("future_capacity_value", ""),
+        "future_capacity_unit": db_.get("future_capacity_unit", ""),
+        "planned_expansion_pct": db_.get("planned_expansion_pct", ""),
+        "requirement_source": db_.get("requirement_source", ""),
+    }
+
+
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
 @bp.route("/dashboard")
@@ -126,10 +153,49 @@ def create_urs():
     if not g.tenant.company_id:
         return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
     data = request.get_json() or {}
-    if not data.get("title", "").strip() and not data.get("equipment_name", "").strip():
-        return jsonify({"error": "Title or equipment name is required"}), 400
-    if not data.get("title", "").strip():
-        data["title"] = f"URS – {data.get('equipment_name', 'New Equipment')}"
+    urs_type = data.get("urs_type") or "equipment"
+    if urs_type not in ("equipment", "facility"):
+        return jsonify({"error": "urs_type must be 'equipment' or 'facility'"}), 400
+
+    if urs_type == "facility":
+        # A facility URS always concerns a specific Facility record (the
+        # Building/Floor/Area/Room hierarchy and facility identity data the
+        # generation prompt draws on) — verify it exists and belongs to this
+        # tenant before creating the URS, exactly like an equipment URS
+        # trusts equipment_name/equipment_id as caller-supplied free text
+        # (the difference here is facility_id is a real FK we can and
+        # should validate).
+        facility_id = data.get("facility_id")
+        facility = facdb.get_facility_scoped(facility_id, g.tenant.company_id) if facility_id else None
+        if not facility:
+            return jsonify({"error": "A valid facility_id is required for a Facility URS"}), 400
+        if not data.get("title", "").strip():
+            data["title"] = f"Facility URS – {facility.get('facility_name', 'New Facility')}"
+        # Mirror the facility's identity fields onto the existing
+        # equipment-shaped columns so list/filter/dashboard views (which
+        # already query category/equipment_type) keep working unmodified
+        # for a facility URS without any of those views needing to branch.
+        data.setdefault("category", facility.get("product_category", ""))
+        data.setdefault("equipment_type", facility.get("facility_type", ""))
+        # facility_data holds only the wizard-specific structured fields that
+        # have no home on the `facilities` table (see facility_database.py) —
+        # generate_requirements() below fetches the *live* facility record
+        # for the identity fields (facility_type/regulatory_market/...) at
+        # generation time rather than snapshotting them here, so an edit to
+        # the Facility record is always reflected without touching the URS.
+        wizard_fields = (
+            "manufacturing_areas", "warehouse_areas", "qc_areas", "utilities_required",
+            "hvac_philosophy", "cleanroom_classification", "material_flow",
+            "personnel_flow", "waste_flow", "expansion_requirements",
+            "automation_requirements", "validation_expectations",
+        )
+        data.setdefault("facility_data", {k: data.get(k, "") for k in wizard_fields})
+    else:
+        if not data.get("title", "").strip() and not data.get("equipment_name", "").strip():
+            return jsonify({"error": "Title or equipment name is required"}), 400
+        if not data.get("title", "").strip():
+            data["title"] = f"URS – {data.get('equipment_name', 'New Equipment')}"
+
     # Prepared By is always the authenticated creator, never a client-
     # supplied value — urs_database.create_urs() also unconditionally
     # ignores urs_number/doc_number/revision/status/reviewed_by/approved_by/
@@ -245,30 +311,43 @@ def delete_requirement(uid, rid):
 
 @bp.route("/<int:uid>/library", methods=["POST"])
 def load_library(uid):
-    """Load pre-built library requirements for the URS equipment type."""
+    """Load pre-built library requirements for the URS's equipment type (or,
+    for a Facility URS, its facility type)."""
     urs = tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id)
     if not urs:
         return jsonify({"error": "URS not found"}), 404
     data = request.get_json() or {}
-    equipment_type = data.get("equipment_type") or urs.get("equipment_type", "")
-    if not equipment_type:
-        return jsonify({"error": "Equipment type required"}), 400
-    reqs = build_numbered_requirements(equipment_type)
+    if urs["urs_type"] == "facility":
+        facility_type = data.get("facility_type") or urs.get("equipment_type", "")
+        if not facility_type:
+            return jsonify({"error": "Facility type required"}), 400
+        facility = facdb.get_facility(urs.get("facility_id")) if urs.get("facility_id") else None
+        kwargs = _facility_design_basis_kwargs(facility) if facility else {}
+        reqs = build_numbered_facility_requirements(facility_type, **kwargs)
+    else:
+        equipment_type = data.get("equipment_type") or urs.get("equipment_type", "")
+        if not equipment_type:
+            return jsonify({"error": "Equipment type required"}), 400
+        reqs = build_numbered_requirements(equipment_type)
     saved = udb.save_requirements(uid, reqs)
     return jsonify({"loaded": len(reqs), "requirements": saved})
 
 
 @bp.route("/library/types", methods=["GET"])
 def library_types():
+    if request.args.get("urs_type") == "facility":
+        return jsonify({"types": list_facility_types()})
     return jsonify({"types": list_equipment_types()})
 
 
 @bp.route("/library/sections", methods=["GET"])
 def library_sections():
-    equipment_type = request.args.get("type", "")
-    if not equipment_type:
+    type_name = request.args.get("type", "")
+    if not type_name:
         return jsonify({"sections": []})
-    return jsonify({"sections": get_sections_for_type(equipment_type)})
+    if request.args.get("urs_type") == "facility":
+        return jsonify({"sections": get_sections_for_facility_type(type_name)})
+    return jsonify({"sections": get_sections_for_type(type_name)})
 
 
 # ── AI Generation (background job — poll for status) ─────────────────────────
@@ -288,17 +367,53 @@ def generate_requirements(uid):
         return jsonify({"error": "URS not found"}), 404
 
     data = request.get_json() or {}
-    sections = data.get("sections", [
-        "General Requirements", "Functional Requirements", "Performance Requirements",
-        "Safety Requirements", "GMP Requirements", "Data Integrity Requirements",
-        "Alarm Requirements", "Audit Trail",
-    ])
 
     urs_info = dict(urs)
-    urs_info.update({k: data.get(k, urs.get(k, "")) for k in (
-        "equipment_name", "equipment_type", "category", "purpose",
-        "intended_use", "process_description",
-    )})
+    if urs["urs_type"] == "facility":
+        default_sections = list(get_sections_for_facility_type(urs.get("equipment_type", "")))
+        sections = data.get("sections", default_sections)
+        facility = facdb.get_facility(urs.get("facility_id")) if urs.get("facility_id") else None
+        if facility:
+            db_ = facility.get("design_basis") or {}
+            urs_info.update({
+                "facility_name": facility.get("facility_name", ""),
+                "facility_type": facility.get("facility_type", ""),
+                "product_category": facility.get("product_category", ""),
+                "country": facility.get("country", ""),
+                "regulatory_market": facility.get("regulatory_market", ""),
+                "site_capacity": facility.get("site_capacity", ""),
+                "manufacturing_type": facility.get("manufacturing_type", ""),
+                "design_standards": facility.get("design_standards", ""),
+                "description": facility.get("description", ""),
+                # Stage 1.1 business-intelligence metadata — see
+                # prompts/facility_urs_prompt.py for how each field adapts
+                # the generated requirements.
+                "classification": facility.get("classification", ""),
+                "regulatory_package": facility.get("regulatory_market", ""),
+                "current_capacity_value": db_.get("current_capacity_value", ""),
+                "current_capacity_unit": db_.get("current_capacity_unit", ""),
+                "annual_capacity_value": db_.get("annual_capacity_value", ""),
+                "annual_capacity_unit": db_.get("annual_capacity_unit", ""),
+                "future_capacity_value": db_.get("future_capacity_value", ""),
+                "future_capacity_unit": db_.get("future_capacity_unit", ""),
+                "planned_expansion_pct": db_.get("planned_expansion_pct", ""),
+                "expandable_design": bool(db_.get("expandable_design")),
+                "utility_philosophy": db_.get("utility_philosophy") or {},
+                "validation_strategy": db_.get("validation_strategy", ""),
+                "requirement_source": db_.get("requirement_source", ""),
+            })
+            urs_info["facility_node_summary"] = facdb.summarize_nodes_for_prompt(facility["id"])
+        urs_info["facility_data"] = urs.get("facility_data", {})
+    else:
+        sections = data.get("sections", [
+            "General Requirements", "Functional Requirements", "Performance Requirements",
+            "Safety Requirements", "GMP Requirements", "Data Integrity Requirements",
+            "Alarm Requirements", "Audit Trail",
+        ])
+        urs_info.update({k: data.get(k, urs.get(k, "")) for k in (
+            "equipment_name", "equipment_type", "category", "purpose",
+            "intended_use", "process_description",
+        )})
 
     performed_by = _current_display_name(fallback="System")
     submit_generation_job(uid, urs_info, sections, performed_by=performed_by)

@@ -28,6 +28,11 @@ equipment           : PharmaGPT v1.0 Module 2 — Equipment as a first-class ent
 equipment_documents : Module 2 — polymorphic links from an Equipment record to
                       existing kb_documents/documents rows (no file duplication).
                       See equipment_database.py.
+facilities          : Greenfield Facility URS (Stage 1) — a Facility as a
+                      first-class entity, owned by a Project (same shape as
+                      Equipment). See facility_database.py.
+facility_nodes      : Stage 1 — self-referential Building/Floor/Area/Room
+                      hierarchy for a Facility. See facility_database.py.
 
 All tables are created automatically on first startup via init_db().
 Database file: pharmagpt/pharmagpt.db
@@ -344,6 +349,44 @@ def init_db() -> None:
     _add_column_if_missing(conn, "urs_projects", "company_id", "TEXT DEFAULT NULL")
     conn.commit()
     conn.execute("UPDATE urs_projects SET company_id = ? WHERE company_id IS NULL", (BOOTSTRAP_COMPANY_ID,))
+    conn.commit()
+
+    # ── Facility entity + Facility URS (Greenfield Facility URS, Stage 1) ────
+    # facilities/facility_nodes are a new domain (facility_database.py);
+    # urs_projects gets three additive columns so the existing URS
+    # Management Suite (create/generate/review/approval/version/export) can
+    # carry a facility-scoped document without any change to its schema
+    # shape: urs_type discriminates 'equipment' (default, existing behaviour
+    # unchanged) vs 'facility'; facility_id references facilities(id) for a
+    # facility URS (loose reference, no FK constraint — same style already
+    # used by linked_project_id/equipment_id on this table); facility_data is
+    # a JSON blob (same pattern as ai_review_data) holding the wizard's
+    # facility-specific structured fields that don't fit the equipment-
+    # shaped columns already on this table (manufacturing/warehouse/QC
+    # areas, utilities, HVAC philosophy, cleanroom classification, material/
+    # personnel/waste flow, expansion, automation, validation expectations).
+    from pharmagpt.facility_database import FACILITY_SCHEMA
+    conn.executescript(FACILITY_SCHEMA)
+    conn.commit()
+    _add_column_if_missing(conn, "urs_projects", "urs_type", "TEXT NOT NULL DEFAULT 'equipment'")
+    _add_column_if_missing(conn, "urs_projects", "facility_id", "INTEGER DEFAULT NULL")
+    _add_column_if_missing(conn, "urs_projects", "facility_data", "TEXT DEFAULT '{}'")
+    conn.commit()
+
+    # ── Facility URS Stage 1.1 — business-intelligence metadata (additive) ───
+    # facilities.classification is a new, mandatory-at-the-route-level axis
+    # distinct from the pre-existing facility_type column (which mixes
+    # facility function and product type) — see facility_database.py's
+    # module docstring. design_basis is a JSON blob (same pattern as
+    # urs_projects.facility_data/ai_review_data) holding the rest of Stage
+    # 1.1's structured metadata (capacity, expansion, per-utility
+    # philosophy, validation strategy, requirement source) so it doesn't
+    # need one sparse column per field. requirement_source on
+    # urs_requirements is additive and always '' for the pre-existing
+    # equipment flow and any URS created before this migration.
+    _add_column_if_missing(conn, "facilities", "classification", "TEXT NOT NULL DEFAULT 'Greenfield'")
+    _add_column_if_missing(conn, "facilities", "design_basis", "TEXT DEFAULT '{}'")
+    _add_column_if_missing(conn, "urs_requirements", "requirement_source", "TEXT DEFAULT ''")
     conn.commit()
 
     # ── Qualification Management Suite tables ─────────────────────────────────
