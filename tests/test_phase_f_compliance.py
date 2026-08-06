@@ -47,8 +47,14 @@ MIDDLEWARE_PATH = "pharmagpt.auth.middleware.resolve_tenant_context"
 
 
 @pytest.fixture()
-def client(db_path):
+def client(db_path, monkeypatch):
     import pharmagpt.app as appmod
+    # Electronic Signature gate (pharmagpt/services/esignature_service.py) —
+    # these pre-existing tests predate e-signature and don't supply a
+    # password/meaning/reason; bypassed here for the same reason
+    # tests/conftest.py's shared `client` fixture bypasses it.
+    import pharmagpt.services.esignature_service as esignature_service
+    monkeypatch.setattr(esignature_service, "require_esignature", lambda *a, **k: None)
     return appmod.app.test_client()
 
 

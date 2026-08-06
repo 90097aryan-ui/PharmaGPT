@@ -21,6 +21,9 @@ POST   /qms/<record_type>/<id>/comments                  add a comment
 GET    /qms/<record_type>/<id>/audit-trail                list audit trail entries
 
 GET    /qms/<record_type>/<id>/approval                   list approval/e-signature trail
+GET    /qms/<record_type>/<id>/esignatures                list Electronic Signature trail
+                                                            (21 CFR Part 11 / Annex 11 — separate
+                                                            from the legacy approval trail above)
 
 Note: POSTing a new approval/e-signature entry is handled by each module's own
 Blueprint (routes/qms_documents.py, qms_deviations.py, qms_capa.py) because
@@ -40,6 +43,7 @@ from pharmagpt import qms_document_database as qdocdb
 from pharmagpt import qms_deviation_database as qdevdb
 from pharmagpt import qms_capa_database as qcapadb
 from pharmagpt import qms_change_control_database as qccdb
+from pharmagpt import qms_feature_request_database as qfrdb
 from pharmagpt import qual_database as qualdb
 from pharmagpt import report_database as reportdb
 from pharmagpt import risk_database as riskdb
@@ -74,6 +78,9 @@ VALID_RECORD_TYPES = {
     # PHARMAGPT_v1.0_RELEASE_READINESS_REPORT.md C4 and
     # docs/AUDIT_TRAIL_COVERAGE_REPORT.md.
     "urs", "equipment", "kb_document",
+    # Feature Requests (v1: CRUD only) — reuses the shared attachments/
+    # comments/audit-trail endpoints instead of a module-specific upload route.
+    "feature_request",
 }
 
 _GETTERS = {
@@ -87,6 +94,7 @@ _GETTERS = {
     "risk_assessment": riskdb.get_assessment,
     "urs": ursdb.get_urs,
     "kb_document": db.get_kb_document,
+    "feature_request": qfrdb.get_feature_request,
 }
 
 # "equipment" is scoped by joining through its owning Project
@@ -300,3 +308,22 @@ def get_approval(record_type, record_id):
     if not _record_exists(record_type, record_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(qmsdb.get_approval_trail(record_type, record_id))
+
+
+# ── Electronic Signatures (21 CFR Part 11 / EU GMP Annex 11) ──────────────────
+# Read-only here, same shared-table/reusable-across-modules shape as
+# get_approval above. POSTing a new signature is handled inside each
+# module's own decision route by calling
+# pharmagpt/services/esignature_service.py directly (see
+# routes/qms_documents.py::decide_workflow_step for the reference
+# integration) — for the same reason submit_approval's module docstring
+# already gives for approvals: each module's decision code owns its own
+# status-transition semantics, only the storage/read-trail is shared.
+
+@bp.route("/<record_type>/<int:record_id>/esignatures", methods=["GET"])
+def get_esignatures(record_type, record_id):
+    if record_type not in VALID_RECORD_TYPES:
+        return jsonify({"error": "Invalid record type"}), 400
+    if not _record_exists(record_type, record_id):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(qmsdb.get_esignatures(record_type, record_id))

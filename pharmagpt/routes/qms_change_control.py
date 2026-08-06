@@ -61,6 +61,7 @@ from pharmagpt import qms_workflow_database as wfdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import qms_repo
+from pharmagpt.services import esignature_service
 from pharmagpt.services import qms_change_control_service as svc
 from pharmagpt.services import workflow_engine as wfe
 
@@ -432,6 +433,20 @@ def submit_approval(cc_id):
                            reason="Closed change controls are immutable")
         return jsonify({"error": "This change control is Closed and cannot accept further actions"}), 409
 
+    # Electronic Signature gate (21 CFR Part 11 / EU GMP Annex 11) — see
+    # pharmagpt/services/esignature_service.py module docstring and the
+    # identical gate in routes/qms_documents.py::submit_approval.
+    old_status = cc["status"]
+    try:
+        esignature_service.require_esignature(
+            g.tenant, data.get("password", ""), data.get("meaning", ""), data.get("reason", ""),
+        )
+    except esignature_service.ReauthenticationError as exc:
+        audit.log_failure("change_control", cc_id, f"Approval action blocked ({action_name}) — e-signature failed", reason=str(exc))
+        return jsonify({"error": str(exc)}), 401
+    except esignature_service.ESignatureError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     sig = tenancy.signing_identity(g.tenant)
     comments = data.get("comments", "")
     try:
@@ -475,6 +490,12 @@ def submit_approval(cc_id):
         "change_control", cc_id, action_name,
         sig["performed_by"], sig["role"],
         comments, sig["electronic_sig"],
+    )
+    cc = ccdb.get_change_control(cc_id)
+    esignature_service.record_signature(
+        tenant=g.tenant, meaning=data.get("meaning", ""), reason=data.get("reason", ""),
+        record_type="change_control", record_id=cc_id,
+        old_status=old_status, new_status=cc.get("status", ""),
     )
     return jsonify(entry), 201
 

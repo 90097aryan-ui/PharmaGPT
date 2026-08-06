@@ -89,6 +89,36 @@ QMS_SCHEMA = """
     );
     CREATE INDEX IF NOT EXISTS idx_qms_approvals_record ON qms_approvals(record_type, record_id);
 
+    -- ── Electronic Signatures (21 CFR Part 11 / EU GMP Annex 11) ─────────────
+    -- Additive, reusable across every GMP workflow via
+    -- pharmagpt/services/esignature_service.py — see that module's docstring.
+    -- Immutable by omission: no update/delete function exists anywhere in
+    -- this codebase for this table, and none should ever be added.
+    CREATE TABLE IF NOT EXISTS qms_esignatures (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id        TEXT    DEFAULT NULL,
+        record_type       TEXT    NOT NULL,
+        record_id         INTEGER NOT NULL,
+        version_number    TEXT    DEFAULT '',
+        user_id           TEXT    NOT NULL,
+        full_name         TEXT    NOT NULL DEFAULT '',
+        role              TEXT    NOT NULL DEFAULT '',
+        department        TEXT    NOT NULL DEFAULT '',
+        approval_level    TEXT    NOT NULL DEFAULT '',
+        meaning           TEXT    NOT NULL,
+        reason            TEXT    NOT NULL DEFAULT '',
+        old_status        TEXT    DEFAULT '',
+        new_status        TEXT    DEFAULT '',
+        signed_at_utc     TEXT    NOT NULL,
+        ip_address        TEXT    DEFAULT '',
+        user_agent        TEXT    DEFAULT '',
+        reauth_method     TEXT    NOT NULL DEFAULT 'password',
+        signature_hash    TEXT    NOT NULL,
+        created_at        TEXT    DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_esignatures_record ON qms_esignatures(record_type, record_id);
+    CREATE INDEX IF NOT EXISTS idx_qms_esignatures_company_id ON qms_esignatures(company_id);
+
     -- ── Document Control ──────────────────────────────────────────────────────
 
     CREATE TABLE IF NOT EXISTS qms_documents (
@@ -960,6 +990,43 @@ def get_approval_trail(record_type: str, record_id: int) -> list[dict]:
     conn = get_connection()
     rows = conn.execute(
         "SELECT * FROM qms_approvals WHERE record_type = ? AND record_id = ? ORDER BY created_at ASC",
+        (record_type, record_id),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ── Electronic Signatures (shared, immutable) ─────────────────────────────────
+# No update/delete function exists for this table anywhere in this codebase,
+# and none should be added — see pharmagpt/services/esignature_service.py.
+
+def add_esignature(*, company_id: str | None, record_type: str, record_id: int,
+                    version_number: str, user_id: str, full_name: str, role: str,
+                    department: str, approval_level: str, meaning: str, reason: str,
+                    old_status: str, new_status: str, signed_at_utc: str,
+                    ip_address: str, user_agent: str, reauth_method: str,
+                    signature_hash: str) -> dict:
+    conn = get_connection()
+    cur = conn.execute(
+        """INSERT INTO qms_esignatures
+           (company_id, record_type, record_id, version_number, user_id, full_name,
+            role, department, approval_level, meaning, reason, old_status, new_status,
+            signed_at_utc, ip_address, user_agent, reauth_method, signature_hash)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (company_id, record_type, record_id, version_number, user_id, full_name,
+         role, department, approval_level, meaning, reason, old_status, new_status,
+         signed_at_utc, ip_address, user_agent, reauth_method, signature_hash),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM qms_esignatures WHERE id = ?", (cur.lastrowid,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def get_esignatures(record_type: str, record_id: int) -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM qms_esignatures WHERE record_type = ? AND record_id = ? ORDER BY created_at ASC",
         (record_type, record_id),
     ).fetchall()
     conn.close()

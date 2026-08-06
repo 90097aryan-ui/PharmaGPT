@@ -92,4 +92,16 @@ def client(db_path, monkeypatch):
 
     monkeypatch.setattr(auth_middleware, "is_exempt", lambda path: True)
 
+    # Electronic Signature gate (pharmagpt/services/esignature_service.py,
+    # wired into routes/qms_documents.py, qms_capa.py, qms_change_control.py
+    # ::submit_approval). Same rationale as the tenant-scoping shim above:
+    # the 300+ existing business-logic tests using this fixture predate
+    # e-signature and don't supply a password/meaning/reason, so the gate
+    # is bypassed here rather than editing every call site. Tests that need
+    # to exercise the real gate patch pharmagpt.services.esignature_service
+    # .require_esignature/.reauthenticate directly instead of using this
+    # fixture — see tests/test_esignature_service.py.
+    import pharmagpt.services.esignature_service as esignature_service
+    monkeypatch.setattr(esignature_service, "require_esignature", lambda *a, **k: None)
+
     return appmod.app.test_client()

@@ -315,21 +315,13 @@ async function qmsRenderApproval(containerId, recordType, recordId, actions, pos
             <label>Action</label>
             <select id="${formId}-action">${qmsOptions(actions)}</select>
           </div>
-          <div class="form-field">
-            <label>Performed By (typed e-signature)</label>
-            <input type="text" id="${formId}-name" placeholder="Full name" />
-          </div>
-          <div class="form-field">
-            <label>Role</label>
-            <input type="text" id="${formId}-role" placeholder="e.g. QA Manager" />
-          </div>
           <div class="form-field span-2">
             <label>Comments</label>
             <input type="text" id="${formId}-comments" placeholder="Optional comments" />
           </div>
         </div>
         <div class="qms-form-actions">
-          <button class="btn-primary" onclick="qmsSubmitApproval('${formId}','${postUrl}','${containerId}','${recordType}',${recordId})">Submit</button>
+          <button class="btn-primary" onclick="qmsSubmitApproval('${formId}','${postUrl}','${containerId}','${recordType}',${recordId})">Submit (Electronic Signature required)</button>
         </div>
       </div>
       <div id="${listId}"></div>
@@ -360,18 +352,25 @@ window.qmsRenderApproval = qmsRenderApproval;
 window._qmsApprovalCallbacks = {};
 async function qmsSubmitApproval(formId, postUrl, containerId, recordType, recordId) {
   const action = document.getElementById(`${formId}-action`).value;
-  const performed_by = document.getElementById(`${formId}-name`).value.trim();
-  const role = document.getElementById(`${formId}-role`).value.trim();
   const comments = document.getElementById(`${formId}-comments`).value.trim();
-  if (!performed_by) { qmsToast("Typed e-signature (name) is required"); return; }
-  try {
-    await qmsPostJSON(postUrl, { action, performed_by, role, comments, electronic_sig: performed_by });
-    qmsToast(`Recorded: ${action}`);
-    const cb = window._qmsApprovalCallbacks[containerId];
-    if (cb) cb();
-  } catch (e) {
-    qmsToast("Failed to record approval: " + e.message);
-  }
+  if (!window.PharmaESign) { qmsToast("Electronic Signature dialog failed to load"); return; }
+
+  // 21 CFR Part 11 / EU GMP Annex 11: this GMP decision requires a fresh
+  // Electronic Signature (password re-confirmation + meaning + reason), not
+  // just the caller's existing session — see
+  // pharmagpt/services/esignature_service.py and pharmagpt/static/js/
+  // esignature_dialog.js. The signature meaning defaults to the action name
+  // when it matches the fixed vocabulary (e.g. "Approved"/"Rejected"), but
+  // remains user-editable in the dialog.
+  window.PharmaESign.open({
+    meaning: action,
+    onConfirm: async ({ password, meaning, reason }) => {
+      await qmsPostJSON(postUrl, { action, comments, password, meaning, reason });
+      qmsToast(`Recorded: ${action}`);
+      const cb = window._qmsApprovalCallbacks[containerId];
+      if (cb) cb();
+    },
+  });
 }
 window.qmsSubmitApproval = qmsSubmitApproval;
 

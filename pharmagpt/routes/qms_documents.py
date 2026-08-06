@@ -48,6 +48,7 @@ from pharmagpt import qms_database as qmsdb
 from pharmagpt import qms_workflow_database as wfdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
+from pharmagpt.services import esignature_service
 from pharmagpt.services import kb_sync
 from pharmagpt.services import lifecycle_engine
 from pharmagpt.services import qms_document_service as svc
@@ -369,6 +370,22 @@ def submit_approval(did):
     if action_name not in _STATUS_MAP:
         return jsonify({"error": f"Unknown action '{action_name}'"}), 400
 
+    # Electronic Signature gate (21 CFR Part 11 / EU GMP Annex 11) — every
+    # GMP decision on this endpoint requires a fresh password confirmation,
+    # not just the caller's existing session. Raises before anything below
+    # is mutated if the password is wrong or meaning/reason are missing.
+    # See pharmagpt/services/esignature_service.py module docstring.
+    old_status = document["status"]
+    try:
+        esignature_service.require_esignature(
+            g.tenant, data.get("password", ""), data.get("meaning", ""), data.get("reason", ""),
+        )
+    except esignature_service.ReauthenticationError as exc:
+        audit.log_failure("document", did, f"Approval action blocked ({action_name}) — e-signature failed", reason=str(exc))
+        return jsonify({"error": str(exc)}), 401
+    except esignature_service.ESignatureError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     sig = tenancy.signing_identity(g.tenant)
     comments = data.get("comments", "")
 
@@ -418,6 +435,11 @@ def submit_approval(did):
         "document", did, action_name,
         sig["performed_by"], sig["role"],
         comments, sig["electronic_sig"],
+    )
+    esignature_service.record_signature(
+        tenant=g.tenant, meaning=data.get("meaning", ""), reason=data.get("reason", ""),
+        record_type="document", record_id=did, version_number=str(document.get("version", "")),
+        old_status=old_status, new_status=document.get("status", ""),
     )
     return jsonify(entry), 201
 
