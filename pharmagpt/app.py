@@ -44,6 +44,8 @@ from pharmagpt.routes.equipment       import bp as equipment_bp
 from pharmagpt.routes.facility        import bp as facility_bp
 from pharmagpt.routes.companies       import bp as companies_bp
 from pharmagpt.routes.users           import bp as users_bp
+from pharmagpt.routes.rbac            import bp as rbac_bp
+from pharmagpt.routes.org_structure   import bp as org_structure_bp
 
 
 # ── Application setup ─────────────────────────────────────────────────────────
@@ -91,6 +93,8 @@ app.register_blueprint(equipment_bp)
 app.register_blueprint(facility_bp)
 app.register_blueprint(companies_bp)
 app.register_blueprint(users_bp)
+app.register_blueprint(rbac_bp)
+app.register_blueprint(org_structure_bp)
 
 
 # ── SPA shell ─────────────────────────────────────────────────────────────────

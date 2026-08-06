@@ -420,6 +420,12 @@
         <div class="sidebar-item" id="nav-admin-users" data-view="view-admin-users" style="display:none">
           <span class='icon' data-lucide='users'></span> Users
         </div>
+        <div class="sidebar-item" id="nav-admin-departments" data-view="view-admin-departments" style="display:none">
+          <span class='icon' data-lucide='sitemap'></span> Departments
+        </div>
+        <div class="sidebar-item" id="nav-admin-roles" data-view="view-admin-roles" style="display:none">
+          <span class='icon' data-lucide='shield-check'></span> Roles &amp; Permissions
+        </div>
       </div>
 
       <div class="sidebar-divider"></div>
@@ -1348,6 +1354,147 @@
         <div class="modal-footer">
           <button type="button" class="btn-secondary" id="admin-user-modal-cancel">Cancel</button>
           <button type="submit" class="btn-primary" id="admin-user-modal-save">Send Invite</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- ── Department Management view (RBAC framework, additive) ────────────── -->
+    <main class="kb-container" id="view-admin-departments" style="display:none">
+      <div class="kb-header">
+        <div class="kb-header-left">
+          <span class="kb-header-icon" data-lucide="sitemap"></span>
+          <div>
+            <h2 class="kb-header-title">Department Management</h2>
+            <p class="kb-header-sub">Departments and designations for your company</p>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn-secondary" id="btn-new-designation">+ Designation</button>
+          <button class="btn-primary" id="btn-new-department">+ Department</button>
+        </div>
+      </div>
+      <h3 style="margin:16px 16px 4px">Departments</h3>
+      <div id="admin-departments-list"></div>
+      <h3 style="margin:24px 16px 4px">Designations</h3>
+      <div id="admin-designations-list"></div>
+    </main>
+
+    <div class="modal-overlay" id="admin-department-modal-overlay"></div>
+    <div class="modal" id="admin-department-modal">
+      <div class="modal-header">
+        <h3>New Department</h3>
+        <button class="modal-close" id="admin-department-modal-close">&times;</button>
+      </div>
+      <form id="admin-department-form">
+        <div class="form-group">
+          <label for="ad-name">Name *</label>
+          <input type="text" id="ad-name" placeholder="e.g. Packaging" required />
+        </div>
+        <div class="form-group">
+          <label for="ad-code">Department Code *</label>
+          <input type="text" id="ad-code" placeholder="e.g. PACKAGING" required />
+        </div>
+        <div class="form-group">
+          <label for="ad-reason">Reason for change *</label>
+          <input type="text" id="ad-reason" placeholder="Why is this being added?" required />
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn-secondary" id="admin-department-modal-cancel">Cancel</button>
+          <button type="submit" class="btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-overlay" id="admin-designation-modal-overlay"></div>
+    <div class="modal" id="admin-designation-modal">
+      <div class="modal-header">
+        <h3>New Designation</h3>
+        <button class="modal-close" id="admin-designation-modal-close">&times;</button>
+      </div>
+      <form id="admin-designation-form">
+        <div class="form-group">
+          <label for="ades-name">Name *</label>
+          <input type="text" id="ades-name" placeholder="e.g. Production Executive" required />
+        </div>
+        <div class="form-group">
+          <label for="ades-reason">Reason for change *</label>
+          <input type="text" id="ades-reason" placeholder="Why is this being added?" required />
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn-secondary" id="admin-designation-modal-cancel">Cancel</button>
+          <button type="submit" class="btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- ── Role & Permission Management view (RBAC framework, additive) ─────── -->
+    <main class="kb-container" id="view-admin-roles" style="display:none">
+      <div class="kb-header">
+        <div class="kb-header-left">
+          <span class="kb-header-icon" data-lucide="shield-check"></span>
+          <div>
+            <h2 class="kb-header-title">Roles &amp; Permissions</h2>
+            <p class="kb-header-sub">Manage roles, the permission matrix, user assignments, and the audit trail</p>
+          </div>
+        </div>
+        <button class="btn-primary" id="btn-new-role">+ New Role</button>
+      </div>
+
+      <div class="rbac-tabs" style="display:flex;gap:8px;padding:0 16px;border-bottom:1px solid var(--border)">
+        <button class="rbac-tab-btn active" data-rbac-tab="roles">Roles</button>
+        <button class="rbac-tab-btn" data-rbac-tab="matrix">Permission Matrix</button>
+        <button class="rbac-tab-btn" data-rbac-tab="assign">User Assignment</button>
+        <button class="rbac-tab-btn" data-rbac-tab="audit">Audit Trail</button>
+      </div>
+
+      <div id="rbac-tab-roles" class="rbac-tab-panel">
+        <div id="admin-roles-list"></div>
+      </div>
+
+      <div id="rbac-tab-matrix" class="rbac-tab-panel" style="display:none">
+        <div class="form-group" style="max-width:360px;margin:16px">
+          <label for="rbac-matrix-role-select">Role</label>
+          <select id="rbac-matrix-role-select"></select>
+        </div>
+        <div id="rbac-matrix-grid" style="overflow-x:auto;padding:0 16px"></div>
+      </div>
+
+      <div id="rbac-tab-assign" class="rbac-tab-panel" style="display:none">
+        <div class="form-group" style="max-width:360px;margin:16px">
+          <label for="rbac-assign-user-select">User</label>
+          <select id="rbac-assign-user-select"></select>
+        </div>
+        <div id="rbac-assign-roles-list" style="padding:0 16px"></div>
+        <div id="rbac-assign-effective" style="padding:0 16px;margin-top:16px"></div>
+      </div>
+
+      <div id="rbac-tab-audit" class="rbac-tab-panel" style="display:none">
+        <div id="rbac-audit-list" style="padding:0 16px"></div>
+      </div>
+    </main>
+
+    <div class="modal-overlay" id="admin-role-modal-overlay"></div>
+    <div class="modal" id="admin-role-modal">
+      <div class="modal-header">
+        <h3 id="admin-role-modal-title">New Role</h3>
+        <button class="modal-close" id="admin-role-modal-close">&times;</button>
+      </div>
+      <form id="admin-role-form">
+        <div class="form-group">
+          <label for="ar-name">Name *</label>
+          <input type="text" id="ar-name" required />
+        </div>
+        <div class="form-group">
+          <label for="ar-description">Description</label>
+          <input type="text" id="ar-description" />
+        </div>
+        <div class="form-group">
+          <label for="ar-reason">Reason for change *</label>
+          <input type="text" id="ar-reason" placeholder="Why is this being added?" required />
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn-secondary" id="admin-role-modal-cancel">Cancel</button>
+          <button type="submit" class="btn-primary">Save</button>
         </div>
       </form>
     </div>
@@ -2381,6 +2528,8 @@
   <script src="{{ url_for('static', filename='js/admin_assume_context.js') }}"></script>
   <script src="{{ url_for('static', filename='js/admin_companies.js') }}"></script>
   <script src="{{ url_for('static', filename='js/admin_users.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/admin_org_structure.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/admin_roles.js') }}"></script>
   <script src="{{ url_for('static', filename='js/header.js') }}"></script>
   <script src="{{ url_for('static', filename='js/search.js') }}"></script>
   <script src="{{ url_for('static', filename='js/notifications.js') }}"></script>
@@ -2459,6 +2608,14 @@
 
         if (targetId === "view-admin-users") {
           if (window.loadAdminUsers) window.loadAdminUsers();
+        }
+
+        if (targetId === "view-admin-departments") {
+          if (window.loadAdminDepartments) window.loadAdminDepartments();
+        }
+
+        if (targetId === "view-admin-roles") {
+          if (window.loadAdminRoles) window.loadAdminRoles();
         }
 
         if (targetId === "view-dashboard") {

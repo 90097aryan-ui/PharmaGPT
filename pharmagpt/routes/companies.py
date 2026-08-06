@@ -22,7 +22,7 @@ import logging
 from flask import Blueprint, g, jsonify, request
 
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
-from pharmagpt.db import qms_repo
+from pharmagpt.db import org_structure_repo, qms_repo, rbac_repo
 from pharmagpt.services.identity_admin import IdentityProvisioningError, provision_user
 from pharmagpt.services.supabase_client import get_authenticated_client, handle_postgrest_errors
 
@@ -120,6 +120,29 @@ def create_company():
                      f"for company {company_row['id']}: {exc}",
         }), 500
 
+    # RBAC framework (migration 0015): seed this company's default
+    # departments/approval-levels/role set. Best-effort — a failure here
+    # must not block company creation (the company and its admin already
+    # exist); the Company Admin can retry from the new Role Management UI,
+    # or a service-role script can re-run provision_org_defaults_for_company
+    # for this company_id. Not audited via rbac_audit_log itself (there is
+    # no acting human "reason" for an automatic provisioning step) —
+    # subsequent edits to these seeded rows are audited normally.
+    try:
+        provisioning_summary = org_structure_repo.provision_org_defaults_for_company(client, company_row["id"])
+        company_admin_rbac_role = next(
+            (r for r in client.table("rbac_roles").select("id, name")
+             .eq("company_id", company_row["id"]).eq("name", "Company Admin").execute().data or []),
+            None,
+        )
+        if company_admin_rbac_role:
+            rbac_repo.assign_user_role(
+                client, provisioned["auth_user_id"], company_admin_rbac_role["id"], company_row["id"],
+            )
+    except Exception:
+        logger.exception("create_company: RBAC/org defaults provisioning failed for company %s", company_row["id"])
+        provisioning_summary = None
+
     _audit_best_effort("Company created", company_row["id"], reason=legal_name)
     return jsonify({
         "company": company_row,
@@ -128,6 +151,7 @@ def create_company():
             "display_name": admin_display_name,
             "temporary_password": provisioned["temporary_password"],
         },
+        "org_defaults_provisioned": provisioning_summary is not None,
     }), 201
 
 

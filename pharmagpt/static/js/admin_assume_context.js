@@ -24,6 +24,8 @@
     const adminSection = el("admin-nav-section");
     const companiesNav = el("nav-admin-companies");
     const usersNav = el("nav-admin-users");
+    const departmentsNav = el("nav-admin-departments");
+    const rolesNav = el("nav-admin-roles");
     const assumeBtn = el("btn-assume-context");
 
     const isSuperAdmin = role === "super_admin";
@@ -32,6 +34,14 @@
 
     if (companiesNav) companiesNav.style.display = isSuperAdmin ? "flex" : "none";
     if (usersNav) usersNav.style.display = (isCompanyAdmin || (isSuperAdmin && hasAssumedContext)) ? "flex" : "none";
+    // Department/Role Management (RBAC framework): same visibility as
+    // Users — a Company Admin, or a Super Admin with an active Assume
+    // Company Context grant. A Super Admin with no assumed context can
+    // still reach Role Management server-side (template-scope mode,
+    // pharmagpt/routes/rbac.py) but has no dedicated nav entry for it yet;
+    // this keeps the nav uncluttered for the common case.
+    if (departmentsNav) departmentsNav.style.display = (isCompanyAdmin || (isSuperAdmin && hasAssumedContext)) ? "flex" : "none";
+    if (rolesNav) rolesNav.style.display = (isCompanyAdmin || (isSuperAdmin && hasAssumedContext)) ? "flex" : "none";
     if (adminSection) adminSection.style.display = (isSuperAdmin || isCompanyAdmin) ? "block" : "none";
     if (assumeBtn) assumeBtn.style.display = isSuperAdmin ? "inline-flex" : "none";
 

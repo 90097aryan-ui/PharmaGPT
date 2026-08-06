@@ -70,6 +70,8 @@
 
     "view-admin-companies": "Administration",
     "view-admin-users": "Administration",
+    "view-admin-departments": "Administration",
+    "view-admin-roles": "Administration",
   };
 
   // Views with no meaningful workspace/project chip (selector + auth screens).
