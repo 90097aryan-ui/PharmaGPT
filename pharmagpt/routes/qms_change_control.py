@@ -368,12 +368,28 @@ def assign_workflow_step(cc_id, step_order):
 
 @bp.route("/<int:cc_id>/workflow/steps/<int:step_order>/decide", methods=["POST"])
 def decide_workflow_step(cc_id, step_order):
-    if not _record_scoped_or_404(cc_id):
+    cc = _record_scoped_or_404(cc_id)
+    if not cc:
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     decision = data.get("decision", "")
     if decision not in ("approve", "reject", "advance"):
         return jsonify({"error": "decision must be one of approve/reject/advance"}), 400
+
+    # Electronic Signature gate (21 CFR Part 11 / EU GMP Annex 11) — same gate
+    # already applied to this record type's legacy submit_approval() below;
+    # this newer Workflow Panel path decides the exact same workflow steps
+    # and must not be a way to bypass the signature requirement.
+    old_status = cc["status"]
+    try:
+        esignature_service.require_esignature(
+            g.tenant, data.get("password", ""), data.get("meaning", ""), data.get("reason", ""),
+        )
+    except esignature_service.ReauthenticationError as exc:
+        audit.log_failure("change_control", cc_id, f"Workflow decision blocked ({decision}) — e-signature failed", reason=str(exc))
+        return jsonify({"error": str(exc)}), 401
+    except esignature_service.ESignatureError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     sig = tenancy.signing_identity(g.tenant)
     try:
@@ -388,6 +404,13 @@ def decide_workflow_step(cc_id, step_order):
     except wfe.WorkflowError as e:
         audit.log_failure("change_control", cc_id, f"Workflow decision blocked ({decision})", reason=str(e))
         return jsonify({"error": str(e)}), 409
+
+    cc = ccdb.get_change_control(cc_id)
+    esignature_service.record_signature(
+        tenant=g.tenant, meaning=data.get("meaning", ""), reason=data.get("reason", ""),
+        record_type="change_control", record_id=cc_id,
+        old_status=old_status, new_status=cc.get("status", ""),
+    )
     return jsonify(state)
 
 

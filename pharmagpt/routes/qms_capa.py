@@ -322,12 +322,28 @@ def assign_workflow_step(cid, step_order):
 
 @bp.route("/<int:cid>/workflow/steps/<int:step_order>/decide", methods=["POST"])
 def decide_workflow_step(cid, step_order):
-    if not _record_scoped_or_404(cid):
+    capa = _record_scoped_or_404(cid)
+    if not capa:
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     decision = data.get("decision", "")
     if decision not in ("approve", "reject", "advance"):
         return jsonify({"error": "decision must be one of approve/reject/advance"}), 400
+
+    # Electronic Signature gate (21 CFR Part 11 / EU GMP Annex 11) — same gate
+    # already applied to this record type's legacy submit_approval() below;
+    # this newer Workflow Panel path decides the exact same workflow steps
+    # and must not be a way to bypass the signature requirement.
+    old_status = capa["status"]
+    try:
+        esignature_service.require_esignature(
+            g.tenant, data.get("password", ""), data.get("meaning", ""), data.get("reason", ""),
+        )
+    except esignature_service.ReauthenticationError as exc:
+        audit.log_failure("capa", cid, f"Workflow decision blocked ({decision}) — e-signature failed", reason=str(exc))
+        return jsonify({"error": str(exc)}), 401
+    except esignature_service.ESignatureError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     sig = tenancy.signing_identity(g.tenant)
     try:
@@ -342,6 +358,13 @@ def decide_workflow_step(cid, step_order):
     except wfe.WorkflowError as e:
         audit.log_failure("capa", cid, f"Workflow decision blocked ({decision})", reason=str(e))
         return jsonify({"error": str(e)}), 409
+
+    capa = cdb.get_capa(cid)
+    esignature_service.record_signature(
+        tenant=g.tenant, meaning=data.get("meaning", ""), reason=data.get("reason", ""),
+        record_type="capa", record_id=cid,
+        old_status=old_status, new_status=capa.get("status", ""),
+    )
     return jsonify(state)
 
 

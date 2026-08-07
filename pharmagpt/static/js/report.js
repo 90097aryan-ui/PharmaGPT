@@ -1355,24 +1355,30 @@ function renderApproval(trail) {
 }
 
 async function submitApprovalAction() {
-  const payload = {
-    action: v('appr-action'),
-    performed_by: v('appr-by'),
-    role: v('appr-role'),
-    comments: v('appr-comments'),
-    electronic_sig: v('appr-sig'),
-  };
-  if (!payload.performed_by) { showReportToast('Please enter your name', 'error'); return; }
+  const action = v('appr-action');
+  const comments = v('appr-comments');
+  if (!window.PharmaESign) { showReportToast('Electronic Signature dialog failed to load', 'error'); return; }
 
-  try {
-    await rApi('/' + ReportState.currentReportId + '/approval', { method: 'POST', body: JSON.stringify(payload) });
-    const report = await rApi('/' + ReportState.currentReportId);
-    ReportState.currentReport = report;
-    showReportToast('Action submitted successfully', 'success');
-    loadApprovalTrail();
-  } catch (e) {
-    showReportToast('Error: ' + e.message, 'error');
-  }
+  // 21 CFR Part 11 / EU GMP Annex 11: this GMP decision requires a fresh
+  // Electronic Signature (password re-confirmation + meaning + reason) —
+  // see pharmagpt/services/esignature_service.py.
+  window.PharmaESign.open({
+    meaning: action,
+    onConfirm: async ({ password, meaning, reason }) => {
+      try {
+        await rApi('/' + ReportState.currentReportId + '/approval', {
+          method: 'POST', body: JSON.stringify({ action, comments, password, meaning, reason }),
+        });
+        const report = await rApi('/' + ReportState.currentReportId);
+        ReportState.currentReport = report;
+        showReportToast('Action submitted successfully', 'success');
+        loadApprovalTrail();
+      } catch (e) {
+        showReportToast('Error: ' + e.message, 'error');
+        throw e;
+      }
+    },
+  });
 }
 
 window.submitForApproval = function () {

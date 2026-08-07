@@ -42,6 +42,7 @@ from pharmagpt import risk_database as risdb
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
+from pharmagpt.services import esignature_service
 from pharmagpt.services import kb_sync
 from pharmagpt.services import lifecycle_engine
 from pharmagpt.services import report_service as svc
@@ -451,6 +452,18 @@ def add_approval(rid):
     if not action:
         return jsonify({"error": "action is required"}), 400
 
+    # Electronic Signature gate (21 CFR Part 11 / EU GMP Annex 11) — the
+    # existing, unmodified pharmagpt/services/esignature_service.py.
+    try:
+        esignature_service.require_esignature(
+            g.tenant, data.get("password", ""), data.get("meaning", ""), data.get("reason", ""),
+        )
+    except esignature_service.ReauthenticationError as exc:
+        audit.log_failure("val_report", rid, f"Approval action blocked ({action}) — e-signature failed", reason=str(exc))
+        return jsonify({"error": str(exc)}), 401
+    except esignature_service.ESignatureError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     # Update report status based on action
     status_map = {
         "Submit for Review": "under_review",
@@ -485,6 +498,12 @@ def add_approval(rid):
     )
     audit.log("val_report", rid, action, old={"status": old_status},
               new={"status": new_status} if new_status else None, reason=comments)
+    report = rdb.get_report(rid)
+    esignature_service.record_signature(
+        tenant=g.tenant, meaning=data.get("meaning", ""), reason=data.get("reason", ""),
+        record_type="val_report", record_id=rid, version_number=version,
+        old_status=old_status, new_status=report.get("status", ""),
+    )
     return jsonify(entry), 201
 
 

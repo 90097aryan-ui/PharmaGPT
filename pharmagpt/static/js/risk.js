@@ -1235,22 +1235,26 @@ function approvalEntryHtml(e) {
 window.submitApproval = async function (aid) {
   const action = document.getElementById("approval-action")?.value;
   if (!action) { alert("Select an action."); return; }
-  const by = document.getElementById("approval-by")?.value || "";
-  const role = document.getElementById("approval-role")?.value || "";
   const comments = document.getElementById("approval-comments")?.value || "";
+  if (!window.PharmaESign) { alert("Electronic Signature dialog failed to load"); return; }
 
-  try {
-    const res = await fetch(`/risk/assessments/${aid}/approval`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, performed_by: by, role, comments }),
-    });
-    if (!res.ok) throw new Error((await res.json()).error);
- showToast(`${action} recorded`);
-    openApprovalPanel(aid);
-  } catch (e) {
-    alert("Error: " + e.message);
-  }
+  // 21 CFR Part 11 / EU GMP Annex 11: this GMP decision requires a fresh
+  // Electronic Signature (password re-confirmation + meaning + reason) —
+  // see pharmagpt/services/esignature_service.py and pharmagpt/static/js/
+  // esignature_dialog.js.
+  window.PharmaESign.open({
+    meaning: action,
+    onConfirm: async ({ password, meaning, reason }) => {
+      const res = await fetch(`/risk/assessments/${aid}/approval`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, comments, password, meaning, reason }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      showToast(`${action} recorded`);
+      openApprovalPanel(aid);
+    },
+  });
 };
 
 

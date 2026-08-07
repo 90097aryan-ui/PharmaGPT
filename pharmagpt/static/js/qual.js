@@ -1124,20 +1124,24 @@ async function loadApprovalsPane(qualId) {
 async function addApprovalForm(qualId) {
   const action = prompt('Action:', 'Submitted for Review');
   if (!action) return;
-  const performedBy = prompt('Performed By:');
-  if (!performedBy) return;
-  const role = prompt('Role:', 'Validation Engineer');
-  const comments = prompt('Comments:', '');
-  try {
-    await fetch(`/qual/${qualId}/approval`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, performed_by: performedBy, role, comments }),
-    });
-    loadApprovalsPane(qualId);
-  } catch (e) {
-    alert('Failed: ' + e.message);
-  }
+  const comments = prompt('Comments:', '') || '';
+  if (!window.PharmaESign) { alert('Electronic Signature dialog failed to load'); return; }
+
+  // 21 CFR Part 11 / EU GMP Annex 11: this GMP decision requires a fresh
+  // Electronic Signature (password re-confirmation + meaning + reason) —
+  // see pharmagpt/services/esignature_service.py.
+  window.PharmaESign.open({
+    meaning: action,
+    onConfirm: async ({ password, meaning, reason }) => {
+      const res = await fetch(`/qual/${qualId}/approval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, comments, password, meaning, reason }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      loadApprovalsPane(qualId);
+    },
+  });
 }
 
 /* ── Version History Tab ─────────────────────────────────────────────────────── */

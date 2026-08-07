@@ -56,6 +56,7 @@ from pharmagpt import qual_database as qdb
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
+from pharmagpt.services import esignature_service
 from pharmagpt.services import kb_sync
 from pharmagpt.services import lifecycle_engine
 from pharmagpt.services import qual_service as svc
@@ -539,6 +540,21 @@ def complete_protocol(qid, pid):
     if pending_count > 0 and not data.get("force"):
         return jsonify({"error": f"{pending_count} test cases still pending. Pass force=true to override."}), 400
 
+    # Electronic Signature gate (21 CFR Part 11 / EU GMP Annex 11) — the
+    # existing, unmodified pharmagpt/services/esignature_service.py. This is
+    # the protocol-level (IQ/OQ/PQ) execution sign-off, distinct from the
+    # qualification-level approval gated in add_approval() below.
+    old_status = protocol["status"]
+    try:
+        esignature_service.require_esignature(
+            g.tenant, data.get("password", ""), data.get("meaning", ""), data.get("reason", ""),
+        )
+    except esignature_service.ReauthenticationError as exc:
+        audit.log_failure("qualification", qid, "Protocol completion blocked — e-signature failed", reason=str(exc))
+        return jsonify({"error": str(exc)}), 401
+    except esignature_service.ESignatureError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     overall_status = "completed" if fail_count == 0 else "completed_with_deviations"
     qdb.update_protocol(pid, {"status": overall_status})
 
@@ -570,6 +586,11 @@ def complete_protocol(qid, pid):
     audit.log("qualification", qid, f"{protocol.get('protocol_type','')} Protocol completed",
               new={"protocol_id": pid, "status": overall_status, "fail_count": fail_count})
 
+    esignature_service.record_signature(
+        tenant=g.tenant, meaning=data.get("meaning", ""), reason=data.get("reason", ""),
+        record_type="qualification", record_id=qid, version_number=protocol.get("revision", ""),
+        old_status=old_status, new_status=overall_status,
+    )
     return jsonify({"status": overall_status, "fail_count": fail_count})
 
 
@@ -627,6 +648,19 @@ def add_approval(qid):
     if not action:
         return jsonify({"error": "action is required"}), 400
 
+    # Electronic Signature gate (21 CFR Part 11 / EU GMP Annex 11) — the
+    # existing, unmodified pharmagpt/services/esignature_service.py.
+    old_status = qual["status"]
+    try:
+        esignature_service.require_esignature(
+            g.tenant, data.get("password", ""), data.get("meaning", ""), data.get("reason", ""),
+        )
+    except esignature_service.ReauthenticationError as exc:
+        audit.log_failure("qualification", qid, f"Approval action blocked ({action}) — e-signature failed", reason=str(exc))
+        return jsonify({"error": str(exc)}), 401
+    except esignature_service.ESignatureError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     # Status transitions
     status_map = {
         "Submitted for Review": "under_review",
@@ -658,6 +692,12 @@ def add_approval(qid):
         sig["electronic_sig"],
     )
     audit.log("qualification", qid, action, old={"status": qual["status"]}, reason=data.get("comments", ""))
+    qual = qdb.get_qualification(qid)
+    esignature_service.record_signature(
+        tenant=g.tenant, meaning=data.get("meaning", ""), reason=data.get("reason", ""),
+        record_type="qualification", record_id=qid, version_number=qual.get("revision", ""),
+        old_status=old_status, new_status=qual.get("status", ""),
+    )
     return jsonify(entry), 201
 
 

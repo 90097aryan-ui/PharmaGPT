@@ -253,12 +253,37 @@ def add_training(did):
 @bp.route("/training/<int:tid>", methods=["PUT"])
 def update_training(tid):
     existing = qdb.get_training_entry(tid)
-    if not existing or not tenancy.scoped_or_none(qdb.get_document(existing["document_id"]), g.tenant.company_id):
+    document = qdb.get_document(existing["document_id"]) if existing else None
+    if not existing or not tenancy.scoped_or_none(document, g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
-    entry = qdb.update_training_status(tid, data.get("training_status", "Pending"), data.get("training_date", ""))
+    new_training_status = data.get("training_status", "Pending")
+
+    # Electronic Signature gate (21 CFR Part 11 / EU GMP Annex 11) — only
+    # the completion attestation is a GMP decision; leaving a training
+    # record "Pending" (its default at creation) is not a lifecycle
+    # transition and does not require a signature.
+    if new_training_status == "Completed":
+        try:
+            esignature_service.require_esignature(
+                g.tenant, data.get("password", ""), data.get("meaning", "Verified"), data.get("reason", ""),
+            )
+        except esignature_service.ReauthenticationError as exc:
+            audit.log_failure("document", existing["document_id"], "Training completion blocked — e-signature failed", reason=str(exc))
+            return jsonify({"error": str(exc)}), 401
+        except esignature_service.ESignatureError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    entry = qdb.update_training_status(tid, new_training_status, data.get("training_date", ""))
     if not entry:
         return jsonify({"error": "Not found"}), 404
+
+    if new_training_status == "Completed":
+        esignature_service.record_signature(
+            tenant=g.tenant, meaning=data.get("meaning", "Verified"), reason=data.get("reason", "Training completed"),
+            record_type="document", record_id=existing["document_id"],
+            old_status=existing.get("training_status", ""), new_status="Completed",
+        )
     return jsonify(entry)
 
 
@@ -306,12 +331,28 @@ def assign_workflow_step(did, step_order):
 
 @bp.route("/<int:did>/workflow/steps/<int:step_order>/decide", methods=["POST"])
 def decide_workflow_step(did, step_order):
-    if not _record_scoped_or_404(did):
+    document = _record_scoped_or_404(did)
+    if not document:
         return jsonify({"error": "Not found"}), 404
     data = request.get_json() or {}
     decision = data.get("decision", "")
     if decision not in ("approve", "reject", "advance"):
         return jsonify({"error": "decision must be one of approve/reject/advance"}), 400
+
+    # Electronic Signature gate (21 CFR Part 11 / EU GMP Annex 11) — same gate
+    # already applied to this record type's legacy submit_approval() below;
+    # this newer Workflow Panel path decides the exact same workflow steps
+    # and must not be a way to bypass the signature requirement.
+    old_status = document["status"]
+    try:
+        esignature_service.require_esignature(
+            g.tenant, data.get("password", ""), data.get("meaning", ""), data.get("reason", ""),
+        )
+    except esignature_service.ReauthenticationError as exc:
+        audit.log_failure("document", did, f"Workflow decision blocked ({decision}) — e-signature failed", reason=str(exc))
+        return jsonify({"error": str(exc)}), 401
+    except esignature_service.ESignatureError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     sig = tenancy.signing_identity(g.tenant)
     try:
@@ -326,6 +367,13 @@ def decide_workflow_step(did, step_order):
     except wfe.WorkflowError as e:
         audit.log_failure("document", did, f"Workflow decision blocked ({decision})", reason=str(e))
         return jsonify({"error": str(e)}), 409
+
+    document = qdb.get_document(did)
+    esignature_service.record_signature(
+        tenant=g.tenant, meaning=data.get("meaning", ""), reason=data.get("reason", ""),
+        record_type="document", record_id=did, version_number=str(document.get("version", "")),
+        old_status=old_status, new_status=document.get("status", ""),
+    )
     return jsonify(state)
 
 

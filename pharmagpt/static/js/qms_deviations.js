@@ -557,6 +557,20 @@ const QMS_DEV_LIFECYCLE_PHASES = ["Draft", "Submitted", "Review", "Investigation
 
 let qmsDevBuilderSteps = [];
 let qmsDevBuilderCapaPhase = {};
+let qmsDevApproverDirectory = [];  // [{user_id, display_name, department, designation}] from GET /users/directory
+
+function qmsDevApproverLabel(entry) {
+  const meta = [entry.department, entry.designation].filter(Boolean).join(" / ");
+  return meta ? `${entry.display_name} (${meta})` : entry.display_name;
+}
+
+async function qmsDevLoadApproverDirectory() {
+  try {
+    qmsDevApproverDirectory = await qmsFetch("/users/directory");
+  } catch (e) {
+    qmsDevApproverDirectory = [];  // picker degrades to "no matches" rather than blocking the builder
+  }
+}
 
 async function qmsDevRenderLifecycleTab(dev) {
   const id = dev.id;
@@ -580,6 +594,7 @@ async function qmsDevRenderLifecycleTab(dev) {
       el.innerHTML = `<div class="qms-empty"><p>Failed to load workflow builder: ${e.message}</p></div>`;
       return;
     }
+    await qmsDevLoadApproverDirectory();
     qmsDevRenderWorkflowBuilder(id);
     return;
   }
@@ -682,9 +697,69 @@ function qmsDevRenderWorkflowBuilder(id) {
         <button class="btn-primary" onclick="qmsDevSubmitForReview(${id})" ${busy}>Submit for Review</button>
       </div>
     </div>
+    ${qmsDevApproverDirectoryDatalistHTML()}
   `;
 }
 window.qmsDevRenderWorkflowBuilder = qmsDevRenderWorkflowBuilder;
+
+// Approvers are picked, never typed: each field is a searchable text input
+// bound to a shared <datalist> of the company's active users (GET
+// /users/directory) — the only way approver_user_id/approver_display_name
+// ever get set is qmsDevBuilderApproverInput() resolving an exact label
+// match, so it's impossible for the UI to save a mistyped or nonexistent id
+// (the root cause of "Lifecycle shows an assigned approver but the
+// deviation never appears in Workflow Inbox" — a freeform id field that
+// looked fine everywhere except the one place doing an exact-match lookup).
+
+function qmsDevApproverDirectoryDatalistHTML() {
+  return `<datalist id="qms-wfb-approver-directory">
+    ${qmsDevApproverDirectory.map(e => `<option value="${qmsDevApproverLabel(e).replace(/"/g, "&quot;")}"></option>`).join("")}
+  </datalist>`;
+}
+
+function qmsDevApproverPickerHTML(fieldId, approverUserId, approverDisplayName, busy) {
+  const entry = qmsDevApproverDirectory.find(e => e.user_id === approverUserId);
+  const label = entry ? qmsDevApproverLabel(entry) : (approverDisplayName || "");
+  const stale = approverUserId && !entry;
+  return `
+    <div class="form-field span-2">
+      <label>Approver${stale ? ' <span style="color:var(--error)">(not in directory — may be inactive; reselect)</span>' : ""}</label>
+      <input type="text" list="qms-wfb-approver-directory" id="${fieldId}" value="${label}"
+             placeholder="Search by name…" ${busy} oninput="qmsDevBuilderApproverInput('${fieldId}')" />
+    </div>
+  `;
+}
+
+// Resolves the typed/selected label against the directory and writes
+// approver_user_id/approver_display_name straight into JS state — NOT
+// re-derived by qmsDevBuilderSyncFromDOM(), so a stale (deactivated) or
+// not-yet-reselected approver already on the record is never silently
+// wiped out by an unrelated structural edit (add/remove/move step) that
+// also calls sync.
+function qmsDevBuilderApproverInput(fieldId) {
+  const el = document.getElementById(fieldId);
+  if (!el) return;
+  const typed = el.value.trim();
+  const entry = qmsDevApproverDirectory.find(e => qmsDevApproverLabel(e) === typed);
+  const resolved = entry
+    ? { approver_user_id: entry.user_id, approver_display_name: entry.display_name }
+    : { approver_user_id: "", approver_display_name: "" };  // no exact match yet — must pick from the list
+
+  if (fieldId === "qms-wfb-approver-capa-qa-review") {
+    qmsDevBuilderCapaPhase.qa_review_approver_user_id = resolved.approver_user_id;
+    qmsDevBuilderCapaPhase.qa_review_approver_display_name = resolved.approver_display_name;
+  } else if (fieldId === "qms-wfb-approver-capa-final") {
+    qmsDevBuilderCapaPhase.final_approval_approver_user_id = resolved.approver_user_id;
+    qmsDevBuilderCapaPhase.final_approval_approver_display_name = resolved.approver_display_name;
+  } else {
+    const i = parseInt(fieldId.replace("qms-wfb-approver-", ""), 10);
+    if (!Number.isNaN(i) && qmsDevBuilderSteps[i]) {
+      qmsDevBuilderSteps[i].approver_user_id = resolved.approver_user_id;
+      qmsDevBuilderSteps[i].approver_display_name = resolved.approver_display_name;
+    }
+  }
+}
+window.qmsDevBuilderApproverInput = qmsDevBuilderApproverInput;
 
 function qmsDevBuilderCapaPhaseHTML(busy) {
   const c = qmsDevBuilderCapaPhase || {};
@@ -692,15 +767,13 @@ function qmsDevBuilderCapaPhaseHTML(busy) {
     <div class="qms-stat-card" style="margin-bottom:10px">
       <strong>QA Review</strong>
       <div class="form-grid">
-        <div class="form-field"><label>Approver User ID</label><input type="text" id="qms-wfb-capa-qa-review-uid" value="${c.qa_review_approver_user_id || ""}" placeholder="Supabase user id" ${busy} /></div>
-        <div class="form-field"><label>Approver Display Name</label><input type="text" id="qms-wfb-capa-qa-review-dname" value="${c.qa_review_approver_display_name || ""}" placeholder="Full name" ${busy} /></div>
+        ${qmsDevApproverPickerHTML("qms-wfb-approver-capa-qa-review", c.qa_review_approver_user_id, c.qa_review_approver_display_name, busy)}
       </div>
     </div>
     <div class="qms-stat-card">
       <strong>Final Approval</strong>
       <div class="form-grid">
-        <div class="form-field"><label>Approver User ID</label><input type="text" id="qms-wfb-capa-final-uid" value="${c.final_approval_approver_user_id || ""}" placeholder="Supabase user id" ${busy} /></div>
-        <div class="form-field"><label>Approver Display Name</label><input type="text" id="qms-wfb-capa-final-dname" value="${c.final_approval_approver_display_name || ""}" placeholder="Full name" ${busy} /></div>
+        ${qmsDevApproverPickerHTML("qms-wfb-approver-capa-final", c.final_approval_approver_user_id, c.final_approval_approver_display_name, busy)}
       </div>
     </div>
   `;
@@ -720,27 +793,22 @@ function qmsDevBuilderStepHTML(step, i, isFinal, busy) {
       <div class="form-grid">
         <div class="form-field"><label>Step Name</label><input type="text" id="qms-wfb-name-${i}" value="${step.step_name || ""}" ${isFinal ? "disabled" : busy} /></div>
         <div class="form-field"><label>Department</label><input type="text" id="qms-wfb-dept-${i}" value="${step.department || ""}" placeholder="e.g. Production, QA, Engineering, Warehouse" ${busy} /></div>
-        <div class="form-field"><label>Approver User ID</label><input type="text" id="qms-wfb-uid-${i}" value="${step.approver_user_id || ""}" placeholder="Supabase user id" ${busy} /></div>
-        <div class="form-field"><label>Approver Display Name</label><input type="text" id="qms-wfb-dname-${i}" value="${step.approver_display_name || ""}" placeholder="Full name" ${busy} /></div>
+        ${qmsDevApproverPickerHTML(`qms-wfb-approver-${i}`, step.approver_user_id, step.approver_display_name, busy)}
       </div>
     </div>
   `;
 }
 
 function qmsDevBuilderSyncFromDOM() {
+  // Only step_name/department are read back from the DOM here — approver
+  // fields are resolved-and-written directly by qmsDevBuilderApproverInput()
+  // as the user picks them, and must never be re-derived from raw input
+  // text on every sync (see that function's docstring).
   qmsDevBuilderSteps = qmsDevBuilderSteps.map((s, i) => ({
     ...s,
     step_name: (document.getElementById(`qms-wfb-name-${i}`) || { value: s.step_name || "" }).value.trim(),
     department: (document.getElementById(`qms-wfb-dept-${i}`) || { value: "" }).value.trim(),
-    approver_user_id: (document.getElementById(`qms-wfb-uid-${i}`) || { value: "" }).value.trim(),
-    approver_display_name: (document.getElementById(`qms-wfb-dname-${i}`) || { value: "" }).value.trim(),
   }));
-  qmsDevBuilderCapaPhase = {
-    qa_review_approver_user_id: (document.getElementById("qms-wfb-capa-qa-review-uid") || { value: "" }).value.trim(),
-    qa_review_approver_display_name: (document.getElementById("qms-wfb-capa-qa-review-dname") || { value: "" }).value.trim(),
-    final_approval_approver_user_id: (document.getElementById("qms-wfb-capa-final-uid") || { value: "" }).value.trim(),
-    final_approval_approver_display_name: (document.getElementById("qms-wfb-capa-final-dname") || { value: "" }).value.trim(),
-  };
 }
 
 // Every structural edit (add/remove/reorder) persists immediately via PUT —
@@ -915,13 +983,22 @@ window.qmsDevRequestInfo = qmsDevRequestInfo;
 
 async function qmsDevDecide(id, stepOrder, decision, formId) {
   const comments = formId && document.getElementById(`${formId}-comments`) ? document.getElementById(`${formId}-comments`).value.trim() : "";
-  try {
-    await qmsPostJSON(`/qms/deviations/${id}/workflow/steps/${stepOrder}/decide`, { decision, comments });
-    qmsToast("Recorded");
-    qmsDevRefreshCurrentView(id);
-  } catch (e) {
-    qmsToast("Failed: " + e.message);
-  }
+  if (!window.PharmaESign) { qmsToast("Electronic Signature dialog failed to load"); return; }
+
+  // 21 CFR Part 11 / EU GMP Annex 11: this GMP decision requires a fresh
+  // Electronic Signature (password re-confirmation + meaning + reason) —
+  // see pharmagpt/services/esignature_service.py.
+  const meaningByDecision = { approve: "Approved", reject: "Rejected", return: "Rejected", advance: "Reviewed" };
+  window.PharmaESign.open({
+    meaning: meaningByDecision[decision] || "Approved",
+    onConfirm: async ({ password, meaning, reason }) => {
+      await qmsPostJSON(`/qms/deviations/${id}/workflow/steps/${stepOrder}/decide`, {
+        decision, comments, password, meaning, reason,
+      });
+      qmsToast("Recorded");
+      qmsDevRefreshCurrentView(id);
+    },
+  });
 }
 window.qmsDevDecide = qmsDevDecide;
 

@@ -84,6 +84,8 @@ from pharmagpt import qms_workflow_database as wfdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import qms_repo
+from pharmagpt.services.supabase_client import get_service_role_client
+from pharmagpt.services import esignature_service
 from pharmagpt.services import investigation_engine as inv
 from pharmagpt.services import qms_deviation_service as svc
 from pharmagpt.services import retrieval_engine
@@ -800,6 +802,36 @@ def _build_dynamic_workflow_key(did: int) -> str:
     return dynamic_key
 
 
+def _missing_or_inactive_approvers(company_id: str, user_ids: set) -> set:
+    """Which of `user_ids` do NOT correspond to a real, active user in this
+    company right now — closes the actual bug behind "Lifecycle shows an
+    assigned approver but the deviation never appears in Workflow Inbox": a
+    stale or mistyped approver_user_id (deactivated since it was picked, or
+    never a real user at all) writes fine into
+    qms_workflow_step_approvers and renders fine everywhere that only
+    echoes back display_name, but can never match a real person's Inbox
+    query. Blocking it here, at Submit, is the one point that can still
+    stop it before it reaches a live workflow instance.
+
+    Deliberately a hard, blocking Supabase round-trip — unlike this
+    codebase's Phase 3.5 dual-write pattern (best-effort, never blocks),
+    this check exists specifically to block. Uses the service-role client,
+    filtered explicitly by company_id in application code, same reasoning
+    as routes/users.py's own directory endpoint: RLS on `users` doesn't
+    grant a non-admin caller read access to their company-mates' rows at
+    all, and the Workflow Engine itself (services/workflow_engine.py) is
+    untouched — this lives entirely in the Deviations route layer."""
+    if not user_ids:
+        return set()
+    client = get_service_role_client()
+    active = (
+        client.table("users").select("id")
+        .eq("company_id", company_id).eq("status", "active").execute()
+    )
+    active_ids = {row["id"] for row in (active.data or [])}
+    return user_ids - active_ids
+
+
 @bp.route("/<int:did>/workflow/start", methods=["POST"])
 def start_workflow(did):
     deviation = _record_scoped_or_404(did)
@@ -821,6 +853,16 @@ def start_workflow(did):
         unassigned.append("Final Approval")
     if unassigned:
         reason = f"Assign an approver in the Workflow Builder for: {', '.join(unassigned)}"
+        audit.log_failure("deviation", did, "Workflow start blocked", reason=reason)
+        return jsonify({"error": reason}), 409
+
+    configured_user_ids = {s["approver_user_id"] for s in configured_steps if s.get("approver_user_id")}
+    configured_user_ids.add(capa_phase["qa_review_approver_user_id"])
+    configured_user_ids.add(capa_phase["final_approval_approver_user_id"])
+    stale = _missing_or_inactive_approvers(g.tenant.company_id, configured_user_ids)
+    if stale:
+        reason = ("These configured approvers no longer exist or are inactive — "
+                   f"reconfigure them in the Workflow Builder: {', '.join(sorted(stale))}")
         audit.log_failure("deviation", did, "Workflow start blocked", reason=reason)
         return jsonify({"error": reason}), 409
 
@@ -864,6 +906,24 @@ def decide_workflow_step(did, step_order):
     if decision not in ("approve", "reject", "return", "advance"):
         return jsonify({"error": "decision must be one of approve/reject/return/advance"}), 400
 
+    # Electronic Signature gate (21 CFR Part 11 / EU GMP Annex 11) — the
+    # existing, unmodified pharmagpt/services/esignature_service.py. RBAC for
+    # this step is enforced by wfe.decide_step itself (named-approver /
+    # eligible-role check, raising WorkflowPermissionError) immediately
+    # below — the signature is required before that call, same ordering
+    # already used for Document Control/CAPA/Change Control's identical
+    # decide_workflow_step gate.
+    old_status = deviation["status"]
+    try:
+        esignature_service.require_esignature(
+            g.tenant, data.get("password", ""), data.get("meaning", ""), data.get("reason", ""),
+        )
+    except esignature_service.ReauthenticationError as exc:
+        audit.log_failure("deviation", did, f"Workflow decision blocked ({decision}) — e-signature failed", reason=str(exc))
+        return jsonify({"error": str(exc)}), 401
+    except esignature_service.ESignatureError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     sig = tenancy.signing_identity(g.tenant)
     try:
         state = wfe.decide_step(
@@ -877,6 +937,13 @@ def decide_workflow_step(did, step_order):
     except wfe.WorkflowError as e:
         audit.log_failure("deviation", did, f"Workflow decision blocked ({decision})", reason=str(e))
         return jsonify({"error": str(e)}), 409
+
+    deviation = ddb.get_deviation(did)
+    esignature_service.record_signature(
+        tenant=g.tenant, meaning=data.get("meaning", ""), reason=data.get("reason", ""),
+        record_type="deviation", record_id=did,
+        old_status=old_status, new_status=deviation.get("status", ""),
+    )
     return jsonify(state)
 
 

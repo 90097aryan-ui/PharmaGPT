@@ -193,12 +193,21 @@ async function wfPanelDecide(containerId, recordType, routePrefix, recordId, ste
     comments = `[Request Changes] ${comments}`;
   }
 
-  try {
-    await qmsPostJSON(`${routePrefix}/${recordId}/workflow/steps/${stepOrder}/decide`, { decision, comments });
-    qmsToast("Recorded");
-    renderWorkflowPanel(containerId, recordType, routePrefix, recordId);
-  } catch (e) {
-    qmsToast("Failed: " + e.message);
-  }
+  if (!window.PharmaESign) { qmsToast("Electronic Signature dialog failed to load"); return; }
+
+  // 21 CFR Part 11 / EU GMP Annex 11: this GMP decision requires a fresh
+  // Electronic Signature (password re-confirmation + meaning + reason) —
+  // see pharmagpt/services/esignature_service.py.
+  const meaningByDecision = { approve: "Approved", reject: "Rejected", advance: "Reviewed" };
+  window.PharmaESign.open({
+    meaning: meaningByDecision[decision] || "Approved",
+    onConfirm: async ({ password, meaning, reason }) => {
+      await qmsPostJSON(`${routePrefix}/${recordId}/workflow/steps/${stepOrder}/decide`, {
+        decision, comments, password, meaning, reason,
+      });
+      qmsToast("Recorded");
+      renderWorkflowPanel(containerId, recordType, routePrefix, recordId);
+    },
+  });
 }
 window.wfPanelDecide = wfPanelDecide;

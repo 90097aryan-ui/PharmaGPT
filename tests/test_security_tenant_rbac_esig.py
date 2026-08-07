@@ -52,9 +52,38 @@ AUTH_HEADERS = {"Authorization": "Bearer good-token"}
 MIDDLEWARE_PATH = "pharmagpt.auth.middleware.resolve_tenant_context"
 
 
+@pytest.fixture(autouse=True)
+def _active_approver_directory(monkeypatch):
+    """/workflow/start validates every configured approver against the
+    company's active users (routes/qms_deviations.py::
+    _missing_or_inactive_approvers) — a real Supabase call in production.
+    Autouse-patched here so this file's deviation-workflow tests (which
+    configure either ADMIN_A or REVIEWER_A, both company A, as the
+    approver) keep passing without per-test boilerplate."""
+    from tests.test_assume_company_context import FakeSupabaseClient
+    store = {"users": [
+        {"id": ADMIN_A.user_id, "company_id": COMPANY_A, "status": "active"},
+        {"id": REVIEWER_A.user_id, "company_id": COMPANY_A, "status": "active"},
+    ]}
+    monkeypatch.setattr(
+        "pharmagpt.routes.qms_deviations.get_service_role_client", lambda: FakeSupabaseClient(store)
+    )
+
+
 @pytest.fixture()
-def client(db_path):
+def client(db_path, monkeypatch):
     import pharmagpt.app as appmod
+    # Electronic Signature gate (pharmagpt/services/esignature_service.py) —
+    # these pre-existing tests predate e-signature and don't supply a
+    # password/meaning/reason; bypassed here for the same reason
+    # tests/conftest.py's shared `client` fixture bypasses it. This file's
+    # own esig-spoofing tests (e.g. test_risk_assessment_approval_
+    # performed_by_cannot_be_spoofed) are about a different, still-relevant
+    # protection — that a client-supplied performed_by/role/electronic_sig
+    # is ignored in favor of the authenticated identity — and are unaffected
+    # by bypassing this separate, newer gate.
+    import pharmagpt.services.esignature_service as esignature_service
+    monkeypatch.setattr(esignature_service, "require_esignature", lambda *a, **k: None)
 
     return appmod.app.test_client()
 
@@ -162,6 +191,24 @@ def test_cross_tenant_cannot_read_another_companys_qms_attachments_or_audit_trai
 
     assert attachments.status_code == 404
     assert audit_trail.status_code == 404
+
+
+def test_cross_tenant_cannot_reach_another_companys_feature_request(client):
+    with _as(ADMIN_A):
+        fr = client.post(
+            "/qms/feature-requests", json={"title": "T", "description": "D"}, headers=AUTH_HEADERS,
+        ).get_json()
+
+    with _as(ADMIN_B):
+        get_resp = client.get(f"/qms/feature-requests/{fr['id']}", headers=AUTH_HEADERS)
+        put_resp = client.put(
+            f"/qms/feature-requests/{fr['id']}", json={"title": "Hijacked"}, headers=AUTH_HEADERS,
+        )
+        delete_resp = client.delete(f"/qms/feature-requests/{fr['id']}", headers=AUTH_HEADERS)
+
+    assert get_resp.status_code == 404
+    assert put_resp.status_code == 404
+    assert delete_resp.status_code == 404
 
 
 def test_cross_tenant_cannot_link_another_companys_capa_to_own_deviation(client):

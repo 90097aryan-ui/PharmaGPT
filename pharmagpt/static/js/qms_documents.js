@@ -521,12 +521,20 @@ window.qmsDocAddTraining = qmsDocAddTraining;
 
 async function qmsDocCompleteTraining(docId, trainingId) {
   const today = new Date().toISOString().slice(0, 10);
-  try {
-    await qmsPutJSON(`/qms/documents/training/${trainingId}`, { training_status: "Completed", training_date: today });
-    qmsDocRenderTraining(docId);
-  } catch (e) {
-    qmsToast("Failed: " + e.message);
-  }
+  if (!window.PharmaESign) { qmsToast("Electronic Signature dialog failed to load"); return; }
+
+  // 21 CFR Part 11 / EU GMP Annex 11: completing a training record is a GMP
+  // attestation and requires a fresh Electronic Signature — see
+  // pharmagpt/services/esignature_service.py.
+  window.PharmaESign.open({
+    meaning: "Verified",
+    onConfirm: async ({ password, meaning, reason }) => {
+      await qmsPutJSON(`/qms/documents/training/${trainingId}`, {
+        training_status: "Completed", training_date: today, password, meaning, reason,
+      });
+      qmsDocRenderTraining(docId);
+    },
+  });
 }
 window.qmsDocCompleteTraining = qmsDocCompleteTraining;
 

@@ -44,6 +44,7 @@ from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import qms_repo
+from pharmagpt.services import esignature_service
 from pharmagpt.services import lifecycle_engine
 from pharmagpt.services import risk_service as svc
 from pharmagpt.state import gemini_client
@@ -335,6 +336,19 @@ def add_approval(aid):
     data = request.get_json() or {}
     action_name = data.get("action", "")
 
+    # Electronic Signature gate (21 CFR Part 11 / EU GMP Annex 11) — the
+    # existing, unmodified pharmagpt/services/esignature_service.py.
+    old_status = a["status"]
+    try:
+        esignature_service.require_esignature(
+            g.tenant, data.get("password", ""), data.get("meaning", ""), data.get("reason", ""),
+        )
+    except esignature_service.ReauthenticationError as exc:
+        audit.log_failure("risk_assessment", aid, f"Approval action blocked ({action_name}) — e-signature failed", reason=str(exc))
+        return jsonify({"error": str(exc)}), 401
+    except esignature_service.ESignatureError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     # Update assessment status based on approval action
     status_map = {
         "Submitted for Review": "In Review",
@@ -365,6 +379,12 @@ def add_approval(aid):
         sig["electronic_sig"],
     )
     audit.log("risk_assessment", aid, action_name, old={"status": a["status"]}, reason=data.get("comments", ""))
+    a = rdb.get_assessment(aid)
+    esignature_service.record_signature(
+        tenant=g.tenant, meaning=data.get("meaning", ""), reason=data.get("reason", ""),
+        record_type="risk_assessment", record_id=aid,
+        old_status=old_status, new_status=a.get("status", ""),
+    )
     return jsonify(entry), 201
 
 
