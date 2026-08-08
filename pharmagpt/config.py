@@ -23,6 +23,24 @@ GEMINI_MODEL = "gemini-2.5-flash"
 # API key loaded from .env
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+# ── AI provider selection (pharmagpt/providers/factory.py) ───────────────────
+# "gemini" (default) — unchanged behavior, routes through google.genai.Client.
+# "nemotron" — routes all AI generation through NVIDIA's Nemotron 3 Ultra API
+# instead (see pharmagpt/providers/nemotron_client.py). Requires
+# NVIDIA_API_KEY and NVIDIA_MODEL below; pharmagpt/state.py fails fast at
+# startup if either is missing while this is set to "nemotron".
+AI_PROVIDER = os.getenv("AI_PROVIDER", "gemini").strip().lower()
+
+# NVIDIA API key for the Nemotron provider (https://build.nvidia.com/).
+# Only required when AI_PROVIDER=nemotron; unused otherwise.
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
+
+# Exact NVIDIA model catalog slug to call. No hardcoded default — must be
+# set explicitly when AI_PROVIDER=nemotron so the app never silently calls
+# the wrong model. Verified current slug for Nemotron 3 Ultra on the hosted
+# catalog API (build.nvidia.com), at time of writing: "nvidia/nemotron-3-ultra-550b-a55b".
+NVIDIA_MODEL = os.getenv("NVIDIA_MODEL")
+
 # Flask debug mode — set to False in production.
 # Defaults to False (fail-safe): an accidentally-unset env var in production
 # must never silently enable the Werkzeug interactive debugger (arbitrary
