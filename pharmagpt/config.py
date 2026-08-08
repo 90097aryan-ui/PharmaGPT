@@ -41,6 +41,23 @@ NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 # catalog API (build.nvidia.com), at time of writing: "nvidia/nemotron-3-ultra-550b-a55b".
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL")
 
+# ── AI orchestration router (pharmagpt/providers/router.py) ──────────────────
+# Opt-in, additive: only consulted by router.py's get_client()/
+# generate_content() — AI_PROVIDER above still fully controls the single
+# gemini_client every existing route/service uses via pharmagpt/state.py.
+# Provider selected for conversational/reasoning task intents (CHAT,
+# GENERAL_QA, SUMMARY, SEARCH, UNKNOWN).
+DEFAULT_CHAT_PROVIDER = os.getenv("DEFAULT_CHAT_PROVIDER", "nemotron").strip().lower()
+
+# Provider selected for structured document-generation task intents (URS, DQ,
+# IQ, OQ, PQ, SAT, FAT, VALIDATION_PLAN, VALIDATION_SUMMARY, RISK_ASSESSMENT,
+# FMEA, CAPA, CHANGE_CONTROL, SOP, FACILITY_URS).
+DEFAULT_DOCUMENT_PROVIDER = os.getenv("DEFAULT_DOCUMENT_PROVIDER", "gemini").strip().lower()
+
+# When true, router.py retries the selected provider once, then falls back to
+# the other provider, on a failed call. Set "false" to fail fast instead.
+ENABLE_FALLBACK = os.getenv("ENABLE_FALLBACK", "true").strip().lower() == "true"
+
 # Flask debug mode — set to False in production.
 # Defaults to False (fail-safe): an accidentally-unset env var in production
 # must never silently enable the Werkzeug interactive debugger (arbitrary
