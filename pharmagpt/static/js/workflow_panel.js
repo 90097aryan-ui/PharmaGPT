@@ -95,6 +95,23 @@ function wfPanelApproversBadge(approvers) {
 function wfPanelActionHTML(containerId, recordType, routePrefix, recordId, step, user) {
   const formId = `wf-panel-${recordType}-${recordId}-${step.step_order}`;
 
+  // CAPA's Effectiveness Verification step (routes/qms_capa.py
+  // EFFECTIVENESS_STEP_KEY) is gated server-side to reject Approve/Reject
+  // through the generic decide endpoint — the mandatory verification record
+  // (date, verified by, method, evidence, result) can only be captured on
+  // the Effectiveness tab, so point the user there instead of showing
+  // buttons the server will refuse.
+  if (recordType === "capa" && step.step_key === "effectiveness_check") {
+    return `
+      <div class="qms-panel-item-meta">
+        Submit the Effectiveness Verification record from the <strong>Effectiveness</strong> tab to decide this step.
+      </div>
+      <div class="qms-form-actions" style="margin-top:8px">
+        <button class="btn-primary" onclick="qmsCapaSwitchTab('effectiveness')">Go to Effectiveness Tab</button>
+      </div>
+    `;
+  }
+
   if (step.step_type !== "approval") {
     if (!user.role || !(step.eligible_roles || "").split(",").includes(user.role)) {
       return `<div class="qms-panel-item-meta">Waiting for a user with an eligible role to advance this step.</div>`;

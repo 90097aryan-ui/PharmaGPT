@@ -39,6 +39,7 @@ from pharmagpt.routes.qms_documents  import bp as qms_documents_bp
 from pharmagpt.routes.qms_deviations import bp as qms_deviations_bp
 from pharmagpt.routes.qms_capa       import bp as qms_capa_bp
 from pharmagpt.routes.qms_change_control import bp as qms_change_control_bp
+from pharmagpt.routes.qms_feature_requests import bp as qms_feature_requests_bp
 from pharmagpt.routes.workflow_inbox  import bp as workflow_inbox_bp
 from pharmagpt.routes.equipment       import bp as equipment_bp
 from pharmagpt.routes.facility        import bp as facility_bp
@@ -46,6 +47,8 @@ from pharmagpt.routes.companies       import bp as companies_bp
 from pharmagpt.routes.users           import bp as users_bp
 from pharmagpt.routes.rbac            import bp as rbac_bp
 from pharmagpt.routes.org_structure   import bp as org_structure_bp
+from pharmagpt.routes.backup_admin    import bp as backup_admin_bp
+from pharmagpt.routes.security_admin  import bp as security_admin_bp
 
 
 # ── Application setup ─────────────────────────────────────────────────────────
@@ -88,6 +91,7 @@ app.register_blueprint(qms_documents_bp)
 app.register_blueprint(qms_deviations_bp)
 app.register_blueprint(qms_capa_bp)
 app.register_blueprint(qms_change_control_bp)
+app.register_blueprint(qms_feature_requests_bp)
 app.register_blueprint(workflow_inbox_bp)
 app.register_blueprint(equipment_bp)
 app.register_blueprint(facility_bp)
@@ -95,6 +99,8 @@ app.register_blueprint(companies_bp)
 app.register_blueprint(users_bp)
 app.register_blueprint(rbac_bp)
 app.register_blueprint(org_structure_bp)
+app.register_blueprint(backup_admin_bp)
+app.register_blueprint(security_admin_bp)
 
 
 # ── SPA shell ─────────────────────────────────────────────────────────────────

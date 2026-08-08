@@ -5,11 +5,28 @@ the Inbox needs zero new code to pick up a module once it has a workflow
 template + a services/workflow_registry.py entry.
 """
 
+import pytest
+
 from pharmagpt import qms_workflow_database as wfdb
 from pharmagpt.services import workflow_registry
 
 _FIXED_USER_ID = "00000000-0000-0000-0000-000000000001"  # tests/conftest.py::_TEST_TENANT.user_id
 _ASSIGN = {"approvers": [{"user_id": _FIXED_USER_ID, "display_name": "Test User"}]}
+
+
+@pytest.fixture(autouse=True)
+def _active_approver_directory(monkeypatch):
+    """/workflow/start validates every configured approver against the
+    company's active users (routes/qms_deviations.py::
+    _missing_or_inactive_approvers) — a real Supabase call in production.
+    Autouse-patched here so this file's deviation-workflow tests keep
+    passing without per-test boilerplate."""
+    from tests.test_assume_company_context import FakeSupabaseClient
+    from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID
+    store = {"users": [{"id": _FIXED_USER_ID, "company_id": BOOTSTRAP_COMPANY_ID, "status": "active"}]}
+    monkeypatch.setattr(
+        "pharmagpt.routes.qms_deviations.get_service_role_client", lambda: FakeSupabaseClient(store)
+    )
 
 
 def _dev_configure_all_approvers(client, did, user_id=_FIXED_USER_ID, display_name="Test User"):
@@ -67,6 +84,72 @@ def test_inbox_lists_pending_deviation_approval_step_once_workflow_starts(client
     assert row["assigned_to"] == ["Test User"]
     assert row["due_date"] is None
     assert row["priority"] == "Normal"
+
+
+def test_first_approver_sees_deviation_in_inbox_immediately_after_submit(client):
+    """Regression test for the reported bug: "Lifecycle shows an assigned
+    approver but the deviation never appears in Workflow Inbox." Root cause
+    was NOT the Inbox depending on any legacy assignment model — the Inbox
+    (routes/workflow_inbox.py) and the Lifecycle tab
+    (routes/qms_deviations.py::_enrich_workflow_state) both read the exact
+    same live tables (qms_workflow_instances/_instance_steps/_step_approvers)
+    that /workflow/start's auto-assignment writes to. The actual defect was
+    that the Workflow Builder's free-text "Approver User ID" field accepted
+    any string with no validation against real accounts — a value that
+    doesn't match a real Supabase user id renders fine in Lifecycle (it only
+    echoes back display_name) but can never match the Inbox's
+    `a.user_id = <the querying user's real id>` filter. This test pins down
+    the correct-configuration path: a real approver, correctly identified,
+    must see the record in their Inbox the instant submission succeeds."""
+    dev = client.post("/qms/deviations", json={"title": "Temp excursion"}).get_json()
+    did = dev["id"]
+    _dev_configure_all_approvers(client, did)
+
+    assert client.post(f"/qms/deviations/{did}/workflow/start").status_code == 201
+
+    # Lifecycle already shows the auto-assigned approver...
+    wf = client.get(f"/qms/deviations/{did}/workflow").get_json()
+    assert wf["assigned_to"] == ["Test User"]
+
+    # ...and the SAME approver (the fixture's logged-in tenant user,
+    # _FIXED_USER_ID) sees it in their Inbox right away — no runtime "Assign
+    # Approver" call, no separate inbox-population step.
+    items = client.get("/workflow/inbox").get_json()
+    assert len(items) == 1
+    assert items[0]["record_id"] == did
+    assert items[0]["module"] == "deviation"
+    assert items[0]["current_step_order"] == 2
+
+
+def test_submit_blocked_when_configured_approver_id_does_not_match_a_real_user(client):
+    """Regression test for the actual root cause behind the bug report:
+    "Lifecycle shows an assigned approver but the deviation never appears in
+    Workflow Inbox." Previously the Workflow Builder accepted any string as
+    an approver_user_id with no validation — a step submitted fine, Lifecycle
+    showed the typed display name, but nobody's Inbox would ever list it,
+    because no real user_id matched the stored value (an approval step is
+    only "pending for" a named user_id, exact match — the generic engine was
+    always correct; the gap was upstream). /workflow/start now validates
+    every configured approver against the company's active users first, so
+    this can no longer reach a live workflow instance at all: submission is
+    blocked, with the record staying in Draft, before Lifecycle or the Inbox
+    ever see a phantom assignment."""
+    dev = client.post("/qms/deviations", json={"title": "Temp excursion"}).get_json()
+    did = dev["id"]
+    # "production-head" is not in this file's autouse-mocked active-user
+    # roster (only _FIXED_USER_ID is) — simulates exactly the reported
+    # misconfiguration: a role label typed where a real user id belongs.
+    _dev_configure_all_approvers(client, did, user_id="production-head", display_name="Production Head")
+
+    r = client.post(f"/qms/deviations/{did}/workflow/start")
+    assert r.status_code == 409
+    assert "production-head" in r.get_json()["error"]
+
+    assert client.get(f"/qms/deviations/{did}").get_json()["status"] == "Draft"
+    wf = client.get(f"/qms/deviations/{did}/workflow").get_json()
+    assert wf["instance"] is None
+
+    assert client.get("/workflow/inbox").get_json() == []
 
 
 def test_inbox_lists_pending_capa_and_change_control_immediately(client):

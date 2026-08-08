@@ -6,7 +6,9 @@ Tables managed here (schema lives in qms_database.QMS_SCHEMA):
   qms_capas               : Master CAPA record.
   qms_capa_actions        : Individual corrective/preventive action tasks
                              (owner, due date, status, escalation).
-  qms_capa_effectiveness  : Effectiveness check records.
+  qms_capa_effectiveness  : Effectiveness check records (checklist).
+  qms_capa_effectiveness_verifications : Formal Effectiveness Verification
+                             sign-off history (gates CAPA closure).
 
 Shared cross-module tables (attachments, comments, audit trail, approvals)
 live in qms_database.py and are accessed with record_type='capa'.
@@ -307,6 +309,42 @@ def get_effectiveness(capa_id: int) -> list[dict]:
     conn = get_connection()
     rows = conn.execute(
         "SELECT * FROM qms_capa_effectiveness WHERE capa_id = ? ORDER BY created_at ASC",
+        (capa_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ── Effectiveness Verification (formal QA gate, distinct from the checklist
+# above) ─────────────────────────────────────────────────────────────────────
+
+def add_effectiveness_verification(capa_id: int, data: dict, *,
+                                    workflow_step_order: int | None = None,
+                                    created_by: str = "") -> dict:
+    conn = get_connection()
+    cur = conn.execute(
+        """INSERT INTO qms_capa_effectiveness_verifications
+           (capa_id, verification_date, verified_by, verification_method,
+            objective_evidence, result, comments, workflow_step_order, created_by)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (
+            capa_id, data.get("verification_date", ""), data.get("verified_by", ""),
+            data.get("verification_method", ""), data.get("objective_evidence", ""),
+            data.get("result", ""), data.get("comments", ""), workflow_step_order, created_by,
+        ),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM qms_capa_effectiveness_verifications WHERE id = ?", (cur.lastrowid,)
+    ).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def get_effectiveness_verifications(capa_id: int) -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM qms_capa_effectiveness_verifications WHERE capa_id = ? ORDER BY created_at ASC",
         (capa_id,),
     ).fetchall()
     conn.close()

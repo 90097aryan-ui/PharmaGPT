@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Backup &amp; Recovery — PharmaGPT</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<style>
+  body { padding: 32px; max-width: 1100px; margin: 0 auto; background: var(--bg); color: var(--navy); font-family: 'Inter', sans-serif; }
+  h1 { margin-bottom: 4px; }
+  .subtitle { color: var(--navy-light); margin-bottom: 24px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+  .card h3 { margin-top: 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+  .stat-label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--navy-light); }
+  .stat-value { font-size: 18px; font-weight: 600; margin-top: 4px; }
+  .stat-sub { font-size: 12px; color: var(--navy-light); margin-top: 2px; }
+  .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill-success { background: var(--soft-green); color: var(--success); }
+  .pill-fail { background: #FBEAEA; color: #B23B3B; }
+  .pill-warn { background: var(--soft-amber); color: var(--warning); }
+  .pill-neutral { background: var(--bg-secondary); color: var(--navy-light); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--divider); }
+  th { color: var(--navy-light); font-weight: 600; }
+  button { background: var(--blue-light); color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600; margin-right: 8px; }
+  button:hover:not(:disabled) { background: var(--blue); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .action-block { display: inline-block; vertical-align: top; margin-right: 20px; margin-bottom: 8px; }
+  .disabled-reason { display: block; font-size: 11px; color: var(--navy-light); max-width: 220px; margin-top: 4px; }
+  pre { background: var(--bg-secondary); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 12px; }
+  .empty-state { color: var(--navy-light); font-style: italic; padding: 8px 0; }
+  #notice-banner { display: none; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 14px; }
+  #notice-banner.notice-info { background: var(--soft-blue); color: var(--info); }
+  #notice-banner.notice-warn { background: var(--soft-amber); color: var(--warning); }
+  .config-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--divider); }
+  .config-row:last-child { border-bottom: none; }
+  .config-name { font-weight: 600; }
+  .config-message { font-size: 12px; color: var(--navy-light); max-width: 480px; text-align: right; }
+  .config-icon { font-size: 16px; margin-right: 8px; }
+  details.tech-details { margin-top: 12px; }
+  details.tech-details summary { cursor: pointer; font-size: 12px; color: var(--navy-light); }
+  .health-line { font-size: 13px; margin-top: 8px; }
+  .health-reason { display: block; color: var(--navy-light); }
+</style>
+</head>
+<body>
+  <h1>Backup &amp; Recovery</h1>
+  <p class="subtitle">Platform-wide status — visible to Super Admin only. Remediates the Compliance Matrix's Critical "Backup &amp; Recovery" finding.</p>
+
+  <div id="notice-banner"></div>
+
+  <div class="card">
+    <h3>Backup Health</h3>
+    <div id="health-pill"><span class="pill pill-neutral">Loading…</span></div>
+    <div class="health-line" id="health-reasons"></div>
+  </div>
+
+  <div class="card">
+    <h3>Overview</h3>
+    <div class="grid">
+      <div>
+        <div class="stat-label">Last Successful Backup</div>
+        <div class="stat-value" id="last-successful">—</div>
+        <div class="stat-sub" id="last-successful-sub"></div>
+      </div>
+      <div>
+        <div class="stat-label">Last Failed Backup</div>
+        <div class="stat-value" id="last-failed">—</div>
+      </div>
+      <div>
+        <div class="stat-label">Last Verification</div>
+        <div class="stat-value" id="last-verification">—</div>
+      </div>
+      <div>
+        <div class="stat-label">Backup Freshness</div>
+        <div class="stat-value"><span id="freshness" class="pill pill-neutral">—</span></div>
+      </div>
+      <div>
+        <div class="stat-label">Next Scheduled Backup</div>
+        <div class="stat-value" id="next-scheduled">—</div>
+      </div>
+      <div>
+        <div class="stat-label">Last run size / duration</div>
+        <div class="stat-value" id="last-size-duration">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Configuration</h3>
+    <div id="config-list"><p class="empty-state">Loading configuration status…</p></div>
+  </div>
+
+  <div class="card">
+    <h3>Actions</h3>
+    <div class="action-block">
+      <button id="btn-run">Run Backup Now</button>
+      <span class="disabled-reason" id="reason-run"></span>
+    </div>
+    <div class="action-block">
+      <button id="btn-verify">Run Verification Drill</button>
+      <span class="disabled-reason" id="reason-verify"></span>
+    </div>
+    <div class="action-block">
+      <button id="btn-restore">Restore (Test Location Only)</button>
+      <span class="disabled-reason" id="reason-restore"></span>
+    </div>
+    <div class="action-block">
+      <button id="btn-refresh">Refresh</button>
+    </div>
+    <div id="action-status" style="margin-top:8px; font-size:13px; color: var(--navy-light);"></div>
+  </div>
+
+  <div class="card">
+    <h3>Run History</h3>
+    <table>
+      <thead><tr><th>Run ID</th><th>Status</th><th>Finished</th><th>Duration (s)</th><th>Size</th><th>SHA-256</th></tr></thead>
+      <tbody id="history-body"><tr><td colspan="6" class="empty-state">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Last Verification Result</h3>
+    <div id="verify-summary" class="empty-state">No verification has been run yet.</div>
+    <details class="tech-details" id="verify-details-wrap" style="display:none;">
+      <summary>Show technical details</summary>
+      <pre id="verify-output"></pre>
+    </details>
+  </div>
+
+  <div class="card">
+    <h3>Last Restore Drill Result</h3>
+    <div id="restore-summary" class="empty-state">No restore drill has been run yet.</div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  var STATUS_ICON = { configured: "✅", missing: "⚠️", failed: "❌" };
+  var CONFIG_LABELS = {
+    backup_service: "Backup Service",
+    scheduler: "Scheduler",
+    encryption_key: "Encryption Key",
+    offsite_storage: "Offsite Storage",
+    database_backup: "Database Backup",
+    document_backup: "Document Backup",
+  };
+  var HEALTH_DISPLAY = {
+    healthy: { icon: "🟢", label: "Healthy", cls: "pill-success" },
+    warning: { icon: "🟡", label: "Warning", cls: "pill-warn" },
+    critical: { icon: "🔴", label: "Critical", cls: "pill-fail" },
+  };
+
+  var FRIENDLY_NETWORK_ERROR = "Could not reach the backup service. Check your connection and try again.";
+  var FRIENDLY_GENERIC_ERROR = "Something went wrong. Please try again in a moment.";
+
+  var latestConfig = null;
+  var latestStatus = null;
+
+  function getToken() {
+    var raw = localStorage.getItem("pharmagpt.session") || sessionStorage.getItem("pharmagpt.session");
+    if (!raw) return null;
+    try { return JSON.parse(raw).access_token || null; } catch (e) { return null; }
+  }
+
+  function authFetch(url, opts) {
+    opts = opts || {};
+    opts.headers = Object.assign({}, opts.headers, { "Authorization": "Bearer " + (getToken() || "") });
+    return fetch(url, opts);
+  }
+
+  // Every call site gets a JS object back, never a raw exception message.
+  // Network failures (server unreachable, DNS, CORS) and non-2xx responses
+  // both resolve to a friendly object instead of rejecting with the
+  // browser's own low-level network-error text.
+  function safeFetchJson(url, opts) {
+    return authFetch(url, opts).then(function (r) {
+      return r.json().catch(function () {
+        // Response wasn't JSON at all (e.g. a proxy/server crash page) —
+        // still never surface that raw body to the user.
+        return { user_message: FRIENDLY_GENERIC_ERROR };
+      }).then(function (data) {
+        return { ok: r.ok, status: r.status, data: data };
+      });
+    }).catch(function () {
+      // The fetch() call itself rejected (host unreachable, DNS, CORS) —
+      // never surface the browser's own rejection text.
+      return { ok: false, status: 0, data: { user_message: FRIENDLY_NETWORK_ERROR } };
+    });
+  }
+
+  function showNotice(msg, level) {
+    var el = document.getElementById("notice-banner");
+    if (!msg) { el.style.display = "none"; return; }
+    el.textContent = msg;
+    el.className = level === "warn" ? "notice-warn" : "notice-info";
+    el.style.display = "block";
+  }
+
+  function fmtBytes(n) {
+    if (n === null || n === undefined) return "—";
+    var units = ["B", "KB", "MB", "GB"], i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return n.toFixed(1) + " " + units[i];
+  }
+
+  function fmtTimestamp(iso) {
+    if (!iso) return "—";
+    try {
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return "—";
+      return d.toLocaleString();
+    } catch (e) { return "—"; }
+  }
+
+  function pillHtml(text, cls) {
+    return '<span class="pill ' + cls + '">' + text + "</span>";
+  }
+
+  function renderConfig(configuration) {
+    var container = document.getElementById("config-list");
+    if (!configuration) {
+      container.innerHTML = '<p class="empty-state">Configuration status is unavailable right now.</p>';
+      return;
+    }
+    var html = "";
+    Object.keys(CONFIG_LABELS).forEach(function (key) {
+      var entry = configuration[key] || { status: "missing", message: "Status unknown." };
+      var icon = STATUS_ICON[entry.status] || STATUS_ICON.missing;
+      html += '<div class="config-row"><div><span class="config-icon">' + icon + '</span>' +
+        '<span class="config-name">' + CONFIG_LABELS[key] + '</span></div>' +
+        '<div class="config-message">' + entry.message + '</div></div>';
+    });
+    container.innerHTML = html;
+  }
+
+  function renderHealth(health) {
+    var pillEl = document.getElementById("health-pill");
+    var reasonsEl = document.getElementById("health-reasons");
+    if (!health) {
+      pillEl.innerHTML = pillHtml("Unknown", "pill-neutral");
+      reasonsEl.innerHTML = "";
+      return;
+    }
+    var disp = HEALTH_DISPLAY[health.level] || HEALTH_DISPLAY.warning;
+    pillEl.innerHTML = pillHtml(disp.icon + " " + disp.label, disp.cls);
+    reasonsEl.innerHTML = (health.reasons || []).map(function (r) {
+      return '<span class="health-reason">' + r + "</span>";
+    }).join("");
+  }
+
+  function renderOverview(status) {
+    var lastSuccess = status.last_successful_backup;
+    document.getElementById("last-successful").textContent = lastSuccess ? fmtTimestamp(lastSuccess.finished_at) : "No backups available.";
+    document.getElementById("last-successful-sub").textContent = lastSuccess ? fmtBytes(lastSuccess.size_bytes) : "";
+
+    var lastFailed = status.last_failed_backup;
+    document.getElementById("last-failed").textContent = lastFailed ? fmtTimestamp(lastFailed.finished_at) : "None recorded.";
+
+    var lastVerification = status.last_verification;
+    document.getElementById("last-verification").innerHTML = lastVerification
+      ? (lastVerification.overall === "pass" ? pillHtml("Passed", "pill-success") : pillHtml("Did not pass", "pill-fail")) +
+        ' <span class="stat-sub">' + fmtTimestamp(lastVerification.timestamp) + "</span>"
+      : "Waiting for first verification.";
+
+    var fresh = status.freshness || {};
+    document.getElementById("freshness").outerHTML = pillHtml(
+      fresh.last_success_at ? (fresh.fresh ? "Fresh" : "Stale") : "No backups yet",
+      fresh.last_success_at ? (fresh.fresh ? "pill-success" : "pill-warn") : "pill-neutral"
+    ).replace("<span", '<span id="freshness"');
+
+    var nextSched = status.next_scheduled_backup || {};
+    document.getElementById("next-scheduled").textContent = nextSched.scheduled
+      ? (nextSched.estimated_at ? fmtTimestamp(nextSched.estimated_at) : (nextSched.message || "Pending"))
+      : "Not scheduled — manual only.";
+
+    var run = status.latest_run;
+    document.getElementById("last-size-duration").textContent = run
+      ? fmtBytes(run.size_bytes) + " / " + (run.duration_seconds != null ? run.duration_seconds + "s" : "—")
+      : "—";
+  }
+
+  function computeButtonAvailability(configuration, status) {
+    var enc = configuration && configuration.encryption_key;
+    var svc = configuration && configuration.backup_service;
+    var hasArchive = !!(status && status.latest_run && status.latest_run.status === "success");
+
+    var canRun = !!enc && enc.status === "configured" && !!svc && svc.status === "configured";
+    var runReason = canRun ? "" :
+      (!enc || enc.status !== "configured") ? "Encryption key is not configured." :
+      "Backup storage is not writable.";
+
+    var canVerifyOrRestore = canRun && hasArchive;
+    var verifyRestoreReason = canVerifyOrRestore ? "" :
+      (!canRun ? runReason : "No successful backup exists yet.");
+
+    return { canRun: canRun, runReason: runReason, canVerifyOrRestore: canVerifyOrRestore, verifyRestoreReason: verifyRestoreReason };
+  }
+
+  function applyButtonState(avail) {
+    var btnRun = document.getElementById("btn-run");
+    var btnVerify = document.getElementById("btn-verify");
+    var btnRestore = document.getElementById("btn-restore");
+
+    btnRun.disabled = !avail.canRun;
+    document.getElementById("reason-run").textContent = avail.canRun ? "" : avail.runReason;
+
+    btnVerify.disabled = !avail.canVerifyOrRestore;
+    document.getElementById("reason-verify").textContent = avail.canVerifyOrRestore ? "" : avail.verifyRestoreReason;
+
+    btnRestore.disabled = !avail.canVerifyOrRestore;
+    document.getElementById("reason-restore").textContent = avail.canVerifyOrRestore ? "" : avail.verifyRestoreReason;
+  }
+
+  function renderHistory(runs) {
+    var body = document.getElementById("history-body");
+    if (!runs || !runs.length) {
+      body.innerHTML = '<tr><td colspan="6" class="empty-state">No backups available.</td></tr>';
+      return;
+    }
+    body.innerHTML = runs.map(function (r) {
+      return "<tr><td>" + r.run_id + "</td><td>" + pillHtml(
+          r.status === "success" ? "Success" : "Failed", r.status === "success" ? "pill-success" : "pill-fail"
+        ) + "</td><td>" + fmtTimestamp(r.finished_at) + "</td><td>" + (r.duration_seconds != null ? r.duration_seconds : "—") +
+        "</td><td>" + fmtBytes(r.size_bytes) + "</td><td style='font-family:monospace;font-size:11px;'>" +
+        (r.archive_sha256 ? r.archive_sha256.slice(0, 16) + "…" : "—") + "</td></tr>";
+    }).join("");
+  }
+
+  function loadAll() {
+    Promise.all([
+      safeFetchJson("/admin/backup/api/status"),
+      safeFetchJson("/admin/backup/api/config"),
+      safeFetchJson("/admin/backup/api/history?limit=20"),
+    ]).then(function (results) {
+      var statusRes = results[0], configRes = results[1], historyRes = results[2];
+
+      if (!statusRes.ok || !configRes.ok) {
+        showNotice(
+          (statusRes.data && statusRes.data.user_message) ||
+          (configRes.data && configRes.data.user_message) ||
+          FRIENDLY_GENERIC_ERROR,
+          "warn"
+        );
+      } else {
+        showNotice("");
+      }
+
+      latestStatus = statusRes.ok ? statusRes.data : null;
+      latestConfig = configRes.ok ? (configRes.data.configuration || null) : null;
+
+      if (latestConfig && latestConfig.backup_service && latestConfig.backup_service.status !== "configured" &&
+          latestConfig.encryption_key && latestConfig.encryption_key.status === "missing" &&
+          (!latestStatus || !latestStatus.latest_run)) {
+        showNotice("Backup service has not been configured.", "warn");
+      }
+
+      renderConfig(latestConfig);
+      if (latestStatus) {
+        renderHealth(latestStatus.health);
+        renderOverview(latestStatus);
+      }
+      renderHistory(historyRes.ok ? historyRes.data.runs : []);
+      applyButtonState(computeButtonAvailability(latestConfig, latestStatus));
+    });
+  }
+
+  document.getElementById("btn-refresh").addEventListener("click", loadAll);
+
+  document.getElementById("btn-run").addEventListener("click", function () {
+    var statusEl = document.getElementById("action-status");
+    statusEl.textContent = "Starting backup…";
+    document.getElementById("btn-run").disabled = true;
+    safeFetchJson("/admin/backup/api/run", { method: "POST" }).then(function (res) {
+      statusEl.textContent = (res.data && res.data.user_message) || FRIENDLY_GENERIC_ERROR;
+      setTimeout(loadAll, 3000);
+    });
+  });
+
+  document.getElementById("btn-verify").addEventListener("click", function () {
+    var statusEl = document.getElementById("action-status");
+    var summary = document.getElementById("verify-summary");
+    var detailsWrap = document.getElementById("verify-details-wrap");
+    var out = document.getElementById("verify-output");
+    statusEl.textContent = "Running verification drill (may take a moment)…";
+    document.getElementById("btn-verify").disabled = true;
+    safeFetchJson("/admin/backup/api/verify", { method: "POST" }).then(function (res) {
+      var data = res.data || {};
+      statusEl.textContent = data.user_message || FRIENDLY_GENERIC_ERROR;
+      summary.textContent = data.user_message || FRIENDLY_GENERIC_ERROR;
+      summary.className = data.success ? "" : "empty-state";
+      if (data.checks) {
+        detailsWrap.style.display = "block";
+        var safeChecks = Object.assign({}, data.checks);
+        out.textContent = JSON.stringify(safeChecks, null, 2);
+      }
+      loadAll();
+    });
+  });
+
+  document.getElementById("btn-restore").addEventListener("click", function () {
+    var statusEl = document.getElementById("action-status");
+    var summary = document.getElementById("restore-summary");
+    statusEl.textContent = "Running restore drill into an isolated test location (may take a moment)…";
+    document.getElementById("btn-restore").disabled = true;
+    safeFetchJson("/admin/backup/api/restore", { method: "POST" }).then(function (res) {
+      var data = res.data || {};
+      statusEl.textContent = data.user_message || FRIENDLY_GENERIC_ERROR;
+      summary.textContent = data.user_message || FRIENDLY_GENERIC_ERROR;
+      summary.className = "";
+      loadAll();
+    });
+  });
+
+  loadAll();
+})();
+</script>
+</body>
+</html>

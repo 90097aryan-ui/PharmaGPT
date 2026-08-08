@@ -230,7 +230,8 @@ def assign_approvers(record_type: str, record_id: int, step_order: int,
 
 
 def decide_step(record_type: str, record_id: int, step_order: int, decision: str, *,
-                 user_id: str, role: str, performed_by: str, comments: str = "") -> dict:
+                 user_id: str, role: str, performed_by: str, comments: str = "",
+                 return_to: str = "") -> dict:
     """Decide the record's *current* workflow step.
 
     decision:
@@ -238,10 +239,20 @@ def decide_step(record_type: str, record_id: int, step_order: int, decision: str
                             the step's eligible_roles (no named assignment).
       'approve'/'reject' — step_type='approval'; caller's `user_id` must be
                             one of the step's assigned approvers.
-      'return'           — step_type='approval', only legal from the
-                            'qa_review' step; sends the record back to
-                            'evidence_collection' for further investigation
-                            (re-opens the intervening activity steps).
+      'return'           — step_type='approval'. With no `return_to`, only
+                            legal from the 'qa_review' step and always sends
+                            the record back to 'evidence_collection' (Phase 1
+                            deviation behaviour, unchanged). A caller may pass
+                            an explicit `return_to` step_key to return from
+                            any other approval step to a different target —
+                            e.g. CAPA's Effectiveness Verification step
+                            routing back to Root Cause Analysis or CAPA
+                            Planning depending on the verification result
+                            (routes/qms_capa.py). The record's status then
+                            becomes the target step's own gate_status rather
+                            than the generic "Returned for Investigation"
+                            label, since that label isn't part of every
+                            module's status vocabulary.
     """
     instance = wfdb.get_active_instance(record_type, record_id)
     if not instance:
@@ -259,7 +270,7 @@ def decide_step(record_type: str, record_id: int, step_order: int, decision: str
     if step["step_type"] == "approval":
         if decision not in ("approve", "reject", "return"):
             raise WorkflowError(f"Illegal decision '{decision}' for an approval step")
-        if decision == "return" and step["step_key"] != "qa_review":
+        if decision == "return" and not return_to and step["step_key"] != "qa_review":
             raise WorkflowError("'Return for Investigation' is only valid from QA Review")
         approvers = wfdb.get_step_approvers(step["id"])
         if not approvers:
@@ -300,15 +311,17 @@ def decide_step(record_type: str, record_id: int, step_order: int, decision: str
         wfdb.update_instance_step(step["id"], {
             "status": "returned", "decided_by": performed_by, "decided_at": now, "comments": comments,
         })
-        target = next((s for s in template_steps if s["step_key"] == "evidence_collection"), None)
+        target_key = return_to or "evidence_collection"
+        target = next((s for s in template_steps if s["step_key"] == target_key), None)
         if not target:
-            raise WorkflowError("Workflow misconfigured: no 'evidence_collection' step to return to")
+            raise WorkflowError(f"Workflow misconfigured: no '{target_key}' step to return to")
         wfdb.update_instance(instance["id"], {"current_step_order": target["step_order"]})
         for inst_step in wfdb.get_instance_steps(instance["id"]):
             if target["step_order"] <= inst_step["step_order"] < step_order and inst_step["status"] == "approved":
                 wfdb.update_instance_step(inst_step["id"], {"status": "pending", "decided_by": "", "decided_at": ""})
-        _apply_gate_status(record_type, record_id, "Returned for Investigation")
+        new_status = target["gate_status"] if return_to else "Returned for Investigation"
+        _apply_gate_status(record_type, record_id, new_status)
         audit.log(record_type, record_id, f"{step['step_name']}: Returned for further investigation",
-                   reason=comments)
+                   reason=comments, detail=f"Returned to '{target['step_name']}'" if return_to else "")
 
     return get_instance_state(record_type, record_id)

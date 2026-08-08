@@ -239,6 +239,28 @@ QMS_SCHEMA = """
         FOREIGN KEY (capa_id) REFERENCES qms_capas(id) ON DELETE CASCADE
     );
 
+    -- Effectiveness Verification (compliance gap fix): the formal QA sign-off
+    -- gate a CAPA must pass through before it may reach QA Review/Closed —
+    -- distinct from qms_capa_effectiveness above, which is a free-form
+    -- checklist of individual check criteria. One row per verification
+    -- attempt (history is preserved across Partially/Not Effective cycles,
+    -- never overwritten) — see routes/qms_capa.py
+    -- ::submit_effectiveness_verification.
+    CREATE TABLE IF NOT EXISTS qms_capa_effectiveness_verifications (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        capa_id               INTEGER NOT NULL,
+        verification_date     TEXT    DEFAULT '',
+        verified_by           TEXT    DEFAULT '',
+        verification_method   TEXT    DEFAULT '',
+        objective_evidence    TEXT    DEFAULT '',
+        result                TEXT    DEFAULT '',  -- Effective, Partially Effective, Not Effective
+        comments              TEXT    DEFAULT '',
+        workflow_step_order   INTEGER DEFAULT NULL,
+        created_by            TEXT    DEFAULT '',
+        created_at            TEXT    DEFAULT (datetime('now')),
+        FOREIGN KEY (capa_id) REFERENCES qms_capas(id) ON DELETE CASCADE
+    );
+
     -- ── Deviation Management ─────────────────────────────────────────────────
 
     CREATE TABLE IF NOT EXISTS qms_deviations (
@@ -371,6 +393,24 @@ QMS_SCHEMA = """
         created_at      TEXT    DEFAULT (datetime('now')),
         FOREIGN KEY (cc_id) REFERENCES qms_change_controls(id) ON DELETE CASCADE
     );
+
+    -- ── Feature Requests (v1: CRUD only — no workflow/approvals/dual-write) ──
+
+    CREATE TABLE IF NOT EXISTS feature_requests (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        fr_number       TEXT    NOT NULL DEFAULT '',
+        title           TEXT    NOT NULL DEFAULT 'Untitled Feature Request',
+        description     TEXT    DEFAULT '',
+        module          TEXT    DEFAULT '',
+        priority        TEXT    NOT NULL DEFAULT 'Medium',   -- Low, Medium, High, Critical
+        status          TEXT    NOT NULL DEFAULT 'New',      -- New, Review, Approved, Development, Testing, Released, Closed
+        assigned_to     TEXT    DEFAULT '',
+        created_by      TEXT    DEFAULT '',
+        company_id      TEXT,
+        created_at      TEXT    DEFAULT (datetime('now')),
+        updated_at      TEXT    DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_feature_requests_company ON feature_requests(company_id);
 
     -- ── Workflow Engine (Phase 1: Deviation Investigation Redesign) ─────────
     -- Generic, cross-module multi-step approval engine. A `qms_workflow_
@@ -590,7 +630,7 @@ QMS_SCHEMA = """
         UNION ALL SELECT 3, 'ca_planned',          'Corrective Action Planning', 'activity', 'user,reviewer_qa,company_admin', 'CA Planned'
         UNION ALL SELECT 4, 'pa_planned',          'Preventive Action Planning', 'activity', 'user,reviewer_qa,company_admin', 'PA Planned'
         UNION ALL SELECT 5, 'implementation',      'Implementation',           'activity', 'user,reviewer_qa,company_admin', 'Implementation'
-        UNION ALL SELECT 6, 'effectiveness_check', 'Effectiveness Check',      'activity', 'user,reviewer_qa,company_admin', 'Effectiveness Check'
+        UNION ALL SELECT 6, 'effectiveness_check', 'Effectiveness Verification', 'approval', 'reviewer_qa,company_admin',    'Effectiveness Check'
         UNION ALL SELECT 7, 'qa_review',           'QA Review',                'approval', 'reviewer_qa,company_admin',      'QA Review'
         UNION ALL SELECT 8, 'closed',              'CAPA Closure',             'approval', 'company_admin',                  'Closed'
     ) s
@@ -867,6 +907,10 @@ def generate_change_control_number() -> str:
     return _next_sequence("qms_change_controls", "cc_number", "CC")
 
 
+def generate_feature_request_number() -> str:
+    return _next_sequence("feature_requests", "fr_number", "FR")
+
+
 # ── Attachments (shared) ──────────────────────────────────────────────────────
 
 def add_attachment(record_type: str, record_id: int, filename: str, original_name: str,
@@ -1084,4 +1128,11 @@ QMS_META = {
         "Software", "Utilities", "Regulatory Compliance", "Business Continuity",
         "Electronic Records", "Electronic Signatures",
     ],
+    "feature_request_modules": [
+        "Chat", "Document Generator", "Validation", "Knowledge Base", "Equipment Library",
+        "Risk Management", "URS", "Qualification", "Reports", "Deviation Management",
+        "CAPA", "Change Control", "Document Control", "Feature Requests", "Other",
+    ],
+    "feature_request_priorities": ["Low", "Medium", "High", "Critical"],
+    "feature_request_statuses": ["New", "Review", "Approved", "Development", "Testing", "Released", "Closed"],
 }

@@ -62,3 +62,72 @@ services:
       #   - key: QMS_BACKEND
       #     value: dual
       # Leaving them unset keeps every domain on its "sqlite" default.
+
+      # ── Backup & Recovery (pharmagpt/services/backup_service.py) ─────────────
+      # See docs/BACKUP_SOP.md §4 "One-time setup" before relying on any of this.
+      - key: BACKUP_DIR
+        value: /var/data/backups
+      # No generateValue here on purpose — Render's generated-value format is
+      # not guaranteed to be a valid Fernet key, and a security-critical key
+      # must never silently take on a plausible-but-wrong value (same
+      # reasoning FLASK_SECRET_KEY's dev-fallback was flagged as a Critical
+      # gap for doing the opposite). Generate with `python
+      # scripts/generate_backup_key.py` and paste the result here by hand.
+      - key: BACKUP_ENCRYPTION_KEY
+        sync: false
+      # Optional — a second mounted disk/network path backups are also
+      # copied to. Unset by default: backups exist only on the primary disk
+      # until this is configured. See docs/BACKUP_SOP.md §4 and
+      # docs/BACKUP_ARCHITECTURE.md §10 "Remaining risks" #1.
+      - key: BACKUP_OFFSITE_DIR
+        sync: false
+      # Optional — Slack/Teams/PagerDuty/Opsgenie-compatible incoming
+      # webhook URL, notified on backup failure and staleness.
+      - key: BACKUP_ALERT_WEBHOOK_URL
+        sync: false
+      # Optional — direct Postgres connection string (Supabase dashboard ->
+      # Settings -> Database -> Connection string) for a supplementary
+      # pg_dump, only used if the pg_dump binary also happens to be on
+      # PATH. Not required — the primary Postgres backup mechanism (a
+      # PostgREST JSON export) works without this. See
+      # docs/BACKUP_ARCHITECTURE.md §5.
+      - key: SUPABASE_DB_URL
+        sync: false
+
+  # ── Backup scheduler — DOCUMENTED, NOT ACTIVE ─────────────────────────────
+  # Commented out deliberately: per this feature's explicit "do not deploy"
+  # scope, nothing here has been pushed or activated. Uncomment and deploy
+  # only after completing docs/BACKUP_SOP.md §4's one-time setup checklist
+  # (BACKUP_ENCRYPTION_KEY especially — every run fails cleanly without it,
+  # per backup_service.py's BackupConfigError, but there is no point
+  # scheduling runs that will only ever fail).
+  #
+  # - type: cron
+  #   name: pharmagpt-backup
+  #   runtime: python
+  #   plan: starter
+  #   buildCommand: pip install -r requirements.txt
+  #   schedule: "0 */6 * * *"   # every 6 hours — keep in sync with BACKUP_FREQUENCY_HOURS
+  #   startCommand: python scripts/run_backup.py
+  #   envVars:
+  #     - key: DB_PATH
+  #       value: /var/data/pharmagpt.db
+  #     - key: UPLOAD_FOLDER
+  #       value: /var/data/uploads
+  #     - key: GENERATED_DOCS_PATH
+  #       value: /var/data/generated_documents
+  #     - key: BACKUP_DIR
+  #       value: /var/data/backups
+  #     - key: BACKUP_ENCRYPTION_KEY
+  #       sync: false
+  #     - key: BACKUP_OFFSITE_DIR
+  #       sync: false
+  #     - key: BACKUP_ALERT_WEBHOOK_URL
+  #       sync: false
+  #     - key: SUPABASE_URL
+  #       sync: false
+  #     - key: SUPABASE_SERVICE_ROLE_KEY
+  #       sync: false
+  #   disk:
+  #     name: pharmagpt-data   # same disk as the web service — a Render Cron
+  #     mountPath: /var/data   # Job can mount an existing named disk read/write.

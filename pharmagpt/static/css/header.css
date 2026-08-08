@@ -215,3 +215,21 @@
   .hdr-search-input { display: none; }
   .hdr-search { width: auto; padding: 6px; border-radius: 50%; }
 }
+@media (max-width: 768px) {
+  /* Decorative-only chrome — safe to hide, nothing functional lives here */
+  .header-titles p,
+  .header-divider,
+  #header-breadcrumb,
+  .hdr-chip-text { display: none; }
+
+  /* Every remaining control (search, notifications, Workspaces, Clear Chat,
+     user menu) stays fully present and clickable; the row scrolls
+     horizontally instead of clipping or wrapping on very narrow phones. */
+  .header-right {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+  .header-right::-webkit-scrollbar { display: none; }
+  .header-right > * { flex-shrink: 0; }
+}

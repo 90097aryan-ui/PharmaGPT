@@ -1,0 +1,102 @@
+/* mobile_nav.css — additive mobile-first navigation shell.
+   Adds a hamburger-triggered sidebar drawer and a bottom tab bar for
+   narrow viewports. Desktop layout (>768px) is untouched: every
+   structural rule below lives inside the same 768px breakpoint already
+   used by style.css/header.css. Loaded after style.css, so `.sidebar`
+   rules here win the cascade at that breakpoint without !important. */
+
+/* ── Hamburger button (header, mobile only) ──────────────────────────────
+   Selector uses the id (not just .mobile-menu-btn) so this default-hidden
+   rule outranks style.css's generic `button:has(> .icon) { display:
+   inline-flex }` — otherwise that rule would make the button visible on
+   desktop too, since it has higher specificity than a single class. */
+#mobile-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: #FFF;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+#mobile-menu-btn .icon svg { width: 17px; height: 17px; stroke-width: 1.8; }
+
+/* ── Sidebar drawer scrim ─────────────────────────────────────────────────── */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(45,42,40,0.45);
+  z-index: 190;
+}
+
+/* ── Bottom tab bar ───────────────────────────────────────────────────────── */
+.bottom-nav {
+  display: none;
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  height: 58px;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -2px 10px rgba(45,42,40,0.06);
+  z-index: 210;
+}
+/* Qualified with the .bottom-nav ancestor (2 classes) so this outranks the
+   same generic `button:has(> .icon)` rule mentioned above. */
+.bottom-nav .bottom-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  flex: 1;
+  height: 100%;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 6px 0;
+}
+.bottom-nav-item .icon svg { width: 19px; height: 19px; stroke-width: 1.8; }
+.bottom-nav .bottom-nav-item.active { color: var(--blue-light); }
+.bottom-nav-item.active .icon svg { stroke-width: 2.2; }
+
+@media (max-width: 768px) {
+  /* Mobile chrome (hamburger + bottom nav) only appears once the app
+     header itself is visible — mirrors auth.js's login/session-check
+     header show/hide (see mobile_nav.js) without touching auth.js. */
+  body.mobile-chrome-visible #mobile-menu-btn { display: flex; }
+  body.mobile-chrome-visible .bottom-nav      { display: flex; }
+
+  /* Sidebar becomes an off-canvas drawer instead of vanishing entirely
+     (overrides style.css's `.sidebar { display:none }` at this same
+     breakpoint, since this stylesheet is linked after style.css). */
+  .sidebar {
+    display: flex;
+    position: fixed;
+    top: 0; bottom: 0; left: 0;
+    width: 260px;
+    max-width: 82vw;
+    z-index: 200;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.25);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+  .sidebar.mobile-open { transform: translateX(0); }
+
+  body.mobile-nav-drawer-open .sidebar-backdrop { display: block; }
+
+  /* Reserve room at the bottom of every view so its own content isn't
+     hidden behind the fixed bottom tab bar. */
+  body.mobile-chrome-visible .app-body > main {
+    padding-bottom: 70px;
+  }
+}

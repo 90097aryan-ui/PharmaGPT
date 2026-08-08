@@ -20,6 +20,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/ui_states.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/header.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/error_pages.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile_nav.css') }}" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 </head>
@@ -73,6 +74,9 @@
   <!-- ── Header ──────────────────────────────────────────────────────────────── -->
   <header>
     <div class="header-left">
+      <button class="mobile-menu-btn" id="mobile-menu-btn" title="Menu" aria-label="Open navigation menu" aria-haspopup="true" aria-expanded="false">
+        <span class="icon" data-lucide="menu"></span>
+      </button>
       <div class="logo-icon">Rx</div>
       <div class="header-titles">
         <h1>PharmaGPT</h1>
@@ -162,6 +166,9 @@
 
   <!-- ── App body ─────────────────────────────────────────────────────────────── -->
   <div class="app-body">
+
+    <!-- ── Mobile sidebar drawer scrim (mobile_nav.js/.css) ─────────────────── -->
+    <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
 
     <!-- ── Sidebar ───────────────────────────────────────────────────────────── -->
     <aside class="sidebar">
@@ -402,6 +409,17 @@
           <div class="sidebar-item qms-sub-item" onclick="window.showView('view-qms-documents'); window.qmsLoadMeta && window.qmsLoadMeta().then(function(){ window.qmsDocShowList && window.qmsDocShowList({type:'Template'}); }); document.querySelectorAll('.sidebar-item').forEach(function(n){n.classList.remove('active');}); this.classList.add('active');">
             <span class='icon' data-lucide='layout-template'></span> Templates
           </div>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <!-- ══ Feature Requests (v1: CRUD only) — own top-level module,
+           same pattern as Equipment Library. ══ -->
+      <div class="sidebar-section">
+        <div class="sidebar-label">Feature Requests</div>
+        <div class="sidebar-item qms-sub-item" id="nav-feature-requests" data-view="view-feature-requests">
+          <span class='icon' data-lucide='lightbulb'></span> Feature Requests
         </div>
       </div>
 
@@ -2488,9 +2506,34 @@
 
   <!-- ══ End Quality Management Suite ══════════════════════════════════════ -->
 
+  <main class="qms-view" id="view-feature-requests">
+    <div id="feature-requests-body"></div>
+  </main>
+
   </div><!-- /app-body — closes here, not after view-validation, so every module
              (Generate Document, Risk, URS, Qual, Report, QMS) renders inside the
              sidebar + content flex layout instead of full-width below it -->
+
+  <!-- ── Bottom tab bar (mobile only) — each button just re-clicks the real
+       existing sidebar item it mirrors, so it reuses that item's view switch
+       and data-init logic verbatim. See mobile_nav.js/.css. ────────────────── -->
+  <nav class="bottom-nav" id="bottom-nav" aria-label="Primary">
+    <button class="bottom-nav-item" data-target="nav-dashboard">
+      <span class="icon" data-lucide="home"></span>Home
+    </button>
+    <button class="bottom-nav-item" data-target="nav-validation-dashboard">
+      <span class="icon" data-lucide="flask-conical"></span>Validation
+    </button>
+    <button class="bottom-nav-item" data-target="nav-qms-dashboard">
+      <span class="icon" data-lucide="shield"></span>Quality
+    </button>
+    <button class="bottom-nav-item" data-target="nav-kb">
+      <span class="icon" data-lucide="library"></span>Knowledge
+    </button>
+    <button class="bottom-nav-item" data-target="nav-chat">
+      <span class="icon" data-lucide="sparkles"></span>Chat
+    </button>
+  </nav>
 
   <!-- auth.js loads first and patches window.fetch to attach the bearer token
        before any other module's DOMContentLoaded handler can call it (Phase 2
@@ -2524,6 +2567,7 @@
   <script src="{{ url_for('static', filename='js/workflow_panel.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_capa.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_change_control.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/qms_feature_requests.js') }}"></script>
   <script src="{{ url_for('static', filename='js/workflow_inbox.js') }}"></script>
   <script src="{{ url_for('static', filename='js/validation_dashboard.js') }}"></script>
   <script src="{{ url_for('static', filename='js/admin_assume_context.js') }}"></script>
@@ -2535,6 +2579,7 @@
   <script src="{{ url_for('static', filename='js/search.js') }}"></script>
   <script src="{{ url_for('static', filename='js/notifications.js') }}"></script>
   <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/mobile_nav.js') }}"></script>
 
   <!-- The "Validation sidebar nav items" builder (buildValNav), plus
        toggleValSection and switchToValidation, were removed here (ALD-001
@@ -2641,6 +2686,10 @@
 
         if (targetId === "view-qms-change-control") {
           if (window.initQMSChangeControl) window.initQMSChangeControl();
+        }
+
+        if (targetId === "view-feature-requests") {
+          if (window.initFeatureRequests) window.initFeatureRequests();
         }
 
         if (targetId === "view-urs-dashboard") {

@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Security Configuration Status — PharmaGPT</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<style>
+  body { padding: 32px; max-width: 1100px; margin: 0 auto; background: var(--bg); color: var(--navy); font-family: 'Inter', sans-serif; }
+  h1 { margin-bottom: 4px; }
+  .subtitle { color: var(--navy-light); margin-bottom: 24px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+  .card h3 { margin-top: 0; }
+  .config-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--divider); gap: 16px; }
+  .config-row:last-child { border-bottom: none; }
+  .config-name { font-weight: 600; }
+  .config-message { font-size: 12px; color: var(--navy-light); max-width: 560px; text-align: right; }
+  .config-icon { font-size: 16px; margin-right: 8px; }
+  .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill-success { background: var(--soft-green); color: var(--success); }
+  .pill-fail { background: #FBEAEA; color: #B23B3B; }
+  .pill-warn { background: var(--soft-amber); color: var(--warning); }
+  .empty-state { color: var(--navy-light); font-style: italic; padding: 8px 0; }
+  #notice-banner { display: none; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 14px; }
+  #notice-banner.notice-warn { background: var(--soft-amber); color: var(--warning); }
+</style>
+</head>
+<body>
+  <h1>Security Configuration Status</h1>
+  <p class="subtitle">Platform-wide status — visible to Super Admin only. Secret values are never shown, only configuration status.</p>
+
+  <div id="notice-banner"></div>
+
+  <div class="card">
+    <h3>Secrets &amp; Credentials</h3>
+    <div id="secrets-list"><p class="empty-state">Loading configuration status…</p></div>
+  </div>
+
+  <div class="card">
+    <h3>Session &amp; CSRF Hardening</h3>
+    <div id="hardening-list"><p class="empty-state">Loading hardening status…</p></div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  var STATUS_ICON = { configured: "✅", missing: "⚠️", failed: "❌" };
+  var SECRET_LABELS = {
+    flask_secret_key: "Flask / Session Secret Key",
+    jwt_secret: "JWT Secret",
+    backup_encryption_key: "Backup Encryption Key",
+    supabase_url: "Supabase URL",
+    supabase_anon_key: "Supabase Anon Key",
+    supabase_service_role_key: "Supabase Service-Role Key",
+  };
+  var HARDENING_LABELS = {
+    httponly: "HttpOnly Cookie",
+    samesite: "SameSite Cookie",
+    secure: "Secure Cookie Flag",
+    csrf: "CSRF Protection",
+    session_timeout: "Session Timeout",
+    session_rotation: "Session Rotation After Login",
+  };
+
+  var FRIENDLY_NETWORK_ERROR = "Could not reach the security status service. Check your connection and try again.";
+  var FRIENDLY_GENERIC_ERROR = "Something went wrong. Please try again in a moment.";
+
+  function getToken() {
+    var raw = localStorage.getItem("pharmagpt.session") || sessionStorage.getItem("pharmagpt.session");
+    if (!raw) return null;
+    try { return JSON.parse(raw).access_token || null; } catch (e) { return null; }
+  }
+
+  function authFetch(url, opts) {
+    opts = opts || {};
+    opts.headers = Object.assign({}, opts.headers, { "Authorization": "Bearer " + (getToken() || "") });
+    return fetch(url, opts);
+  }
+
+  // Every call site gets a JS object back, never a raw exception message.
+  function safeFetchJson(url, opts) {
+    return authFetch(url, opts).then(function (r) {
+      return r.json().catch(function () {
+        return { user_message: FRIENDLY_GENERIC_ERROR };
+      }).then(function (data) {
+        return { ok: r.ok, status: r.status, data: data };
+      });
+    }).catch(function () {
+      return { ok: false, status: 0, data: { user_message: FRIENDLY_NETWORK_ERROR } };
+    });
+  }
+
+  function showNotice(msg) {
+    var el = document.getElementById("notice-banner");
+    if (!msg) { el.style.display = "none"; return; }
+    el.textContent = msg;
+    el.className = "notice-warn";
+    el.style.display = "block";
+  }
+
+  function renderSecrets(configuration) {
+    var container = document.getElementById("secrets-list");
+    if (!configuration) {
+      container.innerHTML = '<p class="empty-state">Configuration status is unavailable right now.</p>';
+      return;
+    }
+    var html = "";
+    Object.keys(SECRET_LABELS).forEach(function (key) {
+      var entry = configuration[key] || { status: "missing", message: "Status unknown." };
+      var icon = STATUS_ICON[entry.status] || STATUS_ICON.missing;
+      html += '<div class="config-row"><div><span class="config-icon">' + icon + '</span>' +
+        '<span class="config-name">' + SECRET_LABELS[key] + '</span></div>' +
+        '<div class="config-message">' + entry.message + '</div></div>';
+    });
+    container.innerHTML = html;
+  }
+
+  function renderHardening(hardening) {
+    var container = document.getElementById("hardening-list");
+    if (!hardening) {
+      container.innerHTML = '<p class="empty-state">Hardening status is unavailable right now.</p>';
+      return;
+    }
+    var html = "";
+    Object.keys(HARDENING_LABELS).forEach(function (key) {
+      var entry = hardening[key] || { enabled: false, message: "Status unknown." };
+      var pillCls = entry.enabled ? "pill-success" : "pill-warn";
+      var pillText = entry.enabled ? "Enabled" : "Off";
+      html += '<div class="config-row"><div><span class="pill ' + pillCls + '">' + pillText + '</span> ' +
+        '<span class="config-name">' + HARDENING_LABELS[key] + '</span></div>' +
+        '<div class="config-message">' + entry.message + '</div></div>';
+    });
+    container.innerHTML = html;
+  }
+
+  function loadAll() {
+    Promise.all([
+      safeFetchJson("/admin/security/api/config"),
+      safeFetchJson("/admin/security/api/hardening"),
+    ]).then(function (results) {
+      var configRes = results[0], hardeningRes = results[1];
+
+      if (!configRes.ok || !hardeningRes.ok) {
+        showNotice(
+          (configRes.data && configRes.data.user_message) ||
+          (hardeningRes.data && hardeningRes.data.user_message) ||
+          FRIENDLY_GENERIC_ERROR
+        );
+      } else {
+        showNotice("");
+      }
+
+      renderSecrets(configRes.ok ? configRes.data.configuration : null);
+      renderHardening(hardeningRes.ok ? hardeningRes.data.hardening : null);
+    });
+  }
+
+  loadAll();
+})();
+</script>
+</body>
+</html>

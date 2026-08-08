@@ -186,6 +186,22 @@ def test_document_docx_export(client):
 _FIXED_USER_ID = "00000000-0000-0000-0000-000000000001"  # tests/conftest.py::_TEST_TENANT.user_id
 
 
+@pytest.fixture(autouse=True)
+def _active_approver_directory(monkeypatch):
+    """/workflow/start validates every configured approver against the
+    company's active users (routes/qms_deviations.py::
+    _missing_or_inactive_approvers) — a real Supabase call in production.
+    Autouse-patched here so this file's deviation-workflow tests (all of
+    which configure _FIXED_USER_ID as the approver) keep passing without
+    per-test boilerplate."""
+    from tests.test_assume_company_context import FakeSupabaseClient
+    from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID
+    store = {"users": [{"id": _FIXED_USER_ID, "company_id": BOOTSTRAP_COMPANY_ID, "status": "active"}]}
+    monkeypatch.setattr(
+        "pharmagpt.routes.qms_deviations.get_service_role_client", lambda: FakeSupabaseClient(store)
+    )
+
+
 def _dev_configure_all_approvers(client, did, user_id=_FIXED_USER_ID, display_name="Test User"):
     """Fill in every named-approval step's approver via the Workflow Builder
     (the only place they can be set for deviations — there is no runtime
@@ -490,11 +506,25 @@ def test_capa_approval_status_map(client):
     client.post(f"/qms/capa/{cid}/approval", json={"action": "Root Cause Analysis Started", "performed_by": "A"})
     assert client.get(f"/qms/capa/{cid}").get_json()["status"] == "CA Planned"
 
-    for action in ["Preventive Actions Planned", "Implementation Started",
-                   "Effectiveness Check Started", "Submitted for QA Review", "Closed"]:
+    for action in ["Preventive Actions Planned", "Implementation Started", "Effectiveness Check Started"]:
         client.post(f"/qms/capa/{cid}/approval", json={"action": action, "performed_by": "B"})
+    assert client.get(f"/qms/capa/{cid}").get_json()["status"] == "Effectiveness Check"
+
+    # Effectiveness Verification (step 6) is now a mandatory, dedicated,
+    # e-signed gate — the legacy /approval endpoint refuses to decide it
+    # directly. See tests/test_capa_effectiveness_verification.py for full
+    # coverage of this gate.
+    r = client.post(f"/qms/capa/{cid}/approval", json={"action": "Submitted for QA Review", "performed_by": "B"})
+    assert r.status_code == 409
+    r = client.post(f"/qms/capa/{cid}/effectiveness-verification", json={
+        "verification_date": "2026-08-07", "verified_by": "QA Lead",
+        "verification_method": "Trend review", "objective_evidence": "No recurrence observed",
+        "result": "Effective",
+    })
+    assert r.status_code == 201
     assert client.get(f"/qms/capa/{cid}").get_json()["status"] == "QA Review"
 
+    client.post(f"/qms/capa/{cid}/approval", json={"action": "Submitted for QA Review", "performed_by": "B"})
     client.post(f"/qms/capa/{cid}/approval", json={"action": "Closed", "performed_by": "B"})
     assert client.get(f"/qms/capa/{cid}").get_json()["status"] == "Closed"
 

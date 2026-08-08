@@ -453,7 +453,16 @@ window.qmsCapaEscalateAction = qmsCapaEscalateAction;
 async function qmsCapaRenderEffectiveness(id) {
   const el = document.getElementById("qms-capa-tab-body");
   el.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading effectiveness checks…</div>`;
-  const checks = await qmsFetch(`/qms/capa/${id}/effectiveness`);
+  const [checks, verifications, wf] = await Promise.all([
+    qmsFetch(`/qms/capa/${id}/effectiveness`),
+    qmsFetch(`/qms/capa/${id}/effectiveness-verification`),
+    qmsFetch(`/qms/capa/${id}/workflow`),
+  ]);
+  const currentStep = wf.instance && wf.instance.status === "in_progress"
+    ? (wf.steps || []).find(s => s.step_order === wf.instance.current_step_order)
+    : null;
+  const gateOpen = !!currentStep && currentStep.step_key === "effectiveness_check";
+
   el.innerHTML = `
     <div class="qms-section-card">
       <h3>AI-Suggested Effectiveness Checks</h3>
@@ -465,8 +474,80 @@ async function qmsCapaRenderEffectiveness(id) {
         <thead><tr><th>Criterion</th><th>Method</th><th>Timeframe</th><th>Acceptable Result</th><th>Status</th></tr></thead>
         <tbody>${checks.map(c => `<tr><td>${c.check_criterion}</td><td>${c.method}</td><td>${c.timeframe}</td><td>${c.acceptable_result}</td><td>${qmsBadge(c.status)}</td></tr>`).join("")}</tbody>
       </table>` : `<div class="qms-empty"><p>No effectiveness checks recorded yet.</p></div>`}
+
+    <div class="qms-section-card">
+      <h3>Effectiveness Verification</h3>
+      <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px">
+        Mandatory QA sign-off gate — a CAPA cannot reach QA Review/Closed without a documented,
+        electronically signed verification. Effective closes the gate forward; Partially Effective
+        returns the CAPA to CAPA Planning; Not Effective reopens Root Cause Analysis.
+      </p>
+      ${gateOpen ? qmsCapaEffectivenessVerificationFormHTML(id) : `
+        <p style="font-size:12.5px;color:var(--text-muted)">
+          ${wf.instance ? `This CAPA is currently at "${currentStep ? currentStep.step_name : wf.instance.status}" — verification can be submitted once it reaches the Effectiveness Verification stage.` : "Start the CAPA workflow (Workflow tab) to reach this stage."}
+        </p>`}
+    </div>
+
+    ${verifications.length ? `
+      <div class="qms-section-card">
+        <h3>Effectiveness Verification History</h3>
+        <table class="qms-table">
+          <thead><tr><th>Date</th><th>Verified By</th><th>Method</th><th>Result</th><th>Comments</th></tr></thead>
+          <tbody>${verifications.map(v => `<tr><td>${v.verification_date}</td><td>${v.verified_by}</td><td>${v.verification_method}</td><td>${qmsBadge(v.result)}</td><td>${v.comments || "—"}</td></tr>`).join("")}</tbody>
+        </table>
+      </div>` : ""}
   `;
 }
+
+function qmsCapaEffectivenessVerificationFormHTML(id) {
+  return `
+    <div class="form-grid">
+      <div class="form-field"><label>Verification Date</label><input type="date" id="qms-ev-date" /></div>
+      <div class="form-field"><label>Verified By</label><input type="text" id="qms-ev-by" /></div>
+      <div class="form-field"><label>Verification Method</label><input type="text" id="qms-ev-method" placeholder="e.g. Trend review, re-audit, retest" /></div>
+      <div class="form-field"><label>Result</label>
+        <select id="qms-ev-result">
+          <option value="Effective">Effective</option>
+          <option value="Partially Effective">Partially Effective</option>
+          <option value="Not Effective">Not Effective</option>
+        </select>
+      </div>
+      <div class="form-field span-2"><label>Objective Evidence</label><textarea id="qms-ev-evidence"></textarea></div>
+      <div class="form-field span-2"><label>Comments</label><textarea id="qms-ev-comments"></textarea></div>
+    </div>
+    <div class="qms-form-actions">
+      <button class="btn-primary" onclick="qmsCapaSubmitEffectivenessVerification(${id})">Submit Verification</button>
+    </div>
+  `;
+}
+
+async function qmsCapaSubmitEffectivenessVerification(id) {
+  const verification_date = document.getElementById("qms-ev-date").value;
+  const verified_by = document.getElementById("qms-ev-by").value.trim();
+  const verification_method = document.getElementById("qms-ev-method").value.trim();
+  const objective_evidence = document.getElementById("qms-ev-evidence").value.trim();
+  const result = document.getElementById("qms-ev-result").value;
+  const comments = document.getElementById("qms-ev-comments").value.trim();
+  if (!verification_date || !verified_by || !verification_method || !objective_evidence) {
+    qmsToast("Verification Date, Verified By, Method, and Objective Evidence are required");
+    return;
+  }
+  if (!window.PharmaESign) { qmsToast("Electronic Signature dialog failed to load"); return; }
+
+  const meaningByResult = { "Effective": "Approved", "Partially Effective": "Reviewed", "Not Effective": "Rejected" };
+  window.PharmaESign.open({
+    meaning: meaningByResult[result] || "Verified",
+    onConfirm: async ({ password, meaning, reason }) => {
+      await qmsPostJSON(`/qms/capa/${id}/effectiveness-verification`, {
+        verification_date, verified_by, verification_method, objective_evidence, result, comments,
+        password, meaning, reason,
+      });
+      qmsToast("Effectiveness Verification recorded");
+      qmsCapaRenderEffectiveness(id);
+    },
+  });
+}
+window.qmsCapaSubmitEffectivenessVerification = qmsCapaSubmitEffectivenessVerification;
 
 async function qmsCapaSuggestEffectiveness(id) {
   const el = document.getElementById("qms-capa-eff-suggestions");
@@ -515,9 +596,13 @@ async function qmsCapaRenderLinkedDeviations(id) {
 // ── Approval / status transition ──────────────────────────────────────────────
 
 async function qmsCapaRenderApprovalTab(id) {
+  // "Effectiveness Check Started" is intentionally not offered here — that
+  // stage is now a mandatory, e-signed gate submitted from the Effectiveness
+  // tab (see EFFECTIVENESS_STEP_KEY in routes/qms_capa.py), not a free
+  // status-map action.
   const actions = [
     "Root Cause Analysis Started", "Corrective Actions Planned", "Preventive Actions Planned",
-    "Implementation Started", "Effectiveness Check Started", "Submitted for QA Review",
+    "Implementation Started", "Submitted for QA Review",
     "Closed", "Rejected",
   ];
   qmsRenderApproval(`qms-approval-capa-${id}`, "capa", id, actions, `/qms/capa/${id}/approval`,

@@ -182,10 +182,20 @@ def test_closed_capa_cannot_be_edited(client):
         # (CAPA_WORKFLOW_V1, 8 steps) — one call advances exactly one real
         # step, so reaching "Closed" from a fresh CAPA takes the full
         # sequence (same mechanism as tests/test_qms_routes.py::
-        # test_capa_approval_status_map).
+        # test_capa_approval_status_map). Step 6 (Effectiveness Verification)
+        # is a mandatory, dedicated, e-signed gate — see
+        # tests/test_capa_effectiveness_verification.py — so it's decided via
+        # /effectiveness-verification, not this legacy action map.
         for action in ["Root Cause Analysis Started", "Preventive Actions Planned", "Implementation Started",
-                       "Effectiveness Check Started", "Submitted for QA Review", "Closed"]:
+                       "Effectiveness Check Started"]:
             client.post(f"/qms/capa/{capa['id']}/approval", json={"action": action}, headers=AUTH_HEADERS)
+        verify_resp = client.post(f"/qms/capa/{capa['id']}/effectiveness-verification", json={
+            "verification_date": "2026-08-07", "verified_by": "Rita Reviewer",
+            "verification_method": "Trend review", "objective_evidence": "No recurrence observed",
+            "result": "Effective",
+        }, headers=AUTH_HEADERS)
+        assert verify_resp.status_code == 201
+        client.post(f"/qms/capa/{capa['id']}/approval", json={"action": "Submitted for QA Review"}, headers=AUTH_HEADERS)
         close_resp = client.post(f"/qms/capa/{capa['id']}/approval", json={"action": "Closed"}, headers=AUTH_HEADERS)
         assert close_resp.status_code == 201
         assert client.get(f"/qms/capa/{capa['id']}", headers=AUTH_HEADERS).get_json()["status"] == "Closed"

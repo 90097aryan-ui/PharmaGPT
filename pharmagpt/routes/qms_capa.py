@@ -26,6 +26,11 @@ POST   /qms/capa/actions/<aid>/escalate     escalate an overdue action
 GET    /qms/capa/<id>/effectiveness         list effectiveness checks
 POST   /qms/capa/<id>/effectiveness         upsert an effectiveness check
 
+GET    /qms/capa/<id>/effectiveness-verification   list Effectiveness Verification history
+POST   /qms/capa/<id>/effectiveness-verification   mandatory QA sign-off gate (e-signature) —
+                                                     the only legal way to decide the
+                                                     Effectiveness Verification workflow step
+
 GET    /qms/capa/<id>/deviations            linked deviations
 
 POST   /qms/capa/<id>/approval              status transition + e-signature entry
@@ -57,6 +62,25 @@ bp = Blueprint("qms_capa", __name__, url_prefix="/qms/capa")
 logger = logging.getLogger(__name__)
 RECORD_TYPE = "capa"
 WORKFLOW_KEY = "CAPA_WORKFLOW_V1"
+
+# Effectiveness Verification (compliance gap fix): CAPA_WORKFLOW_V1 step 6
+# ('effectiveness_check' step_key, kept unchanged from V1 for engine
+# compatibility — see qms_database.py) is a named-approver 'approval' step.
+# It may only be decided through submit_effectiveness_verification() below,
+# never through the generic decide_workflow_step()/submit_approval() paths —
+# both are guarded to reject it (see EFFECTIVENESS_STEP_KEY checks) so a CAPA
+# can never reach QA Review/Closed without a documented, e-signed
+# Effectiveness Verification record.
+EFFECTIVENESS_STEP_KEY = "effectiveness_check"
+EFFECTIVENESS_RESULTS = ("Effective", "Partially Effective", "Not Effective")
+# Result -> (workflow decision, return-to step_key). Effective advances
+# forward as normal; the other two use workflow_engine.decide_step's
+# `return_to` parameter to route back to a specific earlier step.
+_EFFECTIVENESS_RESULT_ROUTING = {
+    "Effective": ("approve", ""),
+    "Partially Effective": ("return", "ca_planned"),
+    "Not Effective": ("return", "root_cause_analysis"),
+}
 
 
 # ── Phase 3.5 dual-write (docs/PHASE3_EXECUTION_PLAN.md) ───────────────────────
@@ -330,6 +354,18 @@ def decide_workflow_step(cid, step_order):
     if decision not in ("approve", "reject", "advance"):
         return jsonify({"error": "decision must be one of approve/reject/advance"}), 400
 
+    # Effectiveness Verification gate: this step may only be decided via
+    # submit_effectiveness_verification() below, which captures the
+    # mandatory verification record before deciding it — never through this
+    # generic path (see EFFECTIVENESS_STEP_KEY module note).
+    active_instance = wfdb.get_active_instance(RECORD_TYPE, cid)
+    current_step = wfdb.get_instance_step(active_instance["id"], step_order) if active_instance else None
+    if current_step and current_step["step_key"] == EFFECTIVENESS_STEP_KEY:
+        return jsonify({
+            "error": "This CAPA is at the Effectiveness Verification stage — "
+                     "submit it via POST /qms/capa/<id>/effectiveness-verification",
+        }), 409
+
     # Electronic Signature gate (21 CFR Part 11 / EU GMP Annex 11) — same gate
     # already applied to this record type's legacy submit_approval() below;
     # this newer Workflow Panel path decides the exact same workflow steps
@@ -366,6 +402,102 @@ def decide_workflow_step(cid, step_order):
         old_status=old_status, new_status=capa.get("status", ""),
     )
     return jsonify(state)
+
+
+# ── Effectiveness Verification (mandatory gate before QA Review/Closed) ──────
+# Closes the compliance gap identified by the Compliance Validation Report:
+# a CAPA could previously reach "Effectiveness Check" as a plain activity
+# step and be advanced by any eligible role with no verification record and
+# no e-signature. Step 6 of CAPA_WORKFLOW_V1 ('effectiveness_check') is now a
+# named-approver 'approval' step decided *only* through this endpoint, which
+# requires the full verification record, RBAC, and an Electronic Signature
+# before the underlying workflow decision is made — reusing the existing
+# workflow engine, e-signature service, RBAC, and audit trail unchanged (see
+# module note above and services/workflow_engine.py's decide_step
+# `return_to` parameter).
+
+@bp.route("/<int:cid>/effectiveness-verification", methods=["GET"])
+def get_effectiveness_verifications(cid):
+    if not _record_scoped_or_404(cid):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(cdb.get_effectiveness_verifications(cid))
+
+
+@bp.route("/<int:cid>/effectiveness-verification", methods=["POST"])
+@require_role("company_admin", "reviewer_qa")
+def submit_effectiveness_verification(cid):
+    capa = _record_scoped_or_404(cid)
+    if not capa:
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json() or {}
+
+    result = data.get("result", "")
+    if result not in EFFECTIVENESS_RESULTS:
+        return jsonify({"error": f"result must be one of: {', '.join(EFFECTIVENESS_RESULTS)}"}), 400
+    required = ("verification_date", "verified_by", "verification_method", "objective_evidence")
+    missing = [f for f in required if not (data.get(f) or "").strip()]
+    if missing:
+        return jsonify({"error": f"Missing required field(s): {', '.join(missing)}"}), 400
+
+    state = wfe.get_instance_state(RECORD_TYPE, cid)
+    instance = state["instance"]
+    if not instance or instance["status"] != "in_progress":
+        return jsonify({"error": "No active workflow instance for this CAPA"}), 409
+    step = next((s for s in state["steps"] if s["step_order"] == instance["current_step_order"]), None)
+    if not step or step["step_key"] != EFFECTIVENESS_STEP_KEY:
+        return jsonify({"error": "This CAPA is not currently at the Effectiveness Verification stage"}), 409
+
+    # Electronic Signature gate (21 CFR Part 11 / EU GMP Annex 11) — same
+    # gate as every other workflow decision in this module; called before
+    # any mutation, so a failed signature leaves no partial state.
+    old_status = capa["status"]
+    try:
+        esignature_service.require_esignature(
+            g.tenant, data.get("password", ""), data.get("meaning", ""), data.get("reason", ""),
+        )
+    except esignature_service.ReauthenticationError as exc:
+        audit.log_failure("capa", cid, "Effectiveness Verification blocked — e-signature failed", reason=str(exc))
+        return jsonify({"error": str(exc)}), 401
+    except esignature_service.ESignatureError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    sig = tenancy.signing_identity(g.tenant)
+    decision, return_to = _EFFECTIVENESS_RESULT_ROUTING[result]
+
+    # Same "assign current user as approver if none is set" convenience the
+    # legacy /approval wrapper already applies (submit_approval below) — this
+    # step's only accountable approver is whoever submits the verification.
+    approver_ids = {a["user_id"] for a in step.get("approvers", [])}
+    if g.tenant.user_id not in approver_ids:
+        wfe.assign_approvers(RECORD_TYPE, cid, step["step_order"],
+                              [{"user_id": g.tenant.user_id, "display_name": sig["performed_by"]}])
+
+    try:
+        wfe.decide_step(
+            RECORD_TYPE, cid, step["step_order"], decision,
+            user_id=g.tenant.user_id, role=g.tenant.role,
+            performed_by=sig["performed_by"], comments=data.get("comments", ""),
+            return_to=return_to,
+        )
+    except (wfe.WorkflowPermissionError, wfe.WorkflowError) as e:
+        audit.log_failure("capa", cid, f"Effectiveness Verification blocked ({result})", reason=str(e))
+        return jsonify({"error": str(e)}), 409
+
+    entry = cdb.add_effectiveness_verification(
+        cid, data, workflow_step_order=step["step_order"], created_by=sig["performed_by"],
+    )
+    audit.log("capa", cid, f"Effectiveness Verification recorded: {result}", new={
+        "result": result, "verified_by": data.get("verified_by", ""),
+        "verification_method": data.get("verification_method", ""),
+    }, reason=data.get("comments", ""))
+
+    capa = cdb.get_capa(cid)
+    esignature_service.record_signature(
+        tenant=g.tenant, meaning=data.get("meaning", ""), reason=data.get("reason", ""),
+        record_type="capa", record_id=cid,
+        old_status=old_status, new_status=capa.get("status", ""),
+    )
+    return jsonify({"verification": entry, "workflow": wfe.get_instance_state(RECORD_TYPE, cid)}), 201
 
 
 # ── Approval / status transition (legacy compatibility wrapper) ──────────────
@@ -434,6 +566,11 @@ def submit_approval(cid):
         if not instance or instance["status"] != "in_progress":
             return jsonify({"error": "No active workflow step to act on"}), 409
         step = next(s for s in state["steps"] if s["step_order"] == instance["current_step_order"])
+        if step["step_key"] == EFFECTIVENESS_STEP_KEY:
+            return jsonify({
+                "error": "This CAPA is at the Effectiveness Verification stage — "
+                         "submit it via POST /qms/capa/<id>/effectiveness-verification",
+            }), 409
         if action_name == "Rejected":
             if step["step_type"] != "approval":
                 return jsonify({"error": f"'{step['step_name']}' cannot be rejected directly"}), 409

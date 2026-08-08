@@ -17,7 +17,27 @@ mandatory QA Approval gate); "capa_phase" is the two fixed, single-approver
 CAPA-phase steps (QA Review, Final Approval) that follow Investigation.
 """
 
+import pytest
+
 _FIXED_USER_ID = "00000000-0000-0000-0000-000000000001"  # tests/conftest.py::_TEST_TENANT.user_id
+
+
+@pytest.fixture(autouse=True)
+def _active_approver_directory(monkeypatch):
+    """/workflow/start validates every configured approver against the
+    company's active users (routes/qms_deviations.py::
+    _missing_or_inactive_approvers) — a real Supabase call in production.
+    Autouse-patched here so this file's tests keep passing without per-test
+    boilerplate: every test in this file configures _FIXED_USER_ID (the
+    fixed test tenant's own id) as the approver, so it just needs to be
+    "active" in the fake company roster."""
+    from tests.test_assume_company_context import FakeSupabaseClient
+    from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID
+    store = {"users": [{"id": _FIXED_USER_ID, "company_id": BOOTSTRAP_COMPANY_ID, "status": "active"}]}
+    monkeypatch.setattr(
+        "pharmagpt.routes.qms_deviations.get_service_role_client", lambda: FakeSupabaseClient(store)
+    )
+
 
 _CAPA_PHASE = {
     "qa_review_approver_user_id": _FIXED_USER_ID,
@@ -241,6 +261,35 @@ def test_workflow_start_blocked_when_only_capa_phase_is_unconfigured(client):
     assert "QA Review" in error
     assert "Final Approval" in error
     assert "QA Manager" not in error
+
+
+def test_workflow_start_blocked_when_a_configured_approver_no_longer_exists_or_is_inactive(client, monkeypatch):
+    """Regression test for the actual root cause behind "Lifecycle shows an
+    assigned approver but the deviation never appears in Workflow Inbox":
+    the Workflow Builder used to accept any string as an approver_user_id
+    with no validation against real accounts. Now /workflow/start checks
+    every configured approver against the company's active users and blocks
+    submission — with the record staying in Draft — if any of them is
+    mistyped, deleted, or deactivated since it was picked."""
+    from tests.test_assume_company_context import FakeSupabaseClient
+    from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID
+    # No active users at all in the fake company roster — every configured
+    # approver (including _FIXED_USER_ID) is therefore "missing".
+    monkeypatch.setattr(
+        "pharmagpt.routes.qms_deviations.get_service_role_client",
+        lambda: FakeSupabaseClient({"users": [{"id": _FIXED_USER_ID, "company_id": BOOTSTRAP_COMPANY_ID, "status": "deactivated"}]}),
+    )
+
+    dev = _create_deviation(client)
+    did = dev["id"]
+    _configure_all_step_approvers(client, did)
+
+    r = client.post(f"/qms/deviations/{did}/workflow/start")
+    assert r.status_code == 409
+    assert _FIXED_USER_ID in r.get_json()["error"]
+
+    assert client.get(f"/qms/deviations/{did}").get_json()["status"] == "Draft"
+    assert client.get(f"/qms/deviations/{did}/workflow").get_json()["instance"] is None
 
 
 def test_runtime_workflow_step_assign_endpoint_no_longer_exists_for_deviations(client):

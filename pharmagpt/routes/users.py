@@ -6,6 +6,9 @@ Routes
 GET   /users              list users in the effective company
 POST  /users              invite a new user into the effective company
 PATCH /users/<id>         deactivate / reactivate / reassign role
+GET   /users/directory    minimal read-only user directory for approver
+                           pickers etc. — open to any authenticated tenant
+                           member, not just admins (see list_users_directory)
 
 "Effective company" is g.tenant.company_id — for a Company Admin this is
 always their own company (unchanged, ordinary case). For a Super Admin it
@@ -99,6 +102,59 @@ def list_users():
         query = query.eq("company_id", company_id)
     result = query.execute()
     return jsonify(result.data or [])
+
+
+@bp.route("/users/directory", methods=["GET"])
+@handle_postgrest_errors
+def list_users_directory():
+    """Minimal, read-only company user directory (user_id, display_name,
+    department, designation) for approver pickers etc. — active users only.
+
+    Deliberately open to any authenticated tenant member, not admin-gated
+    like GET /users: RLS on `users` only lets a non-admin caller read their
+    own row (migration 0002_users_self_select), so an ordinary user's own
+    RLS-scoped client can't list their company-mates at all. This uses the
+    service-role client instead and applies the SAME g.tenant.company_id
+    scoping the rest of this app already trusts everywhere else — never
+    client input, never relying on RLS to do it, matching the reasoning in
+    this file's module docstring for the Super Admin path above.
+
+    No email: the `users` profile table doesn't store one (Supabase Auth
+    owns it) and it isn't needed to identify an approver — this is not a
+    user-management surface, just enough to name someone to assign."""
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
+    company_id = g.tenant.company_id
+    client = get_service_role_client()
+
+    users = (
+        client.table("users").select("id, display_name, workflow_role_id")
+        .eq("company_id", company_id).eq("status", "active").execute()
+    ).data or []
+    roles_by_id = {
+        r["id"]: r["name"] for r in (client.table("workflow_roles").select("id, name").execute().data or [])
+    }
+    departments_by_id = {
+        d["id"]: d["name"]
+        for d in (client.table("departments").select("id, name").eq("company_id", company_id).execute().data or [])
+    }
+    primary_department_by_user = {
+        ud["user_id"]: ud["department_id"]
+        for ud in (
+            client.table("user_departments").select("user_id, department_id")
+            .eq("company_id", company_id).eq("is_primary", True).execute().data or []
+        )
+    }
+
+    return jsonify([
+        {
+            "user_id": u["id"],
+            "display_name": u["display_name"],
+            "department": departments_by_id.get(primary_department_by_user.get(u["id"]), ""),
+            "designation": roles_by_id.get(u.get("workflow_role_id"), ""),
+        }
+        for u in users
+    ])
 
 
 @bp.route("/users", methods=["POST"])
