@@ -56,6 +56,12 @@ from google.genai import types
 
 bp = Blueprint("report", __name__, url_prefix="/report")
 
+
+@bp.before_request
+def _require_workspace_access():
+    from pharmagpt.auth.workspace_access import require_workspace_access
+    return require_workspace_access("validation")
+
 # Phase F (WP3, workflow enforcement): a Validation Report is the final
 # GAMP5 deliverable — it must not reach "approved" (its QA-sign-off status,
 # see status_map below) unless the qualification it reports on has actually

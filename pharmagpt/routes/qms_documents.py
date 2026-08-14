@@ -48,6 +48,7 @@ from pharmagpt import qms_database as qmsdb
 from pharmagpt import qms_workflow_database as wfdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
+from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.services import esignature_service
 from pharmagpt.services import kb_sync
 from pharmagpt.services import lifecycle_engine
@@ -61,6 +62,14 @@ logger = logging.getLogger(__name__)
 bp = Blueprint("qms_documents", __name__, url_prefix="/qms/documents")
 RECORD_TYPE = "document"
 WORKFLOW_KEY = "DOCUMENT_WORKFLOW_V1"
+
+
+@bp.before_request
+def _require_workspace_access():
+    # Document Control is a shared entry point (Quality Management's
+    # "Document Control" item and the Document Generator workspace both
+    # resolve here, see index.html) — either grant is sufficient.
+    return require_workspace_access("quality", "documents")
 
 
 # ── Documents ─────────────────────────────────────────────────────────────────

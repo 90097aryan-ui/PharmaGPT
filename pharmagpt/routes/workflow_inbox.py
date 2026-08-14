@@ -23,9 +23,17 @@ from flask import Blueprint, g, jsonify
 
 from pharmagpt import qms_workflow_database as wfdb
 from pharmagpt import tenancy
+from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.services import workflow_registry
 
 bp = Blueprint("workflow_inbox", __name__, url_prefix="/workflow")
+
+
+@bp.before_request
+def _require_workspace_access():
+    # Shared between the Risk Workflow Inbox (Validation) and QMS approval
+    # inboxes (Quality) — either grant is sufficient.
+    return require_workspace_access("validation", "quality")
 
 # No due_date/priority column exists anywhere in the schema (a schema change
 # is out of scope) — "Overdue" is a labeled heuristic on pending-step age,

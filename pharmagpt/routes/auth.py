@@ -31,6 +31,7 @@ from supabase_auth.errors import AuthApiError
 
 from pharmagpt.auth.context import AuthenticationError, TenantContext, resolve_tenant_context
 from pharmagpt.auth.decorators import extract_bearer_token, require_auth, require_role
+from pharmagpt.auth.workspace_access import accessible_workspaces_for
 from pharmagpt.services.supabase_client import get_anonymous_client, get_authenticated_client, handle_postgrest_errors
 
 bp = Blueprint("auth", __name__)
@@ -40,7 +41,9 @@ MAX_ASSUME_DURATION_MINUTES = 240
 
 
 def _tenant_to_dict(tenant: TenantContext) -> dict:
-    return asdict(tenant)
+    body = asdict(tenant)
+    body["accessible_workspaces"] = accessible_workspaces_for(tenant)
+    return body
 
 
 def _revoke_active_grant(access_token: str) -> None:

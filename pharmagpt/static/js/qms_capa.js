@@ -257,6 +257,17 @@ async function qmsCapaSwitchTab(tab) {
 }
 window.qmsCapaSwitchTab = qmsCapaSwitchTab;
 
+// QA Reviewer name-search picker (static/js/user_picker.js) — re-attached
+// after every render since the overview tab replaces its own DOM.
+let qmsCapaApproverDirectory = null;
+
+async function qmsCapaWireApproverPicker() {
+  if (!qmsCapaApproverDirectory) qmsCapaApproverDirectory = await window.UserPicker.loadDirectory();
+  const datalist = document.getElementById("qms-capa-approver-directory");
+  if (datalist) datalist.outerHTML = window.UserPicker.datalistHTML("qms-capa-approver-directory", qmsCapaApproverDirectory);
+  window.UserPicker.attachNamePicker(document.getElementById("qms-cov-qa"), qmsCapaApproverDirectory);
+}
+
 function qmsCapaRenderTab(capa) {
   const el = document.getElementById("qms-capa-tab-body");
   const id = capa.id;
@@ -275,7 +286,7 @@ function qmsCapaRenderTab(capa) {
         <h3>CAPA Details</h3>
         <div class="form-grid">
           <div class="form-field"><label>Target Closure Date</label><input type="date" id="qms-cov-target" value="${capa.target_closure_date || ""}" /></div>
-          <div class="form-field"><label>QA Reviewer</label><input type="text" id="qms-cov-qa" value="${capa.qa_reviewer || ""}" /></div>
+          <div class="form-field"><label>QA Reviewer</label><input type="text" id="qms-cov-qa" list="qms-capa-approver-directory" value="${capa.qa_reviewer || ""}" placeholder="Search or type a name" /></div>
           <div class="form-field span-2"><label>Problem Statement</label><textarea id="qms-cov-problem">${capa.problem_statement || ""}</textarea></div>
           <div class="form-field span-2"><label>Root Cause</label><textarea id="qms-cov-rootcause">${capa.root_cause || ""}</textarea></div>
         </div>
@@ -283,7 +294,9 @@ function qmsCapaRenderTab(capa) {
           <button class="btn-primary" onclick="qmsCapaSaveOverview(${id})">Save</button>
         </div>
       </div>
+      <datalist id="qms-capa-approver-directory"></datalist>
     `;
+    qmsCapaWireApproverPicker();
   } else if (qmsCapaActiveTab === "workflow") {
     el.innerHTML = `<div id="qms-workflow-capa-${id}"></div>`;
     renderWorkflowPanel(`qms-workflow-capa-${id}`, "capa", "/qms/capa", id);

@@ -187,6 +187,7 @@
     // /auth/me fetch resolves), by which point every <script> tag below
     // this one has already executed synchronously.
     if (window.applyRoleBasedVisibility) window.applyRoleBasedVisibility(user);
+    if (window.applyWorkspaceVisibility) window.applyWorkspaceVisibility(user);
   }
 
   function showUserBadge(user) {

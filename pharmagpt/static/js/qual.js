@@ -356,16 +356,17 @@ function renderQualForm(qual) {
         <div class="qual-form-grid three-col">
           <div class="qual-form-group">
             <label>Prepared By</label>
-            <input type="text" id="qf-prepared-by" value="${qual?.prepared_by || ''}" />
+            <input type="text" id="qf-prepared-by" list="qual-approver-directory" value="${qual?.prepared_by || ''}" placeholder="Search or type a name" />
           </div>
           <div class="qual-form-group">
             <label>Reviewed By</label>
-            <input type="text" id="qf-reviewed-by" value="${qual?.reviewed_by || ''}" />
+            <input type="text" id="qf-reviewed-by" list="qual-approver-directory" value="${qual?.reviewed_by || ''}" placeholder="Search or type a name" />
           </div>
           <div class="qual-form-group">
             <label>Approved By</label>
-            <input type="text" id="qf-approved-by" value="${qual?.approved_by || ''}" />
+            <input type="text" id="qf-approved-by" list="qual-approver-directory" value="${qual?.approved_by || ''}" placeholder="Search or type a name" />
           </div>
+          <datalist id="qual-approver-directory"></datalist>
           <div class="qual-form-group">
             <label>Effective Date</label>
             <input type="date" id="qf-effective-date" value="${qual?.effective_date || ''}" />
@@ -388,6 +389,21 @@ function renderQualForm(qual) {
         </button>
       </div>
     </div>`;
+  qualWireApproverPickers();
+}
+
+// Prepared By/Reviewed By/Approved By name-search picker
+// (static/js/user_picker.js) — re-attached after every render since
+// renderQualForm() replaces the form's DOM.
+let qualApproverDirectory = null;
+
+async function qualWireApproverPickers() {
+  if (!qualApproverDirectory) qualApproverDirectory = await window.UserPicker.loadDirectory();
+  const datalist = document.getElementById('qual-approver-directory');
+  if (datalist) datalist.outerHTML = window.UserPicker.datalistHTML('qual-approver-directory', qualApproverDirectory);
+  ['qf-prepared-by', 'qf-reviewed-by', 'qf-approved-by'].forEach((id) => {
+    window.UserPicker.attachNamePicker(document.getElementById(id), qualApproverDirectory);
+  });
 }
 
 async function saveQualification(qualId) {

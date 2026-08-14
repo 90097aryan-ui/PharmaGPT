@@ -61,7 +61,7 @@
 
       populateMatrixRoleSelect();
     } catch (err) {
-      listEl.innerHTML = `<p style="padding:16px;color:var(--text-muted)">Could not load roles.</p>`;
+      listEl.innerHTML = `<p style="padding:16px;color:var(--error)">Could not load roles: ${escapeHtml(err.message || "unknown error")}</p>`;
     }
   }
 
@@ -138,7 +138,7 @@
       gridEl.querySelectorAll(".rbac-matrix-cell").forEach(cb =>
         cb.addEventListener("change", () => toggleMatrixCell(roleId, cb)));
     } catch (err) {
-      gridEl.innerHTML = `<p style="padding:16px;color:var(--text-muted)">Could not load the permission matrix.</p>`;
+      gridEl.innerHTML = `<p style="padding:16px;color:var(--error)">Could not load the permission matrix: ${escapeHtml(err.message || "unknown error")}</p>`;
     }
   }
 
@@ -171,6 +171,7 @@
       if (_users.length) loadUserAssignment(_users[0].user_id);
     } catch (err) {
       sel.innerHTML = "";
+      toast(`Could not load users: ${err.message || "unknown error"}`);
     }
   }
 
@@ -179,10 +180,33 @@
     const effEl = el("rbac-assign-effective");
     if (!listEl || !userId) return;
 
-    const [rolesRes, effRes] = await Promise.all([
-      window.fetch(`/rbac/users/${userId}/roles`),
-      window.fetch(`/rbac/users/${userId}/effective-permissions`),
-    ]);
+    let rolesRes, effRes;
+    try {
+      [rolesRes, effRes] = await Promise.all([
+        window.fetch(`/rbac/users/${userId}/roles`),
+        window.fetch(`/rbac/users/${userId}/effective-permissions`),
+      ]);
+    } catch (err) {
+      listEl.innerHTML = `<p style="padding:16px;color:var(--error)">Could not reach the server to load role assignments.</p>`;
+      if (effEl) effEl.innerHTML = "";
+      return;
+    }
+
+    // Each endpoint is checked independently rather than assuming both
+    // succeed or fail together — a genuine RBAC-unavailable error (e.g.
+    // migration 0015's tables missing, a 500 with a JSON {error: "..."}
+    // body, not an array) must render as a visible error state here, not
+    // be silently coerced into an empty list (which would look identical
+    // to "this user has no roles assigned" and hide the real failure).
+    for (const [res, label] of [[rolesRes, "role assignments"], [effRes, "effective permissions"]]) {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        listEl.innerHTML = `<p style="padding:16px;color:var(--error)">Could not load ${label}: ${escapeHtml(body.error || `server returned ${res.status}`)}</p>`;
+        if (effEl) effEl.innerHTML = "";
+        return;
+      }
+    }
+
     const assigned = await rolesRes.json().catch(() => []);
     const effective = await effRes.json().catch(() => []);
     const assignedRoleIds = new Set((assigned || []).map(a => a.role_id));
@@ -254,7 +278,7 @@
             </tr>`).join("")}
         </tbody></table>` || `<p style="color:var(--text-muted)">No audit entries yet.</p>`;
     } catch (err) {
-      listEl.innerHTML = `<p style="padding:16px;color:var(--text-muted)">Could not load the audit trail.</p>`;
+      listEl.innerHTML = `<p style="padding:16px;color:var(--error)">Could not load the audit trail: ${escapeHtml(err.message || "unknown error")}</p>`;
     }
   }
 

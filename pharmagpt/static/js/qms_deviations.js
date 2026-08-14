@@ -560,16 +560,11 @@ let qmsDevBuilderCapaPhase = {};
 let qmsDevApproverDirectory = [];  // [{user_id, display_name, department, designation}] from GET /users/directory
 
 function qmsDevApproverLabel(entry) {
-  const meta = [entry.department, entry.designation].filter(Boolean).join(" / ");
-  return meta ? `${entry.display_name} (${meta})` : entry.display_name;
+  return window.UserPicker.label(entry);
 }
 
 async function qmsDevLoadApproverDirectory() {
-  try {
-    qmsDevApproverDirectory = await qmsFetch("/users/directory");
-  } catch (e) {
-    qmsDevApproverDirectory = [];  // picker degrades to "no matches" rather than blocking the builder
-  }
+  qmsDevApproverDirectory = await window.UserPicker.loadDirectory();
 }
 
 async function qmsDevRenderLifecycleTab(dev) {
@@ -712,9 +707,7 @@ window.qmsDevRenderWorkflowBuilder = qmsDevRenderWorkflowBuilder;
 // looked fine everywhere except the one place doing an exact-match lookup).
 
 function qmsDevApproverDirectoryDatalistHTML() {
-  return `<datalist id="qms-wfb-approver-directory">
-    ${qmsDevApproverDirectory.map(e => `<option value="${qmsDevApproverLabel(e).replace(/"/g, "&quot;")}"></option>`).join("")}
-  </datalist>`;
+  return window.UserPicker.datalistHTML("qms-wfb-approver-directory", qmsDevApproverDirectory);
 }
 
 function qmsDevApproverPickerHTML(fieldId, approverUserId, approverDisplayName, busy) {
@@ -740,7 +733,7 @@ function qmsDevBuilderApproverInput(fieldId) {
   const el = document.getElementById(fieldId);
   if (!el) return;
   const typed = el.value.trim();
-  const entry = qmsDevApproverDirectory.find(e => qmsDevApproverLabel(e) === typed);
+  const entry = window.UserPicker.findByLabel(typed, qmsDevApproverDirectory);
   const resolved = entry
     ? { approver_user_id: entry.user_id, approver_display_name: entry.display_name }
     : { approver_user_id: "", approver_display_name: "" };  // no exact match yet — must pick from the list

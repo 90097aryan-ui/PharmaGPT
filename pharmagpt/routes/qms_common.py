@@ -52,10 +52,16 @@ from pharmagpt import urs_database as ursdb
 from pharmagpt import database as db
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
+from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.config import UPLOAD_FOLDER, ALLOWED_EXTENSIONS
 from pharmagpt.documents import get_extension, get_mime_type
 
 bp = Blueprint("qms_common", __name__, url_prefix="/qms")
+
+
+@bp.before_request
+def _require_workspace_access():
+    return require_workspace_access("quality")
 
 # "project" was added for the PharmaGPT v1.0 Module 3 Project Workspace History
 # tab — routes/projects.py now calls qmsdb.add_audit_entry("project", ...) on

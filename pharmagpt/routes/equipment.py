@@ -34,11 +34,17 @@ from pharmagpt import qms_change_control_database as qccdb
 from pharmagpt import risk_database as riskdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
+from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.db import equipment_repo
 from pharmagpt.services import equipment_service
 
 bp = Blueprint("equipment", __name__)
 logger = logging.getLogger(__name__)
+
+
+@bp.before_request
+def _require_workspace_access():
+    return require_workspace_access("validation")
 
 # Phase 3 (Enterprise Validation Platform): tenant-scoped getters for the four
 # QMS record source_types equipment_documents was widened to accept

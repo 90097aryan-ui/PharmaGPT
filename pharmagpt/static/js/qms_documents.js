@@ -263,6 +263,19 @@ async function qmsDocSwitchTab(tab) {
 }
 window.qmsDocSwitchTab = qmsDocSwitchTab;
 
+// Reviewer/Approver name-search picker (static/js/user_picker.js) —
+// re-attached after every render since the overview tab replaces its own DOM.
+let qmsDocApproverDirectory = null;
+
+async function qmsDocWireApproverPicker() {
+  if (!qmsDocApproverDirectory) qmsDocApproverDirectory = await window.UserPicker.loadDirectory();
+  const datalist = document.getElementById("qms-doc-approver-directory");
+  if (datalist) datalist.outerHTML = window.UserPicker.datalistHTML("qms-doc-approver-directory", qmsDocApproverDirectory);
+  ["qms-ov-reviewer", "qms-ov-approver"].forEach((id) => {
+    window.UserPicker.attachNamePicker(document.getElementById(id), qmsDocApproverDirectory);
+  });
+}
+
 function qmsDocRenderTab(doc) {
   const el = document.getElementById("qms-doc-tab-body");
   const id = doc.id;
@@ -278,14 +291,16 @@ function qmsDocRenderTab(doc) {
           <div class="form-field"><label>Review Date</label><input type="date" id="qms-ov-review" value="${doc.review_date || ""}" /></div>
           <div class="form-field"><label>Expiry Date</label><input type="date" id="qms-ov-expiry" value="${doc.expiry_date || ""}" /></div>
           <div class="form-field"><label>Owner</label><input type="text" id="qms-ov-owner" value="${doc.owner || ""}" /></div>
-          <div class="form-field"><label>Reviewer</label><input type="text" id="qms-ov-reviewer" value="${doc.reviewer || ""}" /></div>
-          <div class="form-field"><label>Approver</label><input type="text" id="qms-ov-approver" value="${doc.approver || ""}" /></div>
+          <div class="form-field"><label>Reviewer</label><input type="text" id="qms-ov-reviewer" list="qms-doc-approver-directory" value="${doc.reviewer || ""}" placeholder="Search or type a name" /></div>
+          <div class="form-field"><label>Approver</label><input type="text" id="qms-ov-approver" list="qms-doc-approver-directory" value="${doc.approver || ""}" placeholder="Search or type a name" /></div>
         </div>
         <div class="qms-form-actions">
           <button class="btn-primary" onclick="qmsDocSaveOverview(${id})">Save</button>
         </div>
       </div>
+      <datalist id="qms-doc-approver-directory"></datalist>
     `;
+    qmsDocWireApproverPicker();
   } else if (qmsDocActiveTab === "content") {
     el.innerHTML = `
       <div class="qms-section-card">

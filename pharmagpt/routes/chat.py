@@ -12,12 +12,21 @@ from pharmagpt import database as db
 from pharmagpt import tenancy
 from flask import Blueprint, g, jsonify, request, Response, stream_with_context
 from google.genai import errors, types
+from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.prompts import PHARMA_SYSTEM_PROMPT
 from pharmagpt.services.document_search import search_project_documents
 from pharmagpt.state import gemini_client, get_history, history_cache
 from pharmagpt.config import GEMINI_MODEL
 
 bp = Blueprint("chat", __name__)
+
+
+@bp.before_request
+def _require_workspace_access():
+    # /stream backs both the standalone AI Assistant/PharmaPilot workspace
+    # and Risk Management's embedded AI Assistant tab (static/js/risk.js) —
+    # either grant is sufficient.
+    return require_workspace_access("pharmapilot", "validation")
 
 
 @bp.route("/stream", methods=["POST"])

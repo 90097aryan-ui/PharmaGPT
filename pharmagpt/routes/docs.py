@@ -18,10 +18,18 @@ from pharmagpt import database as db
 from pharmagpt import documents as doc_utils
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
+from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.services.document_processor import process_document_async
 from flask import Blueprint, g, jsonify, request, send_file
 
 bp = Blueprint("documents", __name__)
+
+
+@bp.before_request
+def _require_workspace_access():
+    # Project-scoped document upload/view/download — belongs to the
+    # Validation Suite's Project Workspace, same as routes/projects.py.
+    return require_workspace_access("validation")
 
 
 def _doc_scoped(doc_id):

@@ -43,6 +43,7 @@ from pharmagpt import risk_database as rdb
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
+from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.db import qms_repo
 from pharmagpt.services import esignature_service
 from pharmagpt.services import lifecycle_engine
@@ -56,6 +57,11 @@ from google.genai import types
 bp = Blueprint("risk", __name__, url_prefix="/risk")
 logger = logging.getLogger(__name__)
 RECORD_TYPE = "risk_assessment"
+
+
+@bp.before_request
+def _require_workspace_access():
+    return require_workspace_access("validation")
 
 
 # ── Phase 3.5 dual-write (docs/PHASE3_EXECUTION_PLAN.md) ───────────────────────

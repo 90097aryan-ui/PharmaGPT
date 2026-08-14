@@ -442,12 +442,13 @@ function renderNewReportWizard() {
         </div>
         <div class="report-field">
           <label>Prepared By</label>
-          <input type="text" id="rwiz-prepared-by" placeholder="Author name">
+          <input type="text" id="rwiz-prepared-by" list="report-approver-directory" placeholder="Search or type a name">
         </div>
         <div class="report-field">
           <label>Reviewed By</label>
-          <input type="text" id="rwiz-reviewed-by" placeholder="Reviewer name">
+          <input type="text" id="rwiz-reviewed-by" list="report-approver-directory" placeholder="Search or type a name">
         </div>
+        <datalist id="report-approver-directory"></datalist>
         <div class="report-field">
           <label>Report Date</label>
           <input type="date" id="rwiz-report-date" value="${new Date().toISOString().slice(0,10)}">
@@ -490,6 +491,21 @@ function renderNewReportWizard() {
       </div>
     </div>
   </div>`;
+  reportWireApproverPickers();
+}
+
+// Prepared By/Reviewed By name-search picker (static/js/user_picker.js) —
+// re-attached after every render since renderNewReportWizard() replaces
+// the wizard's DOM on each step change.
+let reportApproverDirectory = null;
+
+async function reportWireApproverPickers() {
+  if (!reportApproverDirectory) reportApproverDirectory = await window.UserPicker.loadDirectory();
+  const datalist = document.getElementById('report-approver-directory');
+  if (datalist) datalist.outerHTML = window.UserPicker.datalistHTML('report-approver-directory', reportApproverDirectory);
+  ['rwiz-prepared-by', 'rwiz-reviewed-by'].forEach((id) => {
+    window.UserPicker.attachNamePicker(document.getElementById(id), reportApproverDirectory);
+  });
 }
 
 function reportWizardStep(n) {

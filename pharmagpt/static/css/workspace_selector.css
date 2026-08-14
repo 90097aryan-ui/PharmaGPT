@@ -56,20 +56,6 @@
   border-color: var(--blue-light);
 }
 
-.ws-card-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: var(--radius);
-  background: var(--soft-blue);
-  color: var(--blue-light);
-  margin-bottom: 16px;
-}
-
-.ws-card-icon svg { width: 22px; height: 22px; }
-
 .ws-card h3 {
   margin: 0 0 6px;
   font-size: 16px;

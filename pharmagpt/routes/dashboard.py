@@ -9,9 +9,15 @@ GET /dashboard/validation-score   average validation score across reviewed docum
 
 from pharmagpt import database as db
 from flask import Blueprint, g, jsonify
+from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.review import get_avg_score, get_score_cache
 
 bp = Blueprint("dashboard", __name__)
+
+
+@bp.before_request
+def _require_workspace_access():
+    return require_workspace_access("dashboard")
 
 
 @bp.route("/dashboard/stats", methods=["GET"])

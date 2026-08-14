@@ -28,11 +28,17 @@ from pharmagpt import equipment_database as equipdb
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
+from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.db import projects_repo
 from pharmagpt.state import history_cache
 
 bp = Blueprint("projects", __name__)
 logger = logging.getLogger(__name__)
+
+
+@bp.before_request
+def _require_workspace_access():
+    return require_workspace_access("validation")
 
 
 # ── Phase 3.2 dual-write (docs/PHASE3_EXECUTION_PLAN.md) ───────────────────────

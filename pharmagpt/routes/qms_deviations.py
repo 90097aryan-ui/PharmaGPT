@@ -83,6 +83,7 @@ from pharmagpt import qms_database as qmsdb
 from pharmagpt import qms_workflow_database as wfdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
+from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.db import qms_repo
 from pharmagpt.services.supabase_client import get_service_role_client
 from pharmagpt.services import esignature_service
@@ -96,6 +97,11 @@ logger = logging.getLogger(__name__)
 RECORD_TYPE = "deviation"
 WORKFLOW_KEY = "DEVIATION_LIFECYCLE_V2"
 UNLOCK_STEP_KEY = "qa_approval"
+
+
+@bp.before_request
+def _require_workspace_access():
+    return require_workspace_access("quality")
 
 # UI-only lifecycle grouping over DEVIATION_LIFECYCLE_V2's individual steps
 # (architecture refactor §2/§4) — the underlying approval steps, their named

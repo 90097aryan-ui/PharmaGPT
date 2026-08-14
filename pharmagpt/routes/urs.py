@@ -102,6 +102,12 @@ def _current_role(fallback: str = "") -> str:
 bp = Blueprint("urs", __name__, url_prefix="/urs")
 
 
+@bp.before_request
+def _require_workspace_access():
+    from pharmagpt.auth.workspace_access import require_workspace_access
+    return require_workspace_access("validation")
+
+
 def _facility_design_basis_kwargs(facility: dict) -> dict:
     """Flatten a Facility record's Stage 1.1 metadata (classification, plus
     the design_basis JSON blob) into the keyword arguments

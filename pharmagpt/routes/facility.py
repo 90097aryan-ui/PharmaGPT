@@ -56,6 +56,12 @@ from pharmagpt.services.facility_requirement_library import (
 bp = Blueprint("facility", __name__)
 
 
+@bp.before_request
+def _require_workspace_access():
+    from pharmagpt.auth.workspace_access import require_workspace_access
+    return require_workspace_access("validation")
+
+
 # ── Project-scoped list / create ──────────────────────────────────────────────
 
 @bp.route("/projects/<int:project_id>/facility", methods=["GET"])

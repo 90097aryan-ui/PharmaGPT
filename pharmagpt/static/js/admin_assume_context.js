@@ -92,6 +92,7 @@
         if (stored) Object.assign(stored, user);
       }
       applyRoleBasedVisibility(user);
+      if (window.applyWorkspaceVisibility) window.applyWorkspaceVisibility(user);
     } catch (err) {
       // best-effort — the banner just won't update until the next natural refresh
     }

@@ -194,7 +194,7 @@
            are moved, rebuilt, or duplicated in Phase A; they are only
            relocated as-is and labelled "(temporary)". They will be
            REMOVED from this location (not rebuilt) once Phases B/C ship. -->
-      <div class="sidebar-section">
+      <div class="sidebar-section" data-workspace="dashboard">
         <div class="sidebar-label">Main Menu</div>
         <div class="sidebar-item active" id="nav-dashboard" data-view="view-dashboard">
           <span class='icon' data-lucide='home'></span> Dashboard
@@ -207,7 +207,7 @@
            is a Phase A placeholder view only — its real KPI / Quality &
            Compliance / Approval Queue / Recent Activity content is built
            in Phase B. Projects is unchanged. ══ -->
-      <div class="sidebar-section">
+      <div class="sidebar-section" data-workspace="validation">
         <div class="sidebar-label-row">
           <span class="sidebar-label">Validation Suite</span>
           <button class="ws-group-collapse-btn" id="ws-validation-collapse-btn" onclick="toggleWSGroup('ws-validation-items','ws-validation-collapse-btn')"><span class='icon' data-lucide='chevron-up'></span></button>
@@ -264,7 +264,7 @@
            five items are explicit "Coming Soon" placeholders with no
            data-view/onclick, per instruction "no implementation
            required". ══ -->
-      <div class="sidebar-section">
+      <div class="sidebar-section" data-workspace="quality">
         <div class="sidebar-label-row">
           <span class="sidebar-label">Quality Management</span>
           <button class="val-collapse-btn" id="qms-collapse-btn" onclick="toggleQMSSection()"><span class='icon' data-lucide='chevron-up'></span></button>
@@ -317,7 +317,7 @@
       <!-- ══ Knowledge Base (ALD-001 §4) — section renamed from
            "Knowledge Center"; SOP Library / Validation Library / Search
            quick filters unchanged (full KB retaxonomy is Phase E). ══ -->
-      <div class="sidebar-section">
+      <div class="sidebar-section" data-workspace="knowledge">
         <div class="sidebar-label-row">
           <span class="sidebar-label">Knowledge Base</span>
           <button class="ws-group-collapse-btn" id="ws-knowledge-collapse-btn" onclick="toggleWSGroup('ws-knowledge-items','ws-knowledge-collapse-btn')"><span class='icon' data-lucide='chevron-up'></span></button>
@@ -343,7 +343,7 @@
       <!-- ══ Equipment Library (ALD-001 §4) — promoted from a Validation
            Suite sub-group to its own top-level module. Same element
            (#nav-equipment-library), same behavior. ══ -->
-      <div class="sidebar-section">
+      <div class="sidebar-section" data-workspace="validation">
         <div class="sidebar-label">Equipment Library</div>
         <div class="sidebar-item qms-sub-item" id="nav-equipment-library" data-view="view-equipment-library">
           <span class='icon' data-lucide='cog'></span> All Equipment
@@ -355,7 +355,7 @@
       <!-- ══ Risk Management (ALD-001 §4) — promoted from a Validation
            Suite sub-group ("Risk Assessment") to its own top-level
            module. Same elements/ids/onclick, unchanged. ══ -->
-      <div class="sidebar-section">
+      <div class="sidebar-section" data-workspace="validation">
         <div class="sidebar-label-row">
           <span class="sidebar-label">Risk Management</span>
           <button class="val-collapse-btn" id="risk-collapse-btn" onclick="toggleRiskSection()"><span class='icon' data-lucide='chevron-up'></span></button>
@@ -394,7 +394,7 @@
            "Document Center"; scope narrowing to operational-GMP-only
            documents is Phase D. Same elements (#nav-qms-documents), same
            behavior. ══ -->
-      <div class="sidebar-section">
+      <div class="sidebar-section" data-workspace="documents">
         <div class="sidebar-label-row">
           <span class="sidebar-label">Document Generator</span>
           <button class="ws-group-collapse-btn" id="ws-document-collapse-btn" onclick="toggleWSGroup('ws-document-items','ws-document-collapse-btn')"><span class='icon' data-lucide='chevron-up'></span></button>
@@ -452,7 +452,7 @@
            existing, fully functional AI Assistant chat is kept alongside
            it unchanged (#nav-chat / #view-chat) so that working feature
            is not removed. Unchanged per ALD-001 §4. ══ -->
-      <div class="sidebar-section">
+      <div class="sidebar-section" data-workspace="pharmapilot">
         <div class="sidebar-label">PharmaPilot</div>
         <div class="sidebar-item" id="nav-pharmapilot" data-view="view-pharmapilot">
           <span class='icon' data-lucide='bot'></span> PharmaPilot
@@ -473,42 +473,36 @@
          ══════════════════════════════════════════════════════════════════ -->
     <main class="ws-selector" id="view-workspace-selector">
       <div class="ws-selector-inner">
-        <h1 class="ws-selector-title">Welcome to PharmaGPT</h1>
-        <p class="ws-selector-subtitle">Choose your workspace.</p>
+        <h1 class="ws-selector-title">Welcome, <span id="ws-selector-username">back</span></h1>
+        <p class="ws-selector-subtitle">Your Workspaces</p>
 
         <div class="ws-card-grid">
-          <div class="ws-card" onclick="document.getElementById('nav-dashboard').click()">
-            <span class="ws-card-icon icon" data-lucide="layout-dashboard"></span>
+          <div class="ws-card" data-workspace="dashboard" onclick="document.getElementById('nav-dashboard').click()">
             <h3>Executive Workspace</h3>
             <p>Dashboards, KPIs, Executive Insights</p>
           </div>
 
-          <div class="ws-card" onclick="document.getElementById('risk-nav-dashboard').click()">
-            <span class="ws-card-icon icon" data-lucide="flask-conical"></span>
+          <div class="ws-card" data-workspace="validation" onclick="document.getElementById('risk-nav-dashboard').click()">
             <h3>Validation Workspace</h3>
             <p>Validation Projects &amp; Qualification</p>
           </div>
 
-          <div class="ws-card" onclick="document.getElementById('nav-qms-dashboard').click()">
-            <span class="ws-card-icon icon" data-lucide="shield"></span>
+          <div class="ws-card" data-workspace="quality" onclick="document.getElementById('nav-qms-dashboard').click()">
             <h3>Quality Workspace</h3>
             <p>CAPA, Deviations, Change Control</p>
           </div>
 
-          <div class="ws-card" onclick="document.getElementById('nav-kb').click()">
-            <span class="ws-card-icon icon" data-lucide="library"></span>
+          <div class="ws-card" data-workspace="knowledge" onclick="document.getElementById('nav-kb').click()">
             <h3>Knowledge Workspace</h3>
             <p>SOPs, Manuals &amp; Reference Documents</p>
           </div>
 
-          <div class="ws-card" onclick="document.getElementById('nav-qms-documents').click()">
-            <span class="ws-card-icon icon" data-lucide="file-text"></span>
+          <div class="ws-card" data-workspace="documents" onclick="document.getElementById('nav-qms-documents').click()">
             <h3>Document Workspace</h3>
             <p>Controlled Document Authoring</p>
           </div>
 
-          <div class="ws-card" onclick="document.getElementById('nav-pharmapilot').click()">
-            <span class="ws-card-icon icon" data-lucide="bot"></span>
+          <div class="ws-card" data-workspace="pharmapilot" onclick="document.getElementById('nav-pharmapilot').click()">
             <h3>PharmaPilot</h3>
             <p>Enterprise AI Assistant (placeholder only)</p>
           </div>
@@ -1697,16 +1691,17 @@
                     </div>
                     <div class="form-field">
                       <label>Assessment Owner</label>
-                      <input name="assessment_owner" placeholder="Full name">
+                      <input name="assessment_owner" list="risk-approver-directory" placeholder="Search or type a name">
                     </div>
                     <div class="form-field">
                       <label>Reviewer</label>
-                      <input name="reviewer" placeholder="Full name">
+                      <input name="reviewer" list="risk-approver-directory" placeholder="Search or type a name">
                     </div>
                     <div class="form-field">
                       <label>Approver</label>
-                      <input name="approver" placeholder="Full name">
+                      <input name="approver" list="risk-approver-directory" placeholder="Search or type a name">
                     </div>
+                    <datalist id="risk-approver-directory"></datalist>
                     <div class="form-field">
                       <label>Assessment Date</label>
                       <input type="date" name="assessment_date">
@@ -2543,6 +2538,7 @@
   <script src="{{ url_for('static', filename='js/favorites.js') }}"></script>
   <script src="{{ url_for('static', filename='js/recent_items.js') }}"></script>
   <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/user_picker.js') }}"></script>
 
   <!-- Load order: workspace (shared shell) -> dashboard -> projects -> documents -> insights -> validation_config -> validation -> knowledge_base -> chat -->
   <script src="{{ url_for('static', filename='js/workspace.js') }}"></script>
@@ -2571,6 +2567,7 @@
   <script src="{{ url_for('static', filename='js/workflow_inbox.js') }}"></script>
   <script src="{{ url_for('static', filename='js/validation_dashboard.js') }}"></script>
   <script src="{{ url_for('static', filename='js/admin_assume_context.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/workspace_visibility.js') }}"></script>
   <script src="{{ url_for('static', filename='js/admin_companies.js') }}"></script>
   <script src="{{ url_for('static', filename='js/admin_users.js') }}"></script>
   <script src="{{ url_for('static', filename='js/admin_org_structure.js') }}"></script>

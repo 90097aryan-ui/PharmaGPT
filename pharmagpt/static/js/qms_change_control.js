@@ -289,6 +289,17 @@ async function qmsCCSwitchTab(tab) {
 }
 window.qmsCCSwitchTab = qmsCCSwitchTab;
 
+// QA Reviewer name-search picker (static/js/user_picker.js) — re-attached
+// after every render since the overview tab replaces its own DOM.
+let qmsCCApproverDirectory = null;
+
+async function qmsCCWireApproverPicker() {
+  if (!qmsCCApproverDirectory) qmsCCApproverDirectory = await window.UserPicker.loadDirectory();
+  const datalist = document.getElementById("qms-cc-approver-directory");
+  if (datalist) datalist.outerHTML = window.UserPicker.datalistHTML("qms-cc-approver-directory", qmsCCApproverDirectory);
+  window.UserPicker.attachNamePicker(document.getElementById("qms-cco-qa"), qmsCCApproverDirectory);
+}
+
 function qmsCCRenderTab(cc) {
   const el = document.getElementById("qms-cc-tab-body");
   const id = cc.id;
@@ -301,7 +312,7 @@ function qmsCCRenderTab(cc) {
           <div class="form-field"><label>Area</label><input type="text" id="qms-cco-area" value="${cc.area || ""}" /></div>
           <div class="form-field"><label>Equipment/System</label><input type="text" id="qms-cco-equipment" value="${cc.equipment_system || ""}" /></div>
           <div class="form-field"><label>Risk Level</label><input type="text" id="qms-cco-risk" value="${cc.risk_level || ""}" /></div>
-          <div class="form-field"><label>QA Reviewer</label><input type="text" id="qms-cco-qa" value="${cc.qa_reviewer || ""}" /></div>
+          <div class="form-field"><label>QA Reviewer</label><input type="text" id="qms-cco-qa" list="qms-cc-approver-directory" value="${cc.qa_reviewer || ""}" placeholder="Search or type a name" /></div>
           <div class="form-field span-2"><label>Change Description</label><textarea id="qms-cco-desc">${cc.change_description || ""}</textarea></div>
           <div class="form-field span-2"><label>Reason for Change</label><textarea id="qms-cco-reason">${cc.reason_for_change || ""}</textarea></div>
           <div class="form-field span-2"><label>Current State</label><textarea id="qms-cco-current">${cc.current_state || ""}</textarea></div>
@@ -311,7 +322,9 @@ function qmsCCRenderTab(cc) {
           <button class="btn-primary" onclick="qmsCCSaveOverview(${id})">Save</button>
         </div>
       </div>
+      <datalist id="qms-cc-approver-directory"></datalist>
     `;
+    qmsCCWireApproverPicker();
   } else if (qmsCCActiveTab === "workflow") {
     el.innerHTML = `<div id="qms-workflow-change_control-${id}"></div>`;
     renderWorkflowPanel(`qms-workflow-change_control-${id}`, "change_control", "/qms/change-control", id);

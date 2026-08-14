@@ -71,6 +71,12 @@ from google.genai import types
 bp = Blueprint("qual", __name__, url_prefix="/qual")
 
 
+@bp.before_request
+def _require_workspace_access():
+    from pharmagpt.auth.workspace_access import require_workspace_access
+    return require_workspace_access("validation")
+
+
 # Phase F (WP3, workflow enforcement): GAMP5/FDA/EU GMP Annex 15 require IQ
 # to be complete before OQ begins, and OQ complete before PQ begins — see
 # PHARMAGPT_v1.0_RELEASE_READINESS_REPORT.md C2. Protocols don't carry their

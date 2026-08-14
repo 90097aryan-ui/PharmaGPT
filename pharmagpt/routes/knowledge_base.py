@@ -24,11 +24,17 @@ from pharmagpt import database as db
 from pharmagpt import documents as doc_utils
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
+from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.db import kb_repo
 from pharmagpt.services.document_processor import process_document_async
 
 bp = Blueprint("knowledge_base", __name__)
 logger = logging.getLogger(__name__)
+
+
+@bp.before_request
+def _require_workspace_access():
+    return require_workspace_access("knowledge")
 
 
 # ── Phase 3.3 dual-write (docs/PHASE3_EXECUTION_PLAN.md) ───────────────────────

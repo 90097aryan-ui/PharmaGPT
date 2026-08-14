@@ -60,6 +60,7 @@ from pharmagpt import qms_database as qmsdb
 from pharmagpt import qms_workflow_database as wfdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
+from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.db import qms_repo
 from pharmagpt.services import esignature_service
 from pharmagpt.services import qms_change_control_service as svc
@@ -69,6 +70,11 @@ bp = Blueprint("qms_change_control", __name__, url_prefix="/qms/change-control")
 logger = logging.getLogger(__name__)
 RECORD_TYPE = "change_control"
 WORKFLOW_KEY = "CHANGE_CONTROL_WORKFLOW_V1"
+
+
+@bp.before_request
+def _require_workspace_access():
+    return require_workspace_access("quality")
 
 
 # ── Phase 3.5 dual-write (docs/PHASE3_EXECUTION_PLAN.md) ───────────────────────

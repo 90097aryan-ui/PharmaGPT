@@ -32,6 +32,12 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint("validation", __name__)
 
+
+@bp.before_request
+def _require_workspace_access():
+    from pharmagpt.auth.workspace_access import require_workspace_access
+    return require_workspace_access("validation")
+
 # URS/IQ/OQ/PQ/CAPA/Deviation/Change Control each now have their own
 # dedicated, more capable suite (URS Management, Qualification, QMS
 # CAPA/Deviation/Change Control) with its own AI generation, lifecycle, and

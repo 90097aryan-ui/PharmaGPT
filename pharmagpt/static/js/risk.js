@@ -321,8 +321,29 @@ function startNewWizard() {
   if (wizardView) wizardView.style.display = "block";
 
   riskRenderWizardStep(1);
+  riskWireApproverPickers();
 }
 window.startNewWizard = startNewWizard;
+
+// Reviewer/Approver/Assessment Owner name-search picker (static/js/user_picker.js)
+// — replaces free-text entry with search-assisted autocomplete over the
+// company's user directory. Loaded once and cached; typing a name not in
+// the directory (e.g. an external/contract reviewer) is still accepted.
+let riskApproverDirectory = null;
+
+async function riskWireApproverPickers() {
+  if (!riskApproverDirectory) riskApproverDirectory = await window.UserPicker.loadDirectory();
+  const datalist = document.getElementById("risk-approver-directory");
+  if (datalist) datalist.outerHTML = window.UserPicker.datalistHTML("risk-approver-directory", riskApproverDirectory);
+
+  ["assessment_owner", "reviewer", "approver"].forEach((name) => {
+    const input = document.querySelector(`#view-risk-new input[name="${name}"]`);
+    if (input && !input.dataset.pickerAttached) {
+      window.UserPicker.attachNamePicker(input, riskApproverDirectory);
+      input.dataset.pickerAttached = "1";
+    }
+  });
+}
 
 function riskRenderWizardStep(step) {
   RiskState.wizardStep = step;
