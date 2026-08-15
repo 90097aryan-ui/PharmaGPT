@@ -114,3 +114,92 @@ def require_permission(module: str, action: str):
         return wrapped
 
     return decorator
+
+
+COMPANY_ADMIN_RBAC_ROLE_NAME = "Company Admin"
+
+
+def has_active_rbac_role(tenant: TenantContext, role_name: str) -> bool:
+    """True if `tenant` holds an active rbac_user_roles assignment to an
+    active rbac_roles row named exactly `role_name`, scoped to their own
+    company. Mirrors get_effective_permissions()'s two-step resolution
+    (assignment -> role) but checks role identity (name) instead of
+    unioning permissions, so it can answer "does this user hold role X"
+    for a specific named role rather than "what can this user do".
+
+    Cross-company assignments can never match: the rbac_user_roles lookup
+    is scoped to tenant.company_id, and the rbac_roles lookup additionally
+    requires company_id == tenant.company_id as defense in depth — the
+    same discipline routes/rbac.py::_authorize_role_scope already applies,
+    since a service-role client (used for super_admin) bypasses RLS.
+    An assignment row's mere presence is what "active assignment" means
+    here: revoking a role deletes the rbac_user_roles row outright
+    (pharmagpt/db/rbac_repo.py::revoke_user_role) — there is no separate
+    inactive/active flag to check on that table, only on rbac_roles.status.
+    """
+    if tenant.role == "super_admin" or not tenant.company_id:
+        return False
+
+    client = get_service_role_client()
+
+    user_roles = (
+        client.table("rbac_user_roles").select("role_id")
+        .eq("user_id", tenant.user_id).eq("company_id", tenant.company_id)
+        .execute()
+    ).data or []
+    role_ids = [r["role_id"] for r in user_roles]
+    if not role_ids:
+        return False
+
+    matches = (
+        client.table("rbac_roles").select("id")
+        .in_("id", role_ids).eq("status", "active")
+        .eq("name", role_name).eq("company_id", tenant.company_id)
+        .execute()
+    ).data or []
+    return len(matches) > 0
+
+
+def has_rbac_admin_access(tenant: TenantContext) -> bool:
+    """Central authorization check for the RBAC/org-structure
+    ADMINISTRATION surfaces (routes/rbac.py, routes/org_structure.py) —
+    distinct from has_permission()'s 'Administration' module gate, which is
+    Platform-Admin-only and unrelated to managing a company's own roles.
+
+    Authorized if:
+      - legacy role is company_admin (unchanged, frozen-tier authority), or
+      - legacy role is super_admin (unchanged — the route body itself still
+        enforces template-vs-company scope / Assume Company Context), or
+      - the caller holds an active RBAC role literally named "Company
+        Admin" for their own company, regardless of legacy role.
+
+    A user whose only RBAC role is "QA Reviewer" (or anything other than
+    "Company Admin") gets nothing from this check, and legacy
+    reviewer_qa/user get no automatic access either — only an actual
+    active "Company Admin" RBAC assignment closes that gap. Roles are
+    additive: holding "Company Admin" plus other RBAC roles simultaneously
+    still grants access, and does not require dropping the other roles.
+    """
+    if tenant.role in ("company_admin", "super_admin"):
+        return True
+    return has_active_rbac_role(tenant, COMPANY_ADMIN_RBAC_ROLE_NAME)
+
+
+def require_rbac_admin_access(view_func):
+    """Route decorator for the RBAC/org-structure administration surfaces.
+    Same shape/placement as require_role, but additionally accepts an
+    active RBAC 'Company Admin' role assignment when the caller's legacy
+    role is reviewer_qa/user — the single centralized fix for the
+    Coordinator-with-legacy-reviewer_qa 403, instead of a special-case
+    check duplicated inside every route."""
+
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        if not has_rbac_admin_access(g.tenant):
+            return jsonify({
+                "error": "This action requires Company Admin access "
+                         "(legacy role or an active RBAC 'Company Admin' role assignment)",
+            }), 403
+        return view_func(*args, **kwargs)
+
+    return wrapped

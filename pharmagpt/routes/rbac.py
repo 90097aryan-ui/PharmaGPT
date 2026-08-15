@@ -34,7 +34,8 @@ every mutating request body, not best-effort.
 
 from flask import Blueprint, g, jsonify, request
 
-from pharmagpt.auth.decorators import extract_bearer_token, require_role
+from pharmagpt.auth.decorators import extract_bearer_token
+from pharmagpt.auth.rbac import require_rbac_admin_access
 from pharmagpt.db import rbac_repo
 from pharmagpt.services.supabase_client import get_authenticated_client, get_service_role_client, handle_postgrest_errors
 
@@ -42,7 +43,21 @@ bp = Blueprint("rbac", __name__, url_prefix="/rbac")
 
 
 def _scoped_client():
-    if g.tenant.role == "super_admin":
+    """RLS on rbac_roles/rbac_user_roles/rbac_role_permissions/rbac_audit_log
+    (migrations/0015_rbac_org_framework_up.sql) all gate on
+    current_user_role_name() = 'company_admin', which resolves strictly
+    from the frozen LEGACY role (users.role_id) — it has no notion of the
+    new RBAC role system. A caller who only reaches this module via an
+    active RBAC "Company Admin" assignment (require_rbac_admin_access,
+    pharmagpt/auth/rbac.py) but whose legacy role is reviewer_qa/user would
+    therefore be silently blocked by RLS under the ordinary RLS-scoped
+    client. Any non-company_admin legacy role that got past the decorator
+    — that's super_admin, or reviewer_qa/user with the RBAC role — is
+    handled the same way super_admin already is: the service-role client,
+    with company scope enforced explicitly in app code (_role_scope_company_id,
+    _authorize_role_scope, and every route's g.tenant.company_id filter)
+    rather than left to RLS."""
+    if g.tenant.role != "company_admin":
         return get_service_role_client()
     return get_authenticated_client(extract_bearer_token())
 
@@ -115,14 +130,14 @@ def _authorize_clone_source(client, role_id: str):
 
 
 @bp.route("/permissions", methods=["GET"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def get_permission_catalog():
     return jsonify(rbac_repo.get_permission_catalog(_scoped_client()))
 
 
 @bp.route("/roles", methods=["GET"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def list_roles():
     client = _scoped_client()
@@ -135,7 +150,7 @@ def list_roles():
 
 
 @bp.route("/roles", methods=["POST"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def create_role():
     data = request.get_json(silent=True) or {}
@@ -170,7 +185,7 @@ def create_role():
 
 
 @bp.route("/roles/<role_id>/clone", methods=["POST"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def clone_role(role_id):
     data = request.get_json(silent=True) or {}
@@ -204,7 +219,7 @@ def clone_role(role_id):
 
 
 @bp.route("/roles/<role_id>", methods=["PATCH"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def update_role(role_id):
     data = request.get_json(silent=True) or {}
@@ -241,7 +256,7 @@ def update_role(role_id):
 
 
 @bp.route("/roles/<role_id>/permissions", methods=["GET"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def get_role_permissions(role_id):
     client = _scoped_client()
@@ -252,7 +267,7 @@ def get_role_permissions(role_id):
 
 
 @bp.route("/roles/<role_id>/permissions", methods=["PUT"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def set_role_permission(role_id):
     data = request.get_json(silent=True) or {}
@@ -279,7 +294,7 @@ def set_role_permission(role_id):
 
 
 @bp.route("/users/<user_id>/roles", methods=["GET"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def list_user_roles(user_id):
     guard = _require_company_context()
@@ -289,7 +304,7 @@ def list_user_roles(user_id):
 
 
 @bp.route("/users/<user_id>/roles", methods=["POST"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def assign_user_role(user_id):
     guard = _require_company_context()
@@ -320,7 +335,7 @@ def assign_user_role(user_id):
 
 
 @bp.route("/users/<user_id>/roles/<role_id>", methods=["DELETE"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def revoke_user_role(user_id, role_id):
     guard = _require_company_context()
@@ -343,7 +358,7 @@ def revoke_user_role(user_id, role_id):
 
 
 @bp.route("/users/<user_id>/effective-permissions", methods=["GET"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def get_user_effective_permissions(user_id):
     guard = _require_company_context()
@@ -376,7 +391,7 @@ def get_user_effective_permissions(user_id):
 
 
 @bp.route("/audit", methods=["GET"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def get_audit_log():
     guard = _require_company_context()

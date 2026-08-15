@@ -32,8 +32,19 @@ def list_departments(client, company_id: str) -> list[dict]:
     ).data or []
 
 
-def update_department(client, department_id: str, updates: dict) -> dict | None:
-    result = client.table("departments").update(updates).eq("id", department_id).execute()
+def update_department(client, department_id: str, company_id: str, updates: dict) -> dict | None:
+    """`company_id` is required so callers on the service-role client (super
+    admin, and now an RBAC-only "Company Admin" whose legacy role isn't
+    company_admin — see routes/org_structure.py::_scoped_client_and_company)
+    can't mutate another company's department by id: the departments RLS
+    write policy enforces this for the ordinary RLS-scoped client, but a
+    service-role client bypasses RLS entirely, so this filter is this
+    function's only cross-tenant guard for that path."""
+    result = (
+        client.table("departments").update(updates)
+        .eq("id", department_id).eq("company_id", company_id)
+        .execute()
+    )
     return (result.data or [None])[0]
 
 
@@ -50,8 +61,14 @@ def create_designation(client, company_id: str, name: str) -> dict:
     return inserted.data[0]
 
 
-def update_designation(client, designation_id: str, updates: dict) -> dict | None:
-    result = client.table("designations").update(updates).eq("id", designation_id).execute()
+def update_designation(client, designation_id: str, company_id: str, updates: dict) -> dict | None:
+    """See update_department()'s docstring — same cross-tenant guard, needed
+    for the same reason on the service-role-client path."""
+    result = (
+        client.table("designations").update(updates)
+        .eq("id", designation_id).eq("company_id", company_id)
+        .execute()
+    )
     return (result.data or [None])[0]
 
 

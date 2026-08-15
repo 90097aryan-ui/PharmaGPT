@@ -24,7 +24,8 @@ pharmagpt/db/rbac_repo.py::add_rbac_audit_entry — a required, non-optional
 
 from flask import Blueprint, g, jsonify, request
 
-from pharmagpt.auth.decorators import extract_bearer_token, require_role
+from pharmagpt.auth.decorators import extract_bearer_token
+from pharmagpt.auth.rbac import require_rbac_admin_access
 from pharmagpt.db import org_structure_repo, rbac_repo
 from pharmagpt.services.supabase_client import get_authenticated_client, get_service_role_client, handle_postgrest_errors
 
@@ -32,7 +33,14 @@ bp = Blueprint("org_structure", __name__, url_prefix="/org")
 
 
 def _scoped_client_and_company():
-    if g.tenant.role == "super_admin":
+    """Same RLS/legacy-role caveat as pharmagpt/routes/rbac.py::_scoped_client:
+    the departments company_admin write policy (migration 0015) also gates
+    on current_user_role_name() = 'company_admin' — the frozen legacy role,
+    blind to the new RBAC role system. A caller reaching this module only
+    via an active RBAC "Company Admin" assignment (require_rbac_admin_access)
+    needs the same service-role-client-plus-app-scoping treatment already
+    used for super_admin, or RLS would silently block them."""
+    if g.tenant.role != "company_admin":
         return get_service_role_client(), g.tenant.company_id
     return get_authenticated_client(extract_bearer_token()), g.tenant.company_id
 
@@ -52,7 +60,7 @@ def _audit(client, company_id, *, action, department_id=None, reason):
 
 
 @bp.route("/departments", methods=["GET"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def list_departments():
     guard = _require_company_context()
@@ -63,7 +71,7 @@ def list_departments():
 
 
 @bp.route("/departments", methods=["POST"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def create_department():
     guard = _require_company_context()
@@ -88,7 +96,7 @@ def create_department():
 
 
 @bp.route("/departments/<department_id>", methods=["PATCH"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def update_department(department_id):
     guard = _require_company_context()
@@ -110,7 +118,7 @@ def update_department(department_id):
         return jsonify({"error": "No valid fields to update"}), 400
 
     client, company_id = _scoped_client_and_company()
-    row = org_structure_repo.update_department(client, department_id, updates)
+    row = org_structure_repo.update_department(client, department_id, company_id, updates)
     if not row:
         return jsonify({"error": "Department not found"}), 404
     _audit(
@@ -121,7 +129,7 @@ def update_department(department_id):
 
 
 @bp.route("/designations", methods=["GET"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def list_designations():
     guard = _require_company_context()
@@ -132,7 +140,7 @@ def list_designations():
 
 
 @bp.route("/designations", methods=["POST"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def create_designation():
     guard = _require_company_context()
@@ -153,7 +161,7 @@ def create_designation():
 
 
 @bp.route("/designations/<designation_id>", methods=["PATCH"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def update_designation(designation_id):
     guard = _require_company_context()
@@ -175,7 +183,7 @@ def update_designation(designation_id):
         return jsonify({"error": "No valid fields to update"}), 400
 
     client, company_id = _scoped_client_and_company()
-    row = org_structure_repo.update_designation(client, designation_id, updates)
+    row = org_structure_repo.update_designation(client, designation_id, company_id, updates)
     if not row:
         return jsonify({"error": "Designation not found"}), 404
     _audit(client, company_id, action="Designation updated", reason=f"{reason} ({updates})")
@@ -183,7 +191,7 @@ def update_designation(designation_id):
 
 
 @bp.route("/approval-levels", methods=["GET"])
-@require_role("company_admin", "super_admin")
+@require_rbac_admin_access
 @handle_postgrest_errors
 def list_approval_levels():
     guard = _require_company_context()

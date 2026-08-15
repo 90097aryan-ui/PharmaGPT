@@ -17,9 +17,11 @@ from unittest.mock import patch
 import pytest
 
 from pharmagpt.auth.context import TenantContext
-from pharmagpt.auth.rbac import get_effective_permissions, has_permission
+from pharmagpt.auth.rbac import get_effective_permissions, has_active_rbac_role, has_permission, has_rbac_admin_access
 from pharmagpt.db import rbac_repo
-from tests.test_security_tenant_rbac_esig import ADMIN_A, COMPANY_A, COMPANY_B, SUPER_ADMIN, AUTH_HEADERS, MIDDLEWARE_PATH
+from tests.test_security_tenant_rbac_esig import (
+    ADMIN_A, COMPANY_A, COMPANY_B, REVIEWER_A, SUPER_ADMIN, USER_A, AUTH_HEADERS, MIDDLEWARE_PATH,
+)
 
 RBAC_CLIENT_PATH = "pharmagpt.routes.rbac.get_authenticated_client"
 RBAC_SERVICE_CLIENT_PATH = "pharmagpt.routes.rbac.get_service_role_client"
@@ -403,3 +405,202 @@ def test_add_rbac_audit_entry_rejects_missing_reason():
     fake = FakeRbacClient({"rbac_audit_log": []})
     with pytest.raises(ValueError):
         rbac_repo.add_rbac_audit_entry(fake, company_id=COMPANY_A, actor_user_id="u1", reason="")
+
+
+# ── Coordinator fix: RBAC "Company Admin" grants RBAC-administration
+# access even when the legacy platform role is reviewer_qa/user ──────────────
+#
+# Business scenario (see CLAUDE.md task): a company's Coordinator is that
+# company's administrator, but is frozen at the legacy `reviewer_qa` role.
+# Some Coordinators are ALSO QA Reviewers. require_rbac_admin_access /
+# has_rbac_admin_access (pharmagpt/auth/rbac.py) must authorize such a user
+# for the RBAC administration surfaces without weakening isolation, without
+# touching the frozen legacy role model, and without granting access to a
+# QA-Reviewer-only user who happens to also hold the legacy reviewer_qa role.
+
+COMPANY_ADMIN_ROLE_NAME = "Company Admin"
+
+
+def _company_admin_rbac_role(role_id="role-a-company-admin", company_id=COMPANY_A, status="active"):
+    return {"id": role_id, "company_id": company_id, "name": COMPANY_ADMIN_ROLE_NAME,
+            "description": "", "is_template": False, "is_system": False, "status": status}
+
+
+def _qa_reviewer_rbac_role(role_id="role-a-qa-reviewer", company_id=COMPANY_A, status="active"):
+    return {"id": role_id, "company_id": company_id, "name": "QA Reviewer",
+            "description": "", "is_template": False, "is_system": False, "status": status}
+
+
+def test_legacy_company_admin_can_access_rbac_administration(client, store):
+    """(1) Legacy company_admin can access RBAC administration — unchanged."""
+    p1, p2, p3 = _patched(store)
+    with _as(ADMIN_A), p1, p2, p3:
+        resp = client.get("/rbac/roles", headers=AUTH_HEADERS)
+    assert resp.status_code == 200
+
+
+def test_legacy_company_admin_with_no_rbac_user_roles_still_works(client, store):
+    """(2) Legacy company_admin with zero rbac_user_roles rows still works —
+    no lockout for a pre-migration company_admin."""
+    assert store["rbac_user_roles"] == []
+    p1, p2, p3 = _patched(store)
+    with _as(ADMIN_A), p1, p2, p3:
+        resp = client.get("/rbac/permissions", headers=AUTH_HEADERS)
+    assert resp.status_code == 200
+
+
+def test_rbac_company_admin_can_access_despite_legacy_reviewer_qa(client, store):
+    """(3) RBAC Company Admin can access RBAC administration even when the
+    legacy role is reviewer_qa — the Coordinator scenario this fix targets."""
+    store["rbac_roles"].append(_company_admin_rbac_role())
+    store["rbac_user_roles"].append(
+        {"id": "ur-coord", "user_id": REVIEWER_A.user_id, "role_id": "role-a-company-admin", "company_id": COMPANY_A}
+    )
+    p1, p2, p3 = _patched(store)
+    with _as(REVIEWER_A), p1, p2, p3:
+        resp = client.get("/rbac/roles", headers=AUTH_HEADERS)
+    assert resp.status_code == 200
+
+
+def test_legacy_reviewer_qa_without_company_admin_rbac_role_is_denied(client, store):
+    """(4) legacy reviewer_qa with NO Company Admin RBAC role is denied."""
+    p1, p2, p3 = _patched(store)
+    with _as(REVIEWER_A), p1, p2, p3:
+        resp = client.get("/rbac/roles", headers=AUTH_HEADERS)
+    assert resp.status_code == 403
+
+
+def test_rbac_qa_reviewer_role_only_is_denied_company_admin_administration(client, store):
+    """(5) A user whose only RBAC role is "QA Reviewer" is denied Company
+    Admin administration — holding QA Reviewer must never grant it."""
+    store["rbac_roles"].append(_qa_reviewer_rbac_role())
+    store["rbac_user_roles"].append(
+        {"id": "ur-qa", "user_id": REVIEWER_A.user_id, "role_id": "role-a-qa-reviewer", "company_id": COMPANY_A}
+    )
+    p1, p2, p3 = _patched(store)
+    with _as(REVIEWER_A), p1, p2, p3:
+        resp = client.get("/rbac/roles", headers=AUTH_HEADERS)
+    assert resp.status_code == 403
+
+
+def test_company_admin_plus_qa_reviewer_rbac_roles_is_allowed(client, store):
+    """(6)/(7) A user with BOTH Company Admin and QA Reviewer RBAC roles is
+    allowed, and their effective permissions are the union of both roles —
+    multi-role assignment is additive, not collapsed to one role."""
+    store["rbac_roles"].append(_company_admin_rbac_role())
+    store["rbac_roles"].append(_qa_reviewer_rbac_role())
+    store["rbac_role_permissions"].append(
+        {"id": "rp-qa-reviewer", "role_id": "role-a-qa-reviewer", "permission_id": "perm-approve-qms", "granted": True}
+    )
+    store["rbac_user_roles"].append(
+        {"id": "ur-coord", "user_id": REVIEWER_A.user_id, "role_id": "role-a-company-admin", "company_id": COMPANY_A}
+    )
+    store["rbac_user_roles"].append(
+        {"id": "ur-qa", "user_id": REVIEWER_A.user_id, "role_id": "role-a-qa-reviewer", "company_id": COMPANY_A}
+    )
+    p1, p2, p3 = _patched(store)
+    with _as(REVIEWER_A), p1, p2, p3:
+        resp = client.get("/rbac/roles", headers=AUTH_HEADERS)
+        assert resp.status_code == 200
+        assert has_active_rbac_role(REVIEWER_A, COMPANY_ADMIN_ROLE_NAME) is True
+        assert has_active_rbac_role(REVIEWER_A, "QA Reviewer") is True
+        assert get_effective_permissions(REVIEWER_A) == {("QMS", "Approve")}
+
+
+def test_inactive_company_admin_assignment_does_not_grant_access(client, store):
+    """(8) A revoked (absent) Company Admin assignment does not grant
+    access — rbac_user_roles has no "inactive" flag: revoking a role
+    deletes the row (rbac_repo.revoke_user_role), so an absent row IS the
+    inactive-assignment case."""
+    store["rbac_roles"].append(_company_admin_rbac_role())
+    # Deliberately no rbac_user_roles row for REVIEWER_A — assignment revoked/never made.
+    p1, p2, p3 = _patched(store)
+    with _as(REVIEWER_A), p1, p2, p3:
+        resp = client.get("/rbac/roles", headers=AUTH_HEADERS)
+    assert resp.status_code == 403
+
+
+def test_inactive_company_admin_rbac_role_does_not_grant_access(client, store):
+    """(9) An assignment to a DISABLED Company Admin role does not grant
+    access."""
+    store["rbac_roles"].append(_company_admin_rbac_role(status="disabled"))
+    store["rbac_user_roles"].append(
+        {"id": "ur-coord", "user_id": REVIEWER_A.user_id, "role_id": "role-a-company-admin", "company_id": COMPANY_A}
+    )
+    p1, p2, p3 = _patched(store)
+    with _as(REVIEWER_A), p1, p2, p3:
+        resp = client.get("/rbac/roles", headers=AUTH_HEADERS)
+    assert resp.status_code == 403
+
+
+def test_company_admin_rbac_role_in_another_company_does_not_grant_access(client, store):
+    """(10)/(11) A Company Admin RBAC role that actually belongs to another
+    company must never grant access, even if a (malformed/adversarial)
+    rbac_user_roles row references it — the defensive company_id filter on
+    the rbac_roles lookup in has_active_rbac_role() is what stops it, not
+    just the rbac_user_roles.company_id column."""
+    store["rbac_roles"].append(_company_admin_rbac_role(role_id="role-b-company-admin", company_id=COMPANY_B))
+    store["rbac_user_roles"].append(
+        {"id": "ur-coord", "user_id": REVIEWER_A.user_id, "role_id": "role-b-company-admin", "company_id": COMPANY_A}
+    )
+    p1, p2, p3 = _patched(store)
+    with _as(REVIEWER_A), p1, p2, p3:
+        resp = client.get("/rbac/roles", headers=AUTH_HEADERS)
+        assert resp.status_code == 403
+        assert has_active_rbac_role(REVIEWER_A, COMPANY_ADMIN_ROLE_NAME) is False
+
+
+def test_cross_tenant_rbac_company_admin_scoped_to_own_company_only(client, store):
+    """(11) Cross-tenant role access remains impossible even for a user
+    that legitimately holds an active Company Admin RBAC role — in COMPANY_B
+    it must not unlock COMPANY_A's roles."""
+    store["rbac_roles"].append(_company_admin_rbac_role(role_id="role-b-company-admin", company_id=COMPANY_B))
+    store["rbac_user_roles"].append(
+        {"id": "ur-b", "user_id": "coord-b", "role_id": "role-b-company-admin", "company_id": COMPANY_B}
+    )
+    coordinator_b = TenantContext(
+        user_id="coord-b", email="coord-b@example.com", display_name="Coordinator B",
+        role="reviewer_qa", company_id=COMPANY_B,
+    )
+    p1, p2, p3 = _patched(store)
+    with _as(coordinator_b), p1, p2, p3:
+        resp = client.get("/rbac/roles", headers=AUTH_HEADERS)
+    names = {r["name"] for r in resp.get_json()}
+    assert "QA Manager (A)" not in names
+    assert "QA Manager (B)" in names
+
+
+def test_super_admin_behavior_unchanged_no_rbac_table_lookup():
+    """(12) super_admin behavior is unchanged: has_rbac_admin_access short-
+    circuits to True for super_admin without ever touching the RBAC tables
+    (no client patch is installed here — a real query would raise)."""
+    assert has_rbac_admin_access(SUPER_ADMIN) is True
+
+
+def test_super_admin_with_assumed_company_context_can_administer_roles(client, store):
+    """(13) Assume Company Context behavior is unchanged: a super_admin who
+    has assumed COMPANY_A can still administer that company's roles."""
+    assumed = TenantContext(
+        user_id=SUPER_ADMIN.user_id, email=SUPER_ADMIN.email, display_name=SUPER_ADMIN.display_name,
+        role="super_admin", company_id=COMPANY_A,
+    )
+    p1, p2, p3 = _patched(store)
+    with _as(assumed), p1, p2, p3:
+        resp = client.get("/rbac/roles", headers=AUTH_HEADERS)
+    names = {r["name"] for r in resp.get_json()}
+    assert "QA Manager (A)" in names
+    assert "QA Manager (B)" not in names
+
+
+def test_legacy_user_role_with_company_admin_rbac_role_is_also_allowed(client, store):
+    """A plain legacy `user` role holding an active Company Admin RBAC
+    assignment is allowed too — the business rule is "any legacy role", not
+    "reviewer_qa specifically"."""
+    store["rbac_roles"].append(_company_admin_rbac_role())
+    store["rbac_user_roles"].append(
+        {"id": "ur-user", "user_id": USER_A.user_id, "role_id": "role-a-company-admin", "company_id": COMPANY_A}
+    )
+    p1, p2, p3 = _patched(store)
+    with _as(USER_A), p1, p2, p3:
+        resp = client.get("/rbac/roles", headers=AUTH_HEADERS)
+    assert resp.status_code == 200

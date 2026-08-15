@@ -16,10 +16,13 @@ import pytest
 
 from pharmagpt.db import org_structure_repo
 from tests.test_rbac import FakeRbacClient
-from tests.test_security_tenant_rbac_esig import ADMIN_A, COMPANY_A, COMPANY_B, SUPER_ADMIN, AUTH_HEADERS, MIDDLEWARE_PATH
+from tests.test_security_tenant_rbac_esig import (
+    ADMIN_A, COMPANY_A, COMPANY_B, REVIEWER_A, SUPER_ADMIN, AUTH_HEADERS, MIDDLEWARE_PATH,
+)
 
 ORG_CLIENT_PATH = "pharmagpt.routes.org_structure.get_authenticated_client"
 ORG_SERVICE_CLIENT_PATH = "pharmagpt.routes.org_structure.get_service_role_client"
+ORG_AUTH_SERVICE_CLIENT_PATH = "pharmagpt.auth.rbac.get_service_role_client"
 
 
 def _as(tenant):
@@ -123,6 +126,48 @@ def test_create_and_disable_designation(client, store):
         )
     assert disable_resp.status_code == 200
     assert store["designations"][0]["status"] == "disabled"
+
+
+def test_rbac_company_admin_can_administer_departments_despite_legacy_reviewer_qa(client, store):
+    """RBAC administration surfaces under /org also honor an active RBAC
+    "Company Admin" assignment for a legacy reviewer_qa Coordinator — same
+    centralized require_rbac_admin_access gate as /rbac/*."""
+    store["rbac_roles"] = [
+        {"id": "role-a-company-admin", "company_id": COMPANY_A, "name": "Company Admin", "status": "active"},
+    ]
+    store["rbac_user_roles"] = [
+        {"id": "ur-coord", "user_id": REVIEWER_A.user_id, "role_id": "role-a-company-admin", "company_id": COMPANY_A},
+    ]
+    p1, p2 = _patched(store)
+    p3 = patch(ORG_AUTH_SERVICE_CLIENT_PATH, return_value=FakeRbacClient(store))
+    with _as(REVIEWER_A), p1, p2, p3:
+        resp = client.get("/org/departments", headers=AUTH_HEADERS)
+    assert resp.status_code == 200
+    ids = {d["id"] for d in resp.get_json()}
+    assert ids == {"dept-a-qa"}
+
+
+def test_legacy_reviewer_qa_without_rbac_company_admin_role_denied_org_admin(client, store):
+    store["rbac_roles"] = []
+    store["rbac_user_roles"] = []
+    p1, p2 = _patched(store)
+    p3 = patch(ORG_AUTH_SERVICE_CLIENT_PATH, return_value=FakeRbacClient(store))
+    with _as(REVIEWER_A), p1, p2, p3:
+        resp = client.get("/org/departments", headers=AUTH_HEADERS)
+    assert resp.status_code == 403
+
+
+def test_update_department_cannot_cross_company_boundary(client, store):
+    """org_structure_repo.update_department() must scope by company_id, not
+    just department id — the service-role client used for super_admin (and
+    now for an RBAC-only Company Admin whose legacy role isn't company_admin)
+    bypasses RLS entirely, so this app-layer filter is the only thing
+    stopping a cross-company PATCH by guessed/known department id."""
+    row = org_structure_repo.update_department(
+        FakeRbacClient(store), "dept-b-qa", COMPANY_A, {"status": "disabled"},
+    )
+    assert row is None
+    assert store["departments"][1]["status"] == "active"  # unchanged
 
 
 def test_provision_org_defaults_for_company_is_idempotent():
