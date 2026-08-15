@@ -20,12 +20,15 @@ effective permissions resolved here. This applies the SAME g.tenant.user_id
 everywhere else — never client input, never relying on RLS to enforce it.
 """
 
+import logging
 from functools import wraps
 
 from flask import g, jsonify
 
 from pharmagpt.auth.context import TenantContext
 from pharmagpt.services.supabase_client import get_service_role_client
+
+logger = logging.getLogger(__name__)
 
 
 def get_effective_permissions(tenant: TenantContext) -> set[tuple[str, str]]:
@@ -148,6 +151,11 @@ def has_active_rbac_role(tenant: TenantContext, role_name: str) -> bool:
         .execute()
     ).data or []
     role_ids = [r["role_id"] for r in user_roles]
+    logger.info(
+        "has_active_rbac_role: rbac_user_roles lookup user_id=%s company_id=%s "
+        "assignment_count=%s role_ids=%s",
+        tenant.user_id, tenant.company_id, len(user_roles), role_ids,
+    )
     if not role_ids:
         return False
 
@@ -157,7 +165,15 @@ def has_active_rbac_role(tenant: TenantContext, role_name: str) -> bool:
         .eq("name", role_name).eq("company_id", tenant.company_id)
         .execute()
     ).data or []
-    return len(matches) > 0
+    matched_role_ids = [r["id"] for r in matches]
+    logger.info(
+        "has_active_rbac_role: rbac_roles lookup role_name=%s role_match_count=%s matched_role_ids=%s",
+        role_name, len(matches), matched_role_ids,
+    )
+
+    result = len(matches) > 0
+    logger.info("has_active_rbac_role: result=%s", result)
+    return result
 
 
 def has_rbac_admin_access(tenant: TenantContext) -> bool:
