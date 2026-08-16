@@ -18,6 +18,18 @@ function scrollToBottom() {
 }
 
 /**
+ * Wave 1 (AI-02, PharmaGPT Production Readiness Audit): render Markdown
+ * AI output through DOMPurify before it's ever assigned to innerHTML.
+ * AI responses can echo retrieved document/RAG content verbatim, so
+ * marked.parse() output must never be trusted as safe HTML on its own —
+ * unlike the user's own message text, which already renders via
+ * .textContent elsewhere in this file and needs no sanitizing.
+ */
+function renderMarkdown(text) {
+  return DOMPurify.sanitize(marked.parse(text));
+}
+
+/**
  * Append a completed (non-streaming) message bubble to the chat window.
  * @param {string}  role    - "user" | "ai" | null (null = error)
  * @param {string}  text    - message content
@@ -44,7 +56,7 @@ function appendMessage(role, text, isError = false) {
   bubble.className = "bubble";
 
   if (role === "ai") {
-    bubble.innerHTML = marked.parse(text);
+    bubble.innerHTML = renderMarkdown(text);
   } else {
     bubble.textContent = text;
   }
@@ -72,7 +84,7 @@ function appendMessage(role, text, isError = false) {
 }
 
 /**
- * Create an AI message row that starts with "PharmaGPT is thinking…"
+ * Create an AI message row that starts with "Yuktav is thinking…"
  * Returns references to the bubble and inner elements so the stream loop
  * can update them as tokens arrive.
  */
@@ -92,7 +104,7 @@ function createStreamingBubble() {
   thinkingEl.className = "thinking-label";
   thinkingEl.id = "thinking-label";
   thinkingEl.innerHTML =
-    '<span class="thinking-dots"><span></span><span></span><span></span></span> PharmaGPT is thinking…';
+    '<span class="thinking-dots"><span></span><span></span><span></span></span> Yuktav is thinking…';
 
   const contentEl = document.createElement("div");
   contentEl.id = "stream-content";
@@ -218,7 +230,7 @@ async function sendMessage() {
             firstChunkReceived = true;
           }
           accumulatedText += event.chunk;
-          contentEl.innerHTML = marked.parse(accumulatedText);
+          contentEl.innerHTML = renderMarkdown(accumulatedText);
           scrollToBottom();
         }
 

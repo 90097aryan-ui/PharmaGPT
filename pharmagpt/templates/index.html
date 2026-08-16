@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PharmaGPT — Pharmaceutical Validation Platform</title>
+  <title>Yuktav — Manufacturing & Quality Intelligence Platform</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -22,6 +22,13 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/error_pages.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile_nav.css') }}" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- Wave 1 (AI-02, PharmaGPT Production Readiness Audit): sanitizes
+       marked.parse() output before it's ever assigned to innerHTML
+       (static/js/chat.js) — AI responses previously rendered as raw,
+       unsanitized HTML. Same CDN family already used for marked/lucide
+       above; the standard, industry-recommended pairing for
+       markdown-to-HTML rendering. -->
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 </head>
 <body>
@@ -34,8 +41,8 @@
       <div class="login-brand">
         <div class="logo-icon">Rx</div>
         <div class="header-titles">
-          <h1>PharmaGPT</h1>
-          <p>Pharmaceutical Validation Platform</p>
+          <h1>Yuktav</h1>
+          <p>Manufacturing & Quality Intelligence Platform</p>
         </div>
       </div>
 
@@ -79,8 +86,8 @@
       </button>
       <div class="logo-icon">Rx</div>
       <div class="header-titles">
-        <h1>PharmaGPT</h1>
-        <p>Pharmaceutical Validation Platform</p>
+        <h1>Yuktav</h1>
+        <p>Manufacturing & Quality Intelligence Platform</p>
       </div>
       <div class="header-divider"></div>
       <span class="header-context" id="header-breadcrumb">Overview</span>
@@ -293,21 +300,6 @@
           </div>
           <div class="sidebar-item qms-sub-item" id="nav-qm-documents" data-view="view-qms-documents">
             <span class='icon' data-lucide='file-text'></span> Document Control
-          </div>
-          <div class="sidebar-item" style="opacity:0.45;cursor:default">
-            <span class='icon' data-lucide='graduation-cap'></span> Training <span style="font-size:11px;margin-left:6px">(Coming Soon)</span>
-          </div>
-          <div class="sidebar-item" style="opacity:0.45;cursor:default">
-            <span class='icon' data-lucide='message-square-warning'></span> Complaints <span style="font-size:11px;margin-left:6px">(Coming Soon)</span>
-          </div>
-          <div class="sidebar-item" style="opacity:0.45;cursor:default">
-            <span class='icon' data-lucide='clipboard-check'></span> Audit Management <span style="font-size:11px;margin-left:6px">(Coming Soon)</span>
-          </div>
-          <div class="sidebar-item" style="opacity:0.45;cursor:default">
-            <span class='icon' data-lucide='truck'></span> Supplier Quality <span style="font-size:11px;margin-left:6px">(Coming Soon)</span>
-          </div>
-          <div class="sidebar-item" style="opacity:0.45;cursor:default">
-            <span class='icon' data-lucide='users-round'></span> Management Review <span style="font-size:11px;margin-left:6px">(Coming Soon)</span>
           </div>
         </div>
       </div>
@@ -757,7 +749,7 @@
       <div class="error-page-card">
         <div class="error-page-icon error-page-icon-warning"><span class="icon" data-lucide="wifi-off"></span></div>
         <h2 class="error-page-title">Network Error</h2>
-        <p class="error-page-message" id="error-network-message">Can't reach PharmaGPT right now. Check your connection and try again.</p>
+        <p class="error-page-message" id="error-network-message">Can't reach Yuktav right now. Check your connection and try again.</p>
         <div class="error-page-actions">
           <button class="btn-primary" id="error-network-retry">Try Again</button>
         </div>
@@ -768,7 +760,7 @@
       <div class="error-page-card">
         <div class="error-page-icon error-page-icon-warning"><span class="icon" data-lucide="lock"></span></div>
         <h2 class="error-page-title">Permission Denied</h2>
-        <p class="error-page-message" id="error-permission-message">Your role doesn't have access to this area of PharmaGPT.</p>
+        <p class="error-page-message" id="error-permission-message">Your role doesn't have access to this area of Yuktav.</p>
         <div class="error-page-actions">
           <button class="btn-primary" onclick="window.showView && window.showView('view-dashboard')">Back to Dashboard</button>
         </div>
@@ -942,7 +934,7 @@
       <div class="welcome-banner">
         <span class='icon' data-lucide='flask-conical'></span>
         <p>
-          <strong>PharmaGPT</strong> is your AI-powered pharmaceutical consultant with 30+ years of simulated
+          <strong>Yuktav</strong> is your AI-powered manufacturing and quality intelligence consultant with 30+ years of simulated
           expertise. Select or create a <strong>Project</strong> in the sidebar, then ask about GMP compliance,
           validation protocols, CAPA, regulatory submissions, or any pharmaceutical engineering topic.
         </p>

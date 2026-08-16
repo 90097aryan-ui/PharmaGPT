@@ -157,7 +157,7 @@ async function selectProject(project) {
   // Enable the send button now that a project is selected
   document.getElementById("send-btn").disabled = false;
   document.getElementById("user-input").placeholder =
-    `Ask PharmaGPT about "${project.name}"…`;
+    `Ask Yuktav about "${project.name}"…`;
 
   // Show the "Use Project Documents" toggle and update its hint count
   _updateUseDocsRow(project.id);

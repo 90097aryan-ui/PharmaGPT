@@ -306,7 +306,7 @@ function qmsDocRenderTab(doc) {
       <div class="qms-section-card">
         <h3>AI Draft Generation</h3>
         <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px">
-          Generates complete ${doc.doc_type} content (Purpose, Scope, Responsibilities, Procedure, Acceptance Criteria, References) using the PharmaGPT regulatory persona.
+          Generates complete ${doc.doc_type} content (Purpose, Scope, Responsibilities, Procedure, Acceptance Criteria, References) using the Yuktav regulatory intelligence engine.
         </p>
         <div class="qms-form-actions" style="justify-content:flex-start;margin-top:0;margin-bottom:14px">
           <button class="btn-primary" id="qms-doc-generate-btn" onclick="qmsDocGenerateDraft(${id})"><span class=\'icon\' data-lucide=\'sparkles\'></span> Generate Draft with AI</button>

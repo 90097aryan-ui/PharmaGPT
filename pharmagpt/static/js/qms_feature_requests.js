@@ -18,7 +18,7 @@ async function frShowList(filters = {}) {
     <div class="qms-page-header">
       <div>
         <h2>Feature Requests</h2>
-        <p>Track and triage feature ideas across PharmaGPT modules</p>
+        <p>Track and triage feature ideas across Yuktav modules</p>
       </div>
       <div class="qms-header-actions">
         <button class="btn-primary" onclick="frOpenNew()">+ New Feature Request</button>
