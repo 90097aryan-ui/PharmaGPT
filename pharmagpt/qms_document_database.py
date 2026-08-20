@@ -18,6 +18,61 @@ from pharmagpt.services import document_versioning as dv
 from pharmagpt.services import lifecycle_engine
 
 
+# ── Templates (Document Control redesign, Phase 5) ───────────────────────────
+
+def create_template(doc_type: str, name: str, structure: list, *,
+                     company_id: str = "", created_by: str = "") -> dict:
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO qms_document_templates (doc_type, name, structure_json, company_id, created_by) "
+        "VALUES (?,?,?,?,?)",
+        (doc_type, name, json.dumps(structure), company_id, created_by),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM qms_document_templates WHERE id = ?", (cur.lastrowid,)).fetchone()
+    conn.close()
+    d = dict(row)
+    d["structure"] = json.loads(d["structure_json"])
+    return d
+
+
+def get_template(template_id: int) -> dict | None:
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM qms_document_templates WHERE id = ?", (template_id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    d = dict(row)
+    d["structure"] = json.loads(d["structure_json"])
+    return d
+
+
+def list_templates(doc_type: str = "", company_id: str = "") -> list[dict]:
+    """Active templates for `doc_type`, company-specific ones first, falling
+    back to platform-wide defaults (company_id='')."""
+    conn = get_connection()
+    clauses, params = ["is_active = 1"], []
+    if doc_type:
+        clauses.append("doc_type = ?")
+        params.append(doc_type)
+    if company_id:
+        clauses.append("(company_id = ? OR company_id = '')")
+        params.append(company_id)
+    else:
+        clauses.append("company_id = ''")
+    rows = conn.execute(
+        f"SELECT * FROM qms_document_templates WHERE {' AND '.join(clauses)} ORDER BY company_id DESC, name ASC",
+        params,
+    ).fetchall()
+    conn.close()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["structure"] = json.loads(d["structure_json"])
+        out.append(d)
+    return out
+
+
 # ── Documents ──────────────────────────────────────────────────────────────────
 
 def create_document(data: dict, *, company_id: str, created_by_user_id: str = "") -> dict:
@@ -36,8 +91,8 @@ def create_document(data: dict, *, company_id: str, created_by_user_id: str = ""
         """INSERT INTO qms_documents
            (doc_number, doc_type, title, department, category, version, status,
             effective_date, review_date, expiry_date, owner, reviewer, approver,
-            content, form_data, project_id, company_id)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            content, form_data, project_id, company_id, template_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             doc_number,
             data.get("doc_type", "SOP"),
@@ -56,6 +111,7 @@ def create_document(data: dict, *, company_id: str, created_by_user_id: str = ""
             json.dumps(data.get("form_data", {})),
             data.get("project_id") or None,
             company_id,
+            data.get("template_id") or None,
         ),
     )
     conn.commit()
@@ -133,6 +189,28 @@ def update_document(document_id: int, data: dict) -> dict | None:
     conn.execute(f"UPDATE qms_documents SET {', '.join(updates)} WHERE id = ?", params)
     conn.commit()
     conn.close()
+
+    # Document Control redesign: keep the authoritative CURRENT version's
+    # content_snapshot in sync with every content edit, not just the
+    # denormalized qms_documents.content mirror — otherwise the version
+    # that gets frozen at Submit for Review would be whatever content
+    # existed at creation/fork time, not the author's actual final edits.
+    # Every existing caller of update_document() with "content" (the PUT
+    # route, AI draft generation) gets this fix automatically, with no
+    # change needed at those call sites. Silently no-ops if the current
+    # version isn't 'draft' (routes/qms_documents.py's PUT already blocks
+    # content edits outside Draft/Under Revision before reaching here).
+    if "content" in data:
+        version = get_current_version(document_id)
+        if version and version["status"] == "draft":
+            vconn = get_connection()
+            vconn.execute(
+                "UPDATE qms_document_versions SET content_snapshot = ? WHERE id = ?",
+                (data["content"], version["id"]),
+            )
+            vconn.commit()
+            vconn.close()
+
     return get_document(document_id)
 
 

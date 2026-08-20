@@ -45,6 +45,33 @@ def _decide(doc, step_order, decision, user_id="rev-1", role="reviewer_qa", comm
                             user_id=user_id, role=role, performed_by="Rita Reviewer", comments=comments)
 
 
+# ── Content edits sync into the authoritative version, not just the mirror ──
+
+def test_content_edit_syncs_into_current_draft_version(db_path):
+    doc = _make_document()
+    v0 = qdb.get_current_version(doc["id"])
+    assert v0["content_snapshot"] == "initial content"
+
+    qdb.update_document(doc["id"], {"content": "edited before submission"})
+
+    assert qdb.get_version(v0["id"])["content_snapshot"] == "edited before submission"
+    assert qdb.get_document(doc["id"])["content"] == "edited before submission"
+
+
+def test_content_edit_does_not_touch_a_non_draft_version(db_path):
+    """Once submitted, the frozen version's content_snapshot must not
+    silently change even if something calls update_document() with content
+    (the route layer already blocks this before it happens; this is the
+    service-layer half of the same guarantee)."""
+    doc = _make_document()
+    v0 = qdb.get_current_version(doc["id"])
+    _start(doc)  # draft -> under_review
+
+    qdb.update_document(doc["id"], {"content": "should not apply"})
+
+    assert qdb.get_version(v0["id"])["content_snapshot"] == "initial content"
+
+
 # ── start_instance links the instance to the current version, moves it to under_review ──
 
 def test_start_instance_links_version_and_moves_to_under_review(db_path):

@@ -100,6 +100,49 @@ def create_document():
     return jsonify(document), 201
 
 
+# ── Templates (Document Control redesign, Phase 5) ───────────────────────────
+# Index + headings + sub-headings only — no procedure content. AI Assist
+# fills content within this structure (constraining the AI prompt itself
+# to preserve controlled headings is a separate, deferred follow-up — see
+# services/qms_document_prompt.py; this is the data model + CRUD half).
+
+@bp.route("/templates", methods=["GET"])
+def list_templates_route():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
+    return jsonify(qdb.list_templates(request.args.get("doc_type", ""), g.tenant.company_id))
+
+
+@bp.route("/templates", methods=["POST"])
+@require_role("company_admin")
+def create_template_route():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
+    data = request.get_json() or {}
+    name = (data.get("name") or "").strip()
+    structure = data.get("structure")
+    if not name:
+        return jsonify({"error": "Template name is required"}), 400
+    if not isinstance(structure, list) or not structure:
+        return jsonify({"error": "structure must be a non-empty list of {heading, sub_headings}"}), 400
+    template = qdb.create_template(
+        data.get("doc_type", "SOP"), name, structure,
+        company_id=g.tenant.company_id, created_by=g.tenant.display_name or g.tenant.email,
+    )
+    audit.log("document_template", template["id"], "Template created", detail=name)
+    return jsonify(template), 201
+
+
+@bp.route("/templates/<int:tid>", methods=["GET"])
+def get_template_route(tid):
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
+    template = qdb.get_template(tid)
+    if not template or (template["company_id"] not in ("", g.tenant.company_id)):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(template)
+
+
 # ── Approver pool (Document Control redesign, Phase 3) ───────────────────────
 # Department Head + Quality Head/Designee mandatory, Plant Head optional.
 # Company-admin only — this configures who the final Approval stage's
@@ -245,6 +288,72 @@ def get_versions(did):
     if not tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
     return jsonify(qdb.get_versions(did))
+
+
+@bp.route("/<int:did>/versions/upload", methods=["POST"])
+def upload_final_author_version(did):
+    """Author Local Edit / Upload Final Author Version (Document Control
+    redesign, Phase 5): the uploaded file becomes the authoritative content
+    for the CURRENT Draft version — not a parallel/competing source of
+    truth alongside qms_documents.content. Reuses the exact same
+    attachment-storage pipeline routes/qms_common.py's generic upload
+    already uses (qmsdb.add_attachment, same upload dir/collision
+    handling) and the same synchronous text-extraction service KB document
+    ingestion uses (services/document_processor.extract_sync) — no new
+    storage or extraction mechanism. The extracted text is written through
+    qdb.update_document(..., content=...), which (as of this redesign)
+    already syncs into the version's content_snapshot for a Draft version,
+    so this is the same single write path "Save Content"/AI-draft
+    generation already use, just sourced from an uploaded file instead of
+    typed/generated text."""
+    import os
+    from werkzeug.utils import secure_filename
+    from pharmagpt.config import UPLOAD_FOLDER, ALLOWED_EXTENSIONS
+    from pharmagpt.documents import get_extension
+    from pharmagpt.routes.qms_common import _qms_upload_dir, _resolve_collision
+    from pharmagpt.services.document_processor import extract_sync
+
+    document = tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
+    if not document:
+        return jsonify({"error": "Not found"}), 404
+    version = qdb.get_current_version(did)
+    if not version or version["status"] != "draft":
+        return jsonify({
+            "error": "The Final Author Version can only be uploaded while the current version is Draft",
+        }), 409
+    if "file" not in request.files:
+        return jsonify({"error": "No file part in the request"}), 400
+    file = request.files["file"]
+    if not file.filename:
+        return jsonify({"error": "No file selected"}), 400
+    extension = get_extension(file.filename)
+    if extension not in ALLOWED_EXTENSIONS:
+        return jsonify({"error": "File type not allowed"}), 400
+
+    upload_dir = _qms_upload_dir(RECORD_TYPE, did)
+    safe_name = _resolve_collision(upload_dir, secure_filename(file.filename))
+    file_path = os.path.join(upload_dir, safe_name)
+    file.save(file_path)
+    file_size = os.path.getsize(file_path)
+
+    uploader = g.tenant.display_name or g.tenant.email
+    attachment = qmsdb.add_attachment(
+        RECORD_TYPE, did, safe_name, file.filename, extension, file_size,
+        "Final Author Version", uploader,
+    )
+
+    result = extract_sync(file_path, extension)
+    if result.status == "failed" or not result.text.strip():
+        audit.log_failure("document", did, "Final Author Version upload rejected",
+                           reason=f"extraction status: {result.status}")
+        return jsonify({"error": f"Could not extract usable text from the uploaded file "
+                                  f"(status: {result.status})"}), 400
+
+    qdb.update_document(did, {"content": result.text})
+    qdb.transition_version_status(version["id"], "draft", source_attachment_id=attachment["id"])
+    audit.log("document", did, "Final Author Version uploaded",
+              detail=f"{file.filename} ({result.status}, {result.word_count} words)")
+    return jsonify(qdb.get_current_version(did)), 201
 
 
 @bp.route("/<int:did>/versions", methods=["POST"])

@@ -121,6 +121,28 @@ QMS_SCHEMA = """
 
     -- ── Document Control ──────────────────────────────────────────────────────
 
+    -- Controlled document templates (Document Control redesign, Phase 5):
+    -- index/headings/sub-headings only — no procedure content. A document
+    -- is created against one of these; AI Assist is expected to fill
+    -- content within the structure without removing/restructuring the
+    -- controlled headings (enforcement of that constraint in the AI prompt
+    -- itself is deferred — see services/qms_document_prompt.py follow-up).
+    -- Templates are themselves versionable/auditable: is_active lets an
+    -- outdated template be retired without deleting history of documents
+    -- created from it (their own template_id keeps pointing at the retired
+    -- row, which stays readable).
+    CREATE TABLE IF NOT EXISTS qms_document_templates (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        doc_type       TEXT    NOT NULL DEFAULT 'SOP',
+        name           TEXT    NOT NULL DEFAULT '',
+        structure_json TEXT    NOT NULL DEFAULT '[]',  -- ordered list of {"heading":..., "sub_headings":[...]}
+        is_active      INTEGER NOT NULL DEFAULT 1,
+        company_id     TEXT    DEFAULT '',              -- '' = platform-wide default template
+        created_by     TEXT    DEFAULT '',
+        created_at     TEXT    DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_document_templates_doc_type ON qms_document_templates(doc_type, company_id);
+
     CREATE TABLE IF NOT EXISTS qms_documents (
         id                INTEGER PRIMARY KEY AUTOINCREMENT,
         doc_number        TEXT    NOT NULL DEFAULT '',
@@ -137,6 +159,7 @@ QMS_SCHEMA = """
         reviewer          TEXT    DEFAULT '',
         approver          TEXT    DEFAULT '',
         content           TEXT    DEFAULT '',         -- markdown, AI-drafted or manual
+        template_id       INTEGER DEFAULT NULL,        -- FK to qms_document_templates.id (Phase 5)
         form_data         TEXT    DEFAULT '{}',
         ai_review_data    TEXT    DEFAULT '{}',
         project_id        INTEGER DEFAULT NULL,

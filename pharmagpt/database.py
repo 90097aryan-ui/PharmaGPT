@@ -456,6 +456,7 @@ def init_db() -> None:
     _add_column_if_missing(conn, "qms_workflow_template_steps", "quorum_eligible", "INTEGER NOT NULL DEFAULT 1")
     _add_column_if_missing(conn, "qms_workflow_instance_steps", "quorum_eligible", "INTEGER NOT NULL DEFAULT 1")
     _add_column_if_missing(conn, "qms_document_training", "document_version_id", "INTEGER DEFAULT NULL")
+    _add_column_if_missing(conn, "qms_documents", "template_id", "INTEGER DEFAULT NULL")
     # DROP + CREATE (not IF NOT EXISTS) so an already-migrated DB always
     # picks up the current trigger definition here, not whatever version of
     # it existed the first time this code ran — SQLite has no ALTER TRIGGER.
