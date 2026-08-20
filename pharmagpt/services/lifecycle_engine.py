@@ -77,17 +77,41 @@ _RISK_ASSESSMENT_TRANSITIONS: dict[str, set[str]] = {
     "Closed":    set(),
 }
 
+# ── Document Control redesign — per-VERSION lifecycle (distinct from and
+# additive to _QMS_DOCUMENT_TRANSITIONS above, which governs the parent
+# qms_documents.status denormalized projection). Every value except 'draft'
+# is one of the spec's immutable states; content-column immutability is
+# additionally enforced at the DB layer by qms_database.py's
+# trg_document_versions_immutable_* triggers — this registry is the
+# service-layer guard on which *status* transitions are legal at all.
+# 'effective' -> 'superseded' is the one transition a terminal-looking
+# state still legally makes: when a *later* version of the same document
+# becomes Effective, the previously-Effective version is marked
+# Superseded (still fully retained, still read-only) rather than staying
+# marked 'effective' forever once it no longer is.
+_QMS_DOCUMENT_VERSION_TRANSITIONS: dict[str, set[str]] = {
+    "draft":             {"under_review"},
+    "under_review":      {"review_rejected", "pending_approval"},
+    "review_rejected":   set(),
+    "pending_approval":  {"approval_rejected", "approved"},
+    "approval_rejected": set(),
+    "approved":          {"effective"},
+    "effective":         {"superseded"},
+    "superseded":        set(),
+}
+
 # Registry key is a lifecycle identifier, not necessarily a doc_type string —
 # callers pass whichever key names their own suite's transition map (kept
 # distinct from qms_documents.doc_type so QMS Document Control's many
 # doc_type values — SOP, Protocol, DQ, FAT, SAT, ... — all share the single
 # "QMS_DOCUMENT" lifecycle rather than needing one entry per doc_type).
 _REGISTRY: dict[str, dict[str, set[str]]] = {
-    "URS":                urs_lifecycle.ALLOWED_TRANSITIONS,
-    "QMS_DOCUMENT":        _QMS_DOCUMENT_TRANSITIONS,
-    "QUALIFICATION":       _QUALIFICATION_TRANSITIONS,
-    "VALIDATION_REPORT":   _VALIDATION_REPORT_TRANSITIONS,
-    "RISK_ASSESSMENT":     _RISK_ASSESSMENT_TRANSITIONS,
+    "URS":                    urs_lifecycle.ALLOWED_TRANSITIONS,
+    "QMS_DOCUMENT":            _QMS_DOCUMENT_TRANSITIONS,
+    "QMS_DOCUMENT_VERSION":    _QMS_DOCUMENT_VERSION_TRANSITIONS,
+    "QUALIFICATION":           _QUALIFICATION_TRANSITIONS,
+    "VALIDATION_REPORT":       _VALIDATION_REPORT_TRANSITIONS,
+    "RISK_ASSESSMENT":         _RISK_ASSESSMENT_TRANSITIONS,
 }
 
 

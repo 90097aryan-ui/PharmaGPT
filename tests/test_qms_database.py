@@ -16,7 +16,11 @@ def test_create_document_generates_number_and_defaults(db_path):
     doc = qdb.create_document({"doc_type": "SOP", "title": "Cleaning SOP", "department": "Quality Assurance"}, company_id="test-company-1")
     assert doc["doc_number"] == "SOP-QA-0001"
     assert doc["status"] == "Draft"
-    assert doc["version"] == "1.0"
+    # Document Control redesign (Phase 1): a brand-new document's version now
+    # starts at 0.1 (services/document_versioning.py's numbering rule — 1.0
+    # is reserved for the first time a document actually becomes Effective),
+    # not the old static '1.0' schema-column default.
+    assert doc["version"] == "0.1"
 
     doc2 = qdb.create_document({"doc_type": "SOP", "title": "Second SOP", "department": "Quality Assurance"}, company_id="test-company-1")
     assert doc2["doc_number"] == "SOP-QA-0002"
@@ -37,10 +41,20 @@ def test_document_versions_training_distribution(db_path):
     from pharmagpt import qms_document_database as qdb
 
     doc = qdb.create_document({"title": "Doc"}, company_id="test-company-1")
+    # Document Control redesign (Phase 1): create_document() now also creates
+    # an authoritative initial version (0.1, draft) via
+    # qdb.create_initial_version() — see qms_document_database.py and
+    # services/document_versioning.py. So a fresh document already has one
+    # version row before this test's own manual create_version() call.
+    versions_before = qdb.get_versions(doc["id"])
+    assert len(versions_before) == 1
+    assert versions_before[0]["version_number"] == "0.1"
+
     qdb.create_version(doc["id"], "1.0", "Initial", "content snapshot", "J Doe")
     versions = qdb.get_versions(doc["id"])
-    assert len(versions) == 1
-    assert versions[0]["change_summary"] == "Initial"
+    assert len(versions) == 2
+    manual_entry = next(v for v in versions if v["change_summary"] == "Initial")
+    assert manual_entry["version"] == "1.0"
 
     qdb.add_training(doc["id"], {"trainee_name": "A Kumar"})
     training = qdb.get_training(doc["id"])

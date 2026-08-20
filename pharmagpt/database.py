@@ -436,6 +436,47 @@ def init_db() -> None:
     _add_column_if_missing(conn, "qms_documents", "approval_quorum", "INTEGER DEFAULT NULL")
     conn.commit()
 
+    # ── Document Control redesign — immutable version architecture ──────────
+    # Defensive: same reason as every block above — a DB that already ran an
+    # earlier QMS_SCHEMA needs these columns/objects added explicitly.
+    # Additive only; no existing column is altered or dropped, no existing
+    # row is mutated. See qms_database.py's qms_document_versions comment
+    # and services/document_versioning.py.
+    _add_column_if_missing(conn, "qms_documents", "current_version_id", "INTEGER DEFAULT NULL")
+    _add_column_if_missing(conn, "qms_document_versions", "version_number", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "qms_document_versions", "parent_version_id", "INTEGER DEFAULT NULL")
+    _add_column_if_missing(conn, "qms_document_versions", "status", "TEXT NOT NULL DEFAULT 'draft'")
+    _add_column_if_missing(conn, "qms_document_versions", "workflow_instance_id", "INTEGER DEFAULT NULL")
+    _add_column_if_missing(conn, "qms_document_versions", "rejection_reason", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "qms_document_versions", "self_check_completed_at", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "qms_document_versions", "source_attachment_id", "INTEGER DEFAULT NULL")
+    _add_column_if_missing(conn, "qms_document_versions", "effective_date", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "qms_document_versions", "created_by_user_id", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "qms_workflow_instances", "document_version_id", "INTEGER DEFAULT NULL")
+    _add_column_if_missing(conn, "qms_workflow_template_steps", "quorum_eligible", "INTEGER NOT NULL DEFAULT 1")
+    _add_column_if_missing(conn, "qms_workflow_instance_steps", "quorum_eligible", "INTEGER NOT NULL DEFAULT 1")
+    _add_column_if_missing(conn, "qms_document_training", "document_version_id", "INTEGER DEFAULT NULL")
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS trg_document_versions_immutable_content
+        BEFORE UPDATE OF content_snapshot, version, version_number, change_summary,
+                           parent_version_id, created_by_user_id, document_id
+        ON qms_document_versions
+        WHEN OLD.status != 'draft'
+        BEGIN
+            SELECT RAISE(ABORT, 'Immutable document version: content cannot be modified once submitted');
+        END;
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS trg_document_versions_immutable_rejection_reason
+        BEFORE UPDATE OF rejection_reason
+        ON qms_document_versions
+        WHEN OLD.rejection_reason != ''
+        BEGIN
+            SELECT RAISE(ABORT, 'Immutable document version: rejection reason cannot be modified once recorded');
+        END;
+    """)
+    conn.commit()
+
     # ── Investigation Case Phase 2 (Investigation Tasks / Evidence / ─────────
     # Interviews / Summary capability additions) ──────────────────────────────
     # Additive columns only — qms_investigation_tasks itself is a brand new

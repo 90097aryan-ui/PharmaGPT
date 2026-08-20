@@ -129,7 +129,7 @@ QMS_SCHEMA = """
         department        TEXT    DEFAULT '',
         category          TEXT    DEFAULT '',
         version           TEXT    DEFAULT '1.0',
-        status            TEXT    DEFAULT 'Draft',   -- Draft, Under Review, Pending Approval, Effective, Under Revision, Obsolete
+        status            TEXT    DEFAULT 'Draft',   -- Draft, Under Review, Pending Approval, Approved, Effective, Under Revision, Obsolete
         effective_date    TEXT    DEFAULT '',
         review_date       TEXT    DEFAULT '',
         expiry_date       TEXT    DEFAULT '',
@@ -141,21 +141,85 @@ QMS_SCHEMA = """
         ai_review_data    TEXT    DEFAULT '{}',
         project_id        INTEGER DEFAULT NULL,
         superseded_by     INTEGER DEFAULT NULL,
+        current_version_id INTEGER DEFAULT NULL,      -- FK to qms_document_versions.id: the authoritative
+                                                        -- current version row (Document Control redesign —
+                                                        -- see services/document_versioning.py). Denormalized
+                                                        -- `content`/`version`/`status` above stay in sync with
+                                                        -- this row for existing list/dashboard/search queries,
+                                                        -- but qms_document_versions is the system of record.
         created_at        TEXT    DEFAULT (datetime('now')),
         updated_at        TEXT    DEFAULT (datetime('now')),
         FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
     );
 
+    -- Document Control redesign — authoritative, append-only version ledger.
+    -- Once a row's status leaves 'draft' it is immutable (enforced at three
+    -- layers: service functions never update a non-draft row; routes never
+    -- expose an edit path for one; trg_document_versions_immutable below
+    -- blocks it even via raw SQL — see services/document_versioning.py and
+    -- services/lifecycle_engine.py's QMS_DOCUMENT_VERSION registry entry).
     CREATE TABLE IF NOT EXISTS qms_document_versions (
-        id                INTEGER PRIMARY KEY AUTOINCREMENT,
-        document_id       INTEGER NOT NULL,
-        version           TEXT    NOT NULL DEFAULT '',
-        change_summary    TEXT    DEFAULT '',
-        content_snapshot  TEXT    DEFAULT '',
-        changed_by        TEXT    DEFAULT '',
-        created_at        TEXT    DEFAULT (datetime('now')),
-        FOREIGN KEY (document_id) REFERENCES qms_documents(id) ON DELETE CASCADE
+        id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+        document_id            INTEGER NOT NULL,
+        version                TEXT    NOT NULL DEFAULT '',
+        change_summary         TEXT    DEFAULT '',
+        content_snapshot       TEXT    DEFAULT '',
+        changed_by             TEXT    DEFAULT '',
+        created_at             TEXT    DEFAULT (datetime('now')),
+        version_number         TEXT    DEFAULT '',     -- canonical X.Y number (services/document_versioning.py);
+                                                         -- `version` above is kept identical for backward reads
+        parent_version_id      INTEGER DEFAULT NULL,    -- FK to the version this one was forked from (rejection
+                                                         -- or new revision cycle); NULL only for a document's
+                                                         -- very first version (0.1)
+        status                 TEXT    NOT NULL DEFAULT 'draft',  -- draft | under_review | review_rejected |
+                                                         -- pending_approval | approval_rejected | approved |
+                                                         -- effective | superseded  (lifecycle_engine.py
+                                                         -- QMS_DOCUMENT_VERSION registry governs transitions)
+                                                         -- CURRENT EDITABLE DRAFT = 'draft'; every other value
+                                                         -- is one of the spec's "IMMUTABLE" states.
+        workflow_instance_id   INTEGER DEFAULT NULL,    -- FK to qms_workflow_instances.id for this version's
+                                                         -- review/approval cycle (ties votes/audit to the
+                                                         -- exact version transitively)
+        rejection_reason       TEXT    DEFAULT '',      -- permanently associated with a review_rejected /
+                                                         -- approval_rejected version; never cleared or moved
+        self_check_completed_at TEXT   DEFAULT '',      -- Author Self-Check hard gate (per-version; never
+                                                         -- carried forward to a new version)
+        source_attachment_id   INTEGER DEFAULT NULL,    -- FK to qms_attachments.id when this version's content
+                                                         -- came from an "Upload Final Author Version" file
+        effective_date         TEXT    DEFAULT '',      -- set only on the version that actually became Effective
+        created_by_user_id     TEXT    DEFAULT '',
+        FOREIGN KEY (document_id) REFERENCES qms_documents(id) ON DELETE CASCADE,
+        FOREIGN KEY (parent_version_id) REFERENCES qms_document_versions(id)
     );
+    CREATE INDEX IF NOT EXISTS idx_qms_document_versions_document ON qms_document_versions(document_id);
+
+    -- Defense-in-depth (rule: no normal mechanism, including Super Admin,
+    -- may silently alter historical content), split into two precise
+    -- triggers rather than one blanket guard:
+    --
+    -- (1) Content identity is frozen the moment a version leaves 'draft'
+    --     for the first time and never legitimately changes again.
+    CREATE TRIGGER IF NOT EXISTS trg_document_versions_immutable_content
+    BEFORE UPDATE OF content_snapshot, version, version_number, change_summary,
+                       parent_version_id, created_by_user_id, document_id
+    ON qms_document_versions
+    WHEN OLD.status != 'draft'
+    BEGIN
+        SELECT RAISE(ABORT, 'Immutable document version: content cannot be modified once submitted');
+    END;
+    -- (2) rejection_reason is legitimately written exactly once, at the
+    --     moment a version transitions INTO review_rejected/approval_rejected
+    --     (i.e. while OLD.status is still 'under_review'/'pending_approval',
+    --     not yet 'draft'-excluded by trigger (1) above) — so its guard is
+    --     "never overwrite a reason that's already been recorded", not tied
+    --     to the draft/non-draft boundary at all.
+    CREATE TRIGGER IF NOT EXISTS trg_document_versions_immutable_rejection_reason
+    BEFORE UPDATE OF rejection_reason
+    ON qms_document_versions
+    WHEN OLD.rejection_reason != ''
+    BEGIN
+        SELECT RAISE(ABORT, 'Immutable document version: rejection reason cannot be modified once recorded');
+    END;
 
     CREATE TABLE IF NOT EXISTS qms_document_distribution (
         id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -178,6 +242,12 @@ QMS_SCHEMA = """
         trainer           TEXT    DEFAULT '',
         evidence_ref      TEXT    DEFAULT '',
         created_at        TEXT    DEFAULT (datetime('now')),
+        document_version_id INTEGER DEFAULT NULL,  -- Document Control redesign: the exact version this
+                                                     -- training assignment gates. Populated only for the
+                                                     -- version that reached 'approved' (training against a
+                                                     -- version that was rejected before approval has no
+                                                     -- regulatory value) — see services/document_versioning.py.
+                                                     -- NULL for training rows created before this redesign.
         FOREIGN KEY (document_id) REFERENCES qms_documents(id) ON DELETE CASCADE
     );
 
@@ -447,6 +517,15 @@ QMS_SCHEMA = """
         gate_status       TEXT    NOT NULL DEFAULT '',          -- record status set on completion
         approval_mode     TEXT    NOT NULL DEFAULT 'any',       -- any (first assigned approver decides) | quorum (N distinct approve votes required)
         required_quorum   INTEGER DEFAULT NULL,                 -- only meaningful when approval_mode='quorum'
+        quorum_eligible   INTEGER NOT NULL DEFAULT 1,           -- Document Control redesign: whether this step
+                                                                 -- may ever be snapshotted as quorum mode at
+                                                                 -- start_instance() time, regardless of a
+                                                                 -- record's own quorum override. Default 1
+                                                                 -- reproduces today's behaviour for every module
+                                                                 -- that never sets a quorum override; Document
+                                                                 -- Control's own seed sets this 0 on its Review
+                                                                 -- step so only the final Approval step is ever
+                                                                 -- quorum-gated (Review stays single-reviewer).
         UNIQUE (template_id, step_order),
         UNIQUE (template_id, step_key),
         FOREIGN KEY (template_id) REFERENCES qms_workflow_templates(id) ON DELETE CASCADE
@@ -463,6 +542,12 @@ QMS_SCHEMA = """
         current_step_order  INTEGER NOT NULL DEFAULT 1,
         started_at          TEXT    DEFAULT (datetime('now')),
         completed_at        TEXT    DEFAULT '',
+        document_version_id INTEGER DEFAULT NULL,   -- Document Control redesign only: FK to the exact
+                                                      -- qms_document_versions row this review/approval cycle
+                                                      -- belongs to. NULL for every other record_type (CAPA,
+                                                      -- Deviation, Change Control) — those have no version
+                                                      -- concept and are unaffected. Ties votes/audit to a
+                                                      -- specific version transitively (via this instance).
         FOREIGN KEY (template_id) REFERENCES qms_workflow_templates(id)
     );
     CREATE INDEX IF NOT EXISTS idx_qms_wf_instances_record ON qms_workflow_instances(record_type, record_id);
@@ -483,6 +568,7 @@ QMS_SCHEMA = """
         comments          TEXT    DEFAULT '',
         approval_mode     TEXT    NOT NULL DEFAULT 'any',       -- snapshotted from the template step at start_instance()
         required_quorum   INTEGER DEFAULT NULL,
+        quorum_eligible   INTEGER NOT NULL DEFAULT 1,           -- snapshotted from the template step
         FOREIGN KEY (instance_id) REFERENCES qms_workflow_instances(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_qms_wf_instance_steps ON qms_workflow_instance_steps(instance_id, step_order);

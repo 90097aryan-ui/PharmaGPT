@@ -14,13 +14,20 @@ live in qms_database.py and are accessed with record_type='document'.
 import json
 from pharmagpt.database import get_connection
 from pharmagpt.qms_database import generate_document_number
+from pharmagpt.services import document_versioning as dv
+from pharmagpt.services import lifecycle_engine
 
 
 # ── Documents ──────────────────────────────────────────────────────────────────
 
-def create_document(data: dict, *, company_id: str) -> dict:
+def create_document(data: dict, *, company_id: str, created_by_user_id: str = "") -> dict:
     """`company_id` must be the caller's authenticated tenant
-    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py."""
+    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py.
+    `created_by_user_id` (Document Control redesign) is used only to
+    populate the document's initial version row's own `created_by_user_id`
+    (see create_initial_version() below) — it is deliberately NOT stored on
+    qms_documents itself here, since a document-level creator column is
+    outside this redesign's scope."""
     conn = get_connection()
     doc_number = data.get("doc_number") or generate_document_number(
         data.get("doc_type", "SOP"), data.get("department", "")
@@ -54,6 +61,7 @@ def create_document(data: dict, *, company_id: str) -> dict:
     conn.commit()
     new_id = cur.lastrowid
     conn.close()
+    create_initial_version(new_id, data.get("content", ""), created_by_user_id)
     return get_document(new_id)
 
 
@@ -205,6 +213,121 @@ def get_versions(document_id: int) -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_version(version_id: int) -> dict | None:
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM qms_document_versions WHERE id = ?", (version_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_current_version(document_id: int) -> dict | None:
+    """The document's authoritative current version row, via
+    qms_documents.current_version_id. None for a document created before
+    this redesign that has never had a version created for it."""
+    conn = get_connection()
+    row = conn.execute(
+        """SELECT v.* FROM qms_document_versions v
+           JOIN qms_documents d ON d.current_version_id = v.id
+           WHERE d.id = ?""",
+        (document_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def _insert_version_row(document_id: int, *, version_number: str, parent_version_id: int | None,
+                         content_snapshot: str, created_by_user_id: str, change_summary: str = "") -> dict:
+    """Low-level insert only — always creates a 'draft' row. Never call this
+    directly to fork a rejected/effective version; use
+    services/document_versioning.py's orchestration functions, which also
+    update qms_documents.current_version_id and the parent version's own
+    status. `version`/`changed_by` are populated identically to
+    `version_number`/`created_by_user_id` for backward-compatible reads by
+    existing callers (services/qms_document_service.py's report generator,
+    the legacy 'versions' UI tab)."""
+    conn = get_connection()
+    cur = conn.execute(
+        """INSERT INTO qms_document_versions
+           (document_id, version, change_summary, content_snapshot, changed_by,
+            version_number, parent_version_id, status, created_by_user_id)
+           VALUES (?,?,?,?,?,?,?,'draft',?)""",
+        (document_id, version_number, change_summary, content_snapshot, created_by_user_id,
+         version_number, parent_version_id, created_by_user_id),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM qms_document_versions WHERE id = ?", (cur.lastrowid,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def create_initial_version(document_id: int, content: str, created_by_user_id: str) -> dict:
+    """A brand-new document's first version (0.1). Also points
+    qms_documents.current_version_id at it and mirrors content/version onto
+    the parent row so every existing list/dashboard/search query (which
+    reads qms_documents.content/.version directly) keeps working unchanged."""
+    version = _insert_version_row(
+        document_id, version_number=dv.first_version_number(), parent_version_id=None,
+        content_snapshot=content, created_by_user_id=created_by_user_id,
+    )
+    set_document_current_version(document_id, version["id"])
+    return version
+
+
+def set_document_current_version(document_id: int, version_id: int) -> None:
+    """The only function that updates qms_documents.current_version_id, and
+    keeps the legacy denormalized content/version columns mirroring the new
+    current version row — existing readers of qms_documents.content/.version
+    (DOCX export, KB publish, dashboards) never need to know this redesign
+    exists."""
+    version = get_version(version_id)
+    if not version:
+        raise ValueError(f"No such document version {version_id}")
+    conn = get_connection()
+    conn.execute(
+        "UPDATE qms_documents SET current_version_id = ?, version = ?, content = ?, updated_at = datetime('now') "
+        "WHERE id = ?",
+        (version_id, version["version_number"], version["content_snapshot"], document_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def transition_version_status(version_id: int, new_status: str, **extra_fields) -> dict:
+    """The only function permitted to change a qms_document_versions row's
+    status (or the handful of fields below the trigger boundary that are
+    legitimately still writable outside 'draft' — see qms_database.py's
+    trg_document_versions_immutable_* triggers for the DB-layer half of this
+    guarantee). Validates the transition against
+    lifecycle_engine.QMS_DOCUMENT_VERSION before writing anything —
+    service-layer guard, independent of and in addition to the DB trigger.
+
+    `extra_fields` may include: rejection_reason, effective_date,
+    workflow_instance_id, self_check_completed_at, source_attachment_id —
+    the columns the trigger does NOT freeze at the content/'draft' boundary,
+    because each is legitimately written exactly once, at the specific
+    transition that produces it (see each column's schema comment)."""
+    version = get_version(version_id)
+    if not version:
+        raise ValueError(f"No such document version {version_id}")
+    lifecycle_engine.validate_transition("QMS_DOCUMENT_VERSION", version["status"], new_status)
+
+    allowed_extra = {"rejection_reason", "effective_date", "workflow_instance_id",
+                      "self_check_completed_at", "source_attachment_id"}
+    updates, params = ["status = ?"], [new_status]
+    for k, v in extra_fields.items():
+        if k not in allowed_extra:
+            raise ValueError(f"'{k}' is not a field transition_version_status() may set")
+        updates.append(f"{k} = ?")
+        params.append(v)
+    params.append(version_id)
+
+    conn = get_connection()
+    conn.execute(f"UPDATE qms_document_versions SET {', '.join(updates)} WHERE id = ?", params)
+    conn.commit()
+    conn.close()
+    return get_version(version_id)
 
 
 # ── Distribution ───────────────────────────────────────────────────────────────

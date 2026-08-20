@@ -71,6 +71,38 @@ def test_risk_assessment_illegal_skip_rejected():
         lifecycle_engine.validate_transition("RISK_ASSESSMENT", "Closed", "In Review")
 
 
+# ── QMS_DOCUMENT_VERSION (Document Control redesign, Phase 1) ───────────────
+
+@pytest.mark.parametrize("current,requested", [
+    ("draft", "under_review"),
+    ("under_review", "review_rejected"),
+    ("under_review", "pending_approval"),
+    ("pending_approval", "approval_rejected"),
+    ("pending_approval", "approved"),
+    ("approved", "effective"),
+    ("effective", "superseded"),
+])
+def test_qms_document_version_legal_transitions(current, requested):
+    lifecycle_engine.validate_transition("QMS_DOCUMENT_VERSION", current, requested)
+
+
+@pytest.mark.parametrize("current,requested", [
+    ("draft", "effective"),                # cannot skip review/approval entirely
+    ("draft", "approved"),
+    ("review_rejected", "draft"),           # rejected version is terminal — a NEW version is created instead
+    ("review_rejected", "under_review"),
+    ("approval_rejected", "draft"),
+    ("approved", "draft"),
+    ("effective", "draft"),
+    ("effective", "approved"),
+    ("superseded", "effective"),            # superseded is terminal
+    ("superseded", "draft"),
+])
+def test_qms_document_version_illegal_transitions_rejected(current, requested):
+    with pytest.raises(lifecycle_engine.InvalidTransitionError):
+        lifecycle_engine.validate_transition("QMS_DOCUMENT_VERSION", current, requested)
+
+
 # ── Route-level: 409 on an illegal transition ────────────────────────────────
 
 def test_qualification_route_rejects_invalid_transition(client):

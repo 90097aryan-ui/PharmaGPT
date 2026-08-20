@@ -129,7 +129,11 @@ def test_document_versions_training_distribution_routes(client):
 
     r = client.post(f"/qms/documents/{did}/versions", json={"version": "1.1", "change_summary": "Update"})
     assert r.status_code == 201
-    assert client.get(f"/qms/documents/{did}/versions").get_json()[0]["version"] == "1.0"
+    # Document Control redesign (Phase 1): a brand-new document's version now
+    # starts at '0.1' (services/document_versioning.py), not the old static
+    # '1.0' — this snapshot captures whatever qms_documents.version was at
+    # snapshot time, i.e. '0.1', before this POST overwrote it to '1.1'.
+    assert client.get(f"/qms/documents/{did}/versions").get_json()[0]["version"] == "0.1"
 
     r = client.post(f"/qms/documents/{did}/training", json={"trainee_name": "A Kumar"})
     assert r.status_code == 201
