@@ -778,12 +778,29 @@ def _publish_effective_document_to_kb(document: dict) -> None:
 
 # ── Report / Export ────────────────────────────────────────────────────────────
 
+def _requested_version_id(did):
+    """?version_id=<id> (Document Control redesign) — export a specific
+    historical version instead of the document's live current state.
+    Validates it actually belongs to this document before use."""
+    raw = request.args.get("version_id")
+    if not raw:
+        return None
+    try:
+        version_id = int(raw)
+    except (TypeError, ValueError):
+        return None
+    version = qdb.get_version(version_id)
+    if not version or version["document_id"] != did:
+        return None
+    return version_id
+
+
 @bp.route("/<int:did>/report", methods=["GET"])
 def get_report(did):
     document = tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
     if not document:
         return jsonify({"error": "Not found"}), 404
-    md = svc.generate_report_markdown(did)
+    md = svc.generate_report_markdown(did, _requested_version_id(did))
     return jsonify({"markdown": md, "title": document.get("title", "")})
 
 
@@ -793,7 +810,7 @@ def export_docx(did):
     if not document:
         return jsonify({"error": "Not found"}), 404
     from pharmagpt.services.doc_exporter import markdown_to_docx
-    md = svc.generate_report_markdown(did)
+    md = svc.generate_report_markdown(did, _requested_version_id(did))
     docx_bytes = markdown_to_docx(md, document.get("doc_type", "SOP"), {
         "title": document.get("title", ""),
         "department": document.get("department", ""),

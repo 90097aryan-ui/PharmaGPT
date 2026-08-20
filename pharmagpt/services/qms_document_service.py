@@ -38,11 +38,31 @@ def ai_review_document(document_id: int) -> dict:
     return review_data
 
 
-def generate_report_markdown(document_id: int) -> str:
-    """Generate a markdown report for a document — used by both in-app preview/print and DOCX export."""
+def generate_report_markdown(document_id: int, version_id: int | None = None) -> str:
+    """Generate a markdown report for a document — used by both in-app
+    preview/print and DOCX export.
+
+    `version_id` (Document Control redesign): when given, renders that
+    SPECIFIC historical qms_document_versions row's frozen content/version
+    number/status instead of the document's live current state — the
+    export-a-historical-version path. The row is immutable once non-draft
+    (Phase 1), so this always reflects exactly what was actually
+    reviewed/approved/effective at that version, never today's live edits."""
     document = qdb.get_document(document_id)
     if not document:
         return "# Error: Document not found"
+
+    content = document.get("content", "")
+    version_label = document.get("version", "")
+    status_label = document.get("status", "")
+    historical_version = None
+    if version_id is not None:
+        historical_version = qdb.get_version(version_id)
+        if not historical_version or historical_version["document_id"] != document_id:
+            return "# Error: Version not found"
+        content = historical_version["content_snapshot"]
+        version_label = historical_version["version_number"]
+        status_label = historical_version["status"]
 
     versions = qdb.get_versions(document_id)
     training = qdb.get_training(document_id)
@@ -54,10 +74,15 @@ def generate_report_markdown(document_id: int) -> str:
     md.append(f"# {document.get('title', 'Untitled Document')}")
     md.append(f"## {document.get('doc_type', 'SOP')} — {document.get('doc_number', '')}")
     md.append("")
+    if historical_version:
+        md.append(f"_Historical version {version_label} ({status_label}) — this export reflects exactly "
+                   f"what this version contained; it is not the document's current live content._")
+        md.append("")
 
     md.append("---")
     md.append("| Field | Value |")
     md.append("|-------|-------|")
+    field_overrides = {"version": version_label, "status": status_label}
     for label, key in [
         ("Document Number", "doc_number"), ("Document Type", "doc_type"),
         ("Department", "department"), ("Category", "category"),
@@ -66,13 +91,13 @@ def generate_report_markdown(document_id: int) -> str:
         ("Expiry Date", "expiry_date"), ("Owner", "owner"),
         ("Reviewer", "reviewer"), ("Approver", "approver"),
     ]:
-        val = document.get(key, "")
+        val = field_overrides.get(key, document.get(key, ""))
         if val:
             md.append(f"| **{label}** | {val} |")
     md.append("")
 
     md.append("## Document Content")
-    md.append(document.get("content", "_No content drafted yet._"))
+    md.append(content or "_No content drafted yet._")
     md.append("")
 
     if versions:
