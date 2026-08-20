@@ -102,9 +102,23 @@ def _apply_document_status(record_id: int, status: str) -> None:
     from pharmagpt import qms_document_database as qdb
     from pharmagpt.routes.qms_documents import _publish_effective_document_to_kb
     mapped = "Draft" if status == "Rejected" else status
-    document = qdb.update_document(record_id, {"status": mapped})
-    if mapped == "Effective" and (document.get("content") or "").strip():
-        _publish_effective_document_to_kb(document)
+    if mapped == "Effective":
+        # Document Control redesign (Phase 4): quorum/approval achieved on
+        # the final Approval step means the version is 'approved', not yet
+        # Effective — it must hold there until the training gate (>=90%
+        # completion, >=1 trainee, never vacuously 100% at zero trainees)
+        # clears. try_clear_training_gate() checks immediately (covers the
+        # case training was already complete before approval finished) and
+        # is also called again from routes/qms_documents.py::update_training
+        # every time a training record's status changes, so the document
+        # flips to Effective the moment the last required training clears
+        # without requiring a second manual action.
+        qdb.update_document(record_id, {"status": "Approved"})
+        document = qdb.try_clear_training_gate(record_id)
+        if document and (document.get("content") or "").strip():
+            _publish_effective_document_to_kb(document)
+    else:
+        qdb.update_document(record_id, {"status": mapped})
 
 
 # Registry dispatch for "how does this record_type's status get written back"
@@ -137,9 +151,20 @@ def _apply_gate_status(record_type: str, record_id: int, status: str) -> None:
 # that knowledge lives entirely inside these three handler functions.
 
 def _document_version_lookup(record_id: int) -> int | None:
+    """Also responsible for forking a fresh revision draft if the
+    document's current version is already 'effective' — starting a new
+    review cycle against an Effective document (e.g. re-submitting for the
+    spec's '1.0 Effective -> 1.1 Revision Draft' case) must fork BEFORE the
+    new workflow instance is linked to a version, so the instance points at
+    the version that will actually be reviewed, not the outgoing Effective
+    one. See qms_document_database.start_new_revision()."""
     from pharmagpt import qms_document_database as qdb
     version = qdb.get_current_version(record_id)
-    return version["id"] if version else None
+    if not version:
+        return None
+    if version["status"] == "effective":
+        version = qdb.start_new_revision(record_id)
+    return version["id"]
 
 
 CURRENT_VERSION_LOOKUP: dict[str, Callable[[int], int | None]] = {
@@ -156,15 +181,19 @@ def _document_version_on_instance_start(record_id: int, instance: dict) -> None:
 
 
 def _document_version_on_step_approved(record_id: int, step: dict) -> None:
-    """Review accepted (the 'under_review' step specifically) advances the
-    version to pending_approval. The final approval step's own advance to
-    'approved'/'effective' is deliberately NOT handled here — that requires
-    the training-gate check (Document Control redesign, later phase) and is
-    wired in alongside it, not here."""
-    if step.get("step_key") != "under_review":
-        return
+    """Review accepted ('under_review') advances the version to
+    pending_approval. Quorum/approval achieved on the final Approval step
+    ('effective') advances it to 'approved' — NOT 'effective' yet; this
+    fires BEFORE _apply_gate_status() (see decide_step/_decide_quorum_step
+    call order) specifically so qms_document_database.try_clear_training_gate(),
+    called from _apply_document_status(), already sees the version as
+    'approved' and can check the training gate immediately rather than
+    requiring a second, separate action."""
     from pharmagpt import qms_document_database as qdb
-    qdb.advance_version_to_pending_approval(record_id)
+    if step.get("step_key") == "under_review":
+        qdb.advance_version_to_pending_approval(record_id)
+    elif step.get("step_key") == "effective":
+        qdb.advance_version_to_approved(record_id)
 
 
 def _document_version_on_step_rejected(record_id: int, reason: str) -> None:
@@ -391,10 +420,13 @@ def _decide_quorum_step(record_type: str, record_id: int, instance: dict, step: 
         wfdb.update_instance(instance["id"], {"status": "completed", "completed_at": now})
     else:
         wfdb.update_instance(instance["id"], {"current_step_order": step_order + 1})
-    _apply_gate_status(record_type, record_id, _status_after_completing(template_steps, step_order, last_order))
+    # Version hook runs BEFORE _apply_gate_status (Document Control redesign,
+    # Phase 4): the training-gate check inside _apply_document_status needs
+    # the version already moved to 'approved' to see it.
     version_approved_hook = VERSION_ON_STEP_APPROVED.get(record_type)
     if version_approved_hook:
         version_approved_hook(record_id, step)
+    _apply_gate_status(record_type, record_id, _status_after_completing(template_steps, step_order, last_order))
     audit.log(record_type, record_id, f"{step['step_name']}: Approved (quorum met {votes_cast}/{required})",
               reason=comments, detail=f"decided by {performed_by}")
     return get_instance_state(record_type, record_id)
@@ -475,10 +507,12 @@ def decide_step(record_type: str, record_id: int, step_order: int, decision: str
             wfdb.update_instance(instance["id"], {"status": "completed", "completed_at": now})
         else:
             wfdb.update_instance(instance["id"], {"current_step_order": step_order + 1})
-        _apply_gate_status(record_type, record_id, _status_after_completing(template_steps, step_order, last_order))
+        # Version hook runs BEFORE _apply_gate_status — see the identical
+        # comment in _decide_quorum_step above.
         version_approved_hook = VERSION_ON_STEP_APPROVED.get(record_type)
         if version_approved_hook:
             version_approved_hook(record_id, step)
+        _apply_gate_status(record_type, record_id, _status_after_completing(template_steps, step_order, last_order))
         audit.log(record_type, record_id, f"{step['step_name']}: Approved",
                    reason=comments, detail=f"decided by {performed_by}")
 

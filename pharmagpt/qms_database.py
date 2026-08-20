@@ -198,12 +198,21 @@ QMS_SCHEMA = """
     -- triggers rather than one blanket guard:
     --
     -- (1) Content identity is frozen the moment a version leaves 'draft'
-    --     for the first time and never legitimately changes again.
+    --     for the first time and never legitimately changes again — with
+    --     one narrow, well-defined exception: the version_number/version
+    --     columns ARE legitimately rewritten exactly once, at the specific
+    --     approved -> effective transition (services/document_versioning.py's
+    --     numbering rule bumps e.g. 0.3 -> 1.0 only once a version actually
+    --     becomes Effective, per the locked spec — see
+    --     qms_document_database.try_clear_training_gate()). content_snapshot
+    --     itself is never included in that same UPDATE statement, so it
+    --     stays fully frozen even during this one exception.
     CREATE TRIGGER IF NOT EXISTS trg_document_versions_immutable_content
     BEFORE UPDATE OF content_snapshot, version, version_number, change_summary,
                        parent_version_id, created_by_user_id, document_id
     ON qms_document_versions
     WHEN OLD.status != 'draft'
+         AND NOT (OLD.status = 'approved' AND NEW.status = 'effective')
     BEGIN
         SELECT RAISE(ABORT, 'Immutable document version: content cannot be modified once submitted');
     END;

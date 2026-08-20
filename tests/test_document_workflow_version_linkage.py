@@ -258,3 +258,90 @@ def test_deviation_reject_with_empty_comment_still_allowed(db_path):
         pytest.skip("DEVIATION_INVESTIGATION_V1 step 2 is not an approval step in this schema version")
     wfe.decide_step("deviation", dev["id"], 2, "reject", user_id="mgr-1", role="reviewer_qa",
                      performed_by="Manny", comments="")  # must NOT raise
+
+
+# ── Phase 4: starting a new revision cycle from an Effective document ────────
+# (services/qms_document_database.py::start_new_revision — the spec's
+# "Existing SOP: 1.0 Effective -> 1.1 Revision Draft -> ..." case, distinct
+# from reject_and_fork_version()'s mid-review/mid-approval forking.)
+
+def _drive_to_effective(doc):
+    """Full happy-path cycle: Draft -> ... -> Approved -> Effective (one
+    trainee completed to clear the Phase 4 training gate)."""
+    _start(doc)
+    _assign(doc, 2, "rev-1")
+    _decide(doc, 2, "approve", user_id="rev-1")
+    _assign(doc, 3, "appr-1")
+    wfe.decide_step("document", doc["id"], 3, "approve", user_id="appr-1", role="company_admin", performed_by="Al")
+    tid = qdb.add_training(doc["id"], {"trainee_name": "T1"})["id"]
+    qdb.update_training_status(tid, "Completed", "2026-01-01")
+    return qdb.try_clear_training_gate(doc["id"])
+
+
+def test_full_existing_sop_revision_cycle_matches_spec_worked_example(db_path):
+    """0.1 -> ... -> 1.0 Effective -> 1.1 -> rejected -> 1.2 -> rejected ->
+    1.3 -> approved -> training -> 2.0 Effective — the exact sequence named
+    in the locked spec."""
+    doc = _make_document()
+    _drive_to_effective(doc)
+    v_1_0 = qdb.get_current_version(doc["id"])
+    assert v_1_0["version_number"] == "1.0"
+    assert v_1_0["status"] == "effective"
+    assert qdb.get_document(doc["id"])["status"] == "Effective"
+
+    # 1.0 -> 1.1 (new revision cycle starts automatically on re-submission)
+    _start(doc)
+    v_1_1 = qdb.get_current_version(doc["id"])
+    assert v_1_1["version_number"] == "1.1"
+    assert v_1_1["status"] == "under_review"
+    assert qdb.get_version(v_1_0["id"])["status"] == "superseded"  # old Effective retained, read-only
+
+    # 1.1 -> 1.2 (review rejection)
+    _assign(doc, 2, "rev-1")
+    _decide(doc, 2, "reject", user_id="rev-1", comments="Needs more detail")
+    v_1_2 = qdb.get_current_version(doc["id"])
+    assert v_1_2["version_number"] == "1.2"
+    assert v_1_2["parent_version_id"] == v_1_1["id"]
+
+    # 1.2 -> 1.3 (approval rejection)
+    _start(doc)
+    _assign(doc, 2, "rev-1")
+    _decide(doc, 2, "approve", user_id="rev-1")
+    _assign(doc, 3, "appr-1")
+    wfe.decide_step("document", doc["id"], 3, "reject", user_id="appr-1", role="company_admin",
+                     performed_by="Al", comments="Numbers don't reconcile")
+    v_1_3 = qdb.get_current_version(doc["id"])
+    assert v_1_3["version_number"] == "1.3"
+    assert v_1_3["parent_version_id"] == v_1_2["id"]
+
+    # 1.3 -> approved -> training -> 2.0 Effective
+    _start(doc)
+    _assign(doc, 2, "rev-1")
+    _decide(doc, 2, "approve", user_id="rev-1")
+    _assign(doc, 3, "appr-1")
+    wfe.decide_step("document", doc["id"], 3, "approve", user_id="appr-1", role="company_admin", performed_by="Al")
+    assert qdb.get_document(doc["id"])["status"] == "Approved"
+    tid = qdb.add_training(doc["id"], {"trainee_name": "T2"})["id"]
+    qdb.update_training_status(tid, "Completed", "2026-01-01")
+    cleared = qdb.try_clear_training_gate(doc["id"])
+
+    assert cleared["status"] == "Effective"
+    v_2_0 = qdb.get_current_version(doc["id"])
+    assert v_2_0["version_number"] == "2.0"
+    assert v_2_0["status"] == "effective"
+    assert v_2_0["id"] == v_1_3["id"]  # design decision, see comment below
+
+    # No version number is ever reused across the whole chain. Design
+    # decision (flagged for explicit product sign-off in the implementation
+    # report, not silently assumed): the version whose content is actually
+    # approved is RENUMBERED in place when it becomes Effective (0.1's row
+    # becomes '1.0', 1.3's row becomes '2.0') rather than spawning a
+    # duplicate row with identical content under the new number — matching
+    # common real-world SOP practice where "0.3 approved" and "1.0
+    # Effective" name the same content, not two different snapshots. This
+    # is why only 4 distinct rows/numbers exist here, not 6: the original
+    # row (0.1->1.0) and the 1.3->2.0 row are each ONE row that changed
+    # label at its one legitimate renumbering point; only genuinely
+    # divergent content (1.1, 1.2, from real rejections) gets its own row.
+    numbers = [v["version_number"] for v in qdb.get_versions(doc["id"])]
+    assert len(numbers) == len(set(numbers)) == 4  # 1.0, 1.1, 1.2, 2.0

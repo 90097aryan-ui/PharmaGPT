@@ -456,18 +456,25 @@ def init_db() -> None:
     _add_column_if_missing(conn, "qms_workflow_template_steps", "quorum_eligible", "INTEGER NOT NULL DEFAULT 1")
     _add_column_if_missing(conn, "qms_workflow_instance_steps", "quorum_eligible", "INTEGER NOT NULL DEFAULT 1")
     _add_column_if_missing(conn, "qms_document_training", "document_version_id", "INTEGER DEFAULT NULL")
+    # DROP + CREATE (not IF NOT EXISTS) so an already-migrated DB always
+    # picks up the current trigger definition here, not whatever version of
+    # it existed the first time this code ran — SQLite has no ALTER TRIGGER.
+    conn.execute("DROP TRIGGER IF EXISTS trg_document_versions_immutable")  # pre-split, superseded name
+    conn.execute("DROP TRIGGER IF EXISTS trg_document_versions_immutable_content")
+    conn.execute("DROP TRIGGER IF EXISTS trg_document_versions_immutable_rejection_reason")
     conn.execute("""
-        CREATE TRIGGER IF NOT EXISTS trg_document_versions_immutable_content
+        CREATE TRIGGER trg_document_versions_immutable_content
         BEFORE UPDATE OF content_snapshot, version, version_number, change_summary,
                            parent_version_id, created_by_user_id, document_id
         ON qms_document_versions
         WHEN OLD.status != 'draft'
+             AND NOT (OLD.status = 'approved' AND NEW.status = 'effective')
         BEGIN
             SELECT RAISE(ABORT, 'Immutable document version: content cannot be modified once submitted');
         END;
     """)
     conn.execute("""
-        CREATE TRIGGER IF NOT EXISTS trg_document_versions_immutable_rejection_reason
+        CREATE TRIGGER trg_document_versions_immutable_rejection_reason
         BEFORE UPDATE OF rejection_reason
         ON qms_document_versions
         WHEN OLD.rejection_reason != ''

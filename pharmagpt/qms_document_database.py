@@ -294,6 +294,11 @@ def set_document_current_version(document_id: int, version_id: int) -> None:
     conn.close()
 
 
+_TRANSITION_EXTRA_FIELDS = {"rejection_reason", "effective_date", "workflow_instance_id",
+                            "self_check_completed_at", "source_attachment_id",
+                            "version", "version_number"}
+
+
 def transition_version_status(version_id: int, new_status: str, **extra_fields) -> dict:
     """The only function permitted to change a qms_document_versions row's
     status (or the handful of fields below the trigger boundary that are
@@ -307,17 +312,24 @@ def transition_version_status(version_id: int, new_status: str, **extra_fields) 
     workflow_instance_id, self_check_completed_at, source_attachment_id —
     the columns the trigger does NOT freeze at the content/'draft' boundary,
     because each is legitimately written exactly once, at the specific
-    transition that produces it (see each column's schema comment)."""
+    transition that produces it (see each column's schema comment).
+    `version`/`version_number` are additionally restricted to the
+    approved -> effective transition specifically (the one point a
+    version's number is legitimately finalized, e.g. 0.3 -> 1.0 — see
+    services/document_versioning.py's numbering rule and
+    try_clear_training_gate() below) — this mirrors the DB trigger's own
+    WHEN-clause exception exactly, service-layer side."""
     version = get_version(version_id)
     if not version:
         raise ValueError(f"No such document version {version_id}")
     lifecycle_engine.validate_transition("QMS_DOCUMENT_VERSION", version["status"], new_status)
+    if ("version" in extra_fields or "version_number" in extra_fields) and (
+            version["status"] != "approved" or new_status != "effective"):
+        raise ValueError("version/version_number may only be set on the approved -> effective transition")
 
-    allowed_extra = {"rejection_reason", "effective_date", "workflow_instance_id",
-                      "self_check_completed_at", "source_attachment_id"}
     updates, params = ["status = ?"], [new_status]
     for k, v in extra_fields.items():
-        if k not in allowed_extra:
+        if k not in _TRANSITION_EXTRA_FIELDS:
             raise ValueError(f"'{k}' is not a field transition_version_status() may set")
         updates.append(f"{k} = ?")
         params.append(v)
@@ -351,6 +363,34 @@ def advance_version_to_pending_approval(document_id: int) -> dict:
     if not version:
         raise ValueError(f"Document {document_id} has no current version")
     return transition_version_status(version["id"], "pending_approval")
+
+
+def start_new_revision(document_id: int) -> dict:
+    """Starting a fresh revision cycle against an already-Effective document
+    (the spec's 'Existing SOP: 1.0 Effective -> 1.1 Revision Draft' case —
+    distinct from reject_and_fork_version(), which forks mid-review/
+    mid-approval, not from an Effective version). The outgoing Effective
+    version is marked 'superseded' (still fully retained, still read-only —
+    never 'effective' again, since a document has at most one Effective
+    version at a time) and a new Draft version is forked from it via
+    services/document_versioning.py's next_revision_number() (X.0 -> X.1).
+    Returns the new draft version."""
+    current = get_current_version(document_id)
+    if not current:
+        raise ValueError(f"Document {document_id} has no current version")
+    if current["status"] != "effective":
+        raise ValueError(f"Version {current['id']} is '{current['status']}', not 'effective' — "
+                          f"only an Effective version can start a new revision cycle")
+    transition_version_status(current["id"], "superseded")
+
+    next_number = dv.next_revision_number(current["version_number"])
+    new_version = _insert_version_row(
+        document_id, version_number=next_number, parent_version_id=current["id"],
+        content_snapshot=current["content_snapshot"], created_by_user_id=current["created_by_user_id"],
+        change_summary=f"New revision cycle started from Effective version {current['version_number']}",
+    )
+    set_document_current_version(document_id, new_version["id"])
+    return new_version
 
 
 def reject_and_fork_version(document_id: int, rejection_reason: str) -> dict:
@@ -522,14 +562,25 @@ def acknowledge_distribution(dist_id: int, acknowledged_date: str) -> dict | Non
 # ── Training ───────────────────────────────────────────────────────────────────
 
 def add_training(document_id: int, data: dict) -> dict:
+    """`document_version_id` (Document Control redesign) is always
+    stamped with whatever the document's CURRENT version is at the moment
+    the training row is created — never editable afterward. This is what
+    makes "rejected-version training cannot clear a newer version" true
+    with no special-case logic: if a rejection later forks a new version,
+    document_version_id already points at the (now superseded) version
+    these trainees were assigned against, and a fresh training round tied
+    to the new version has to be created before its own gate can clear."""
+    current_version = get_current_version(document_id)
     conn = get_connection()
     cur = conn.execute(
-        """INSERT INTO qms_document_training (document_id, trainee_name, role, training_status, training_date, trainer, evidence_ref)
-           VALUES (?,?,?,?,?,?,?)""",
+        """INSERT INTO qms_document_training
+           (document_id, trainee_name, role, training_status, training_date, trainer, evidence_ref, document_version_id)
+           VALUES (?,?,?,?,?,?,?,?)""",
         (
             document_id, data.get("trainee_name", ""), data.get("role", ""),
             data.get("training_status", "Pending"), data.get("training_date", ""),
             data.get("trainer", ""), data.get("evidence_ref", ""),
+            current_version["id"] if current_version else None,
         ),
     )
     conn.commit()
@@ -569,3 +620,83 @@ def update_training_status(training_id: int, training_status: str, training_date
     row = conn.execute("SELECT * FROM qms_document_training WHERE id = ?", (training_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+# ── Training gate (Document Control redesign, Phase 4) ──────────────────────
+# The SOP must not become Effective unless >=1 trainee is assigned AND
+# training_completion >= 90% for that specific version. Zero trainees is
+# NEVER treated as 100% — training_completion_pct() returns None (not 0.0
+# or 100.0) when no trainee rows exist for the version, and
+# training_gate_status()/try_clear_training_gate() both treat None as "not
+# cleared", never as vacuously passing.
+
+TRAINING_GATE_THRESHOLD_PCT = 90.0
+
+
+def training_completion_pct(document_version_id: int) -> float | None:
+    """None (not 0.0) when zero trainees are assigned to this version —
+    callers must never treat that as a passing percentage."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT training_status FROM qms_document_training WHERE document_version_id = ?",
+        (document_version_id,),
+    ).fetchall()
+    conn.close()
+    if not rows:
+        return None
+    completed = sum(1 for r in rows if r["training_status"] == "Completed")
+    return (completed / len(rows)) * 100.0
+
+
+def training_gate_status(document_version_id: int) -> dict:
+    """{'completion_pct', 'trainee_count', 'cleared', 'threshold_pct'} — the
+    single source of truth the UI and the gate-check function both read, so
+    they can never disagree about whether the gate has cleared."""
+    conn = get_connection()
+    trainee_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM qms_document_training WHERE document_version_id = ?",
+        (document_version_id,),
+    ).fetchone()["n"]
+    conn.close()
+    pct = training_completion_pct(document_version_id)
+    cleared = trainee_count > 0 and pct is not None and pct >= TRAINING_GATE_THRESHOLD_PCT
+    return {"completion_pct": pct, "trainee_count": trainee_count, "cleared": cleared,
+            "threshold_pct": TRAINING_GATE_THRESHOLD_PCT}
+
+
+def advance_version_to_approved(document_id: int) -> dict:
+    """Quorum/approval achieved on the final Approval step: the version
+    moves pending_approval -> approved (NOT effective — see
+    try_clear_training_gate() below for the training-gated final step)."""
+    version = get_current_version(document_id)
+    if not version:
+        raise ValueError(f"Document {document_id} has no current version")
+    return transition_version_status(version["id"], "approved")
+
+
+def try_clear_training_gate(document_id: int) -> dict | None:
+    """If the document's current version is 'approved' and its training
+    gate has cleared, transitions the version to 'effective' (stamping
+    effective_date), updates qms_documents.status to 'Effective', and
+    returns the updated document — the caller (services/workflow_engine.py's
+    _apply_document_status, or routes/qms_documents.py's update_training)
+    is responsible for any KB-publish side effect. Returns None (no-op) if
+    the version isn't 'approved' yet or the gate hasn't cleared — safe to
+    call speculatively any time a training record's status changes."""
+    version = get_current_version(document_id)
+    if not version or version["status"] != "approved":
+        return None
+    gate = training_gate_status(version["id"])
+    if not gate["cleared"]:
+        return None
+    from datetime import date
+    effective_date = date.today().isoformat()
+    # The version's number is finalized here — e.g. 0.3 -> 1.0, or 1.3 -> 2.0
+    # — this is the one point in the whole lifecycle a version's number is
+    # legitimately rewritten (see transition_version_status()'s guard and
+    # qms_database.py's matching DB-trigger exception).
+    final_number = dv.next_version_number(version["version_number"], "effective")
+    transition_version_status(version["id"], "effective", effective_date=effective_date,
+                               version=final_number, version_number=final_number)
+    return update_document(document_id, {"status": "Effective", "effective_date": effective_date,
+                                          "version": final_number})

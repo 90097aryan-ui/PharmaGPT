@@ -24,6 +24,16 @@ def _kb_rows_for(source_type: str, source_id: int):
     return [row] if row else []
 
 
+def _clear_training_gate(client, did):
+    """Document Control redesign (Phase 4): quorum/approval achieved now
+    holds a document at 'Approved', not 'Effective', until the training
+    gate clears (>=90% completion, >=1 trainee). Existing tests that expect
+    'Approved' to reach 'Effective' immediately need one trainee completed
+    first — this helper does exactly that, nothing more."""
+    t = client.post(f"/qms/documents/{did}/training", json={"trainee_name": "KB Sync Test Trainee"}).get_json()
+    client.put(f"/qms/documents/training/{t['id']}", json={"training_status": "Completed", "training_date": "2026-01-01"})
+
+
 # ── Document Control ─────────────────────────────────────────────────────────
 
 def test_effective_document_control_record_is_published_to_kb(client):
@@ -33,6 +43,9 @@ def test_effective_document_control_record_is_published_to_kb(client):
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     resp = client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
     assert resp.status_code == 201
+    assert client.get(f"/qms/documents/{doc['id']}").get_json()["status"] == "Approved"
+    _clear_training_gate(client, doc["id"])
+    assert client.get(f"/qms/documents/{doc['id']}").get_json()["status"] == "Effective"
 
     rows = _kb_rows_for("document", doc["id"])
     assert len(rows) == 1
@@ -45,15 +58,24 @@ def test_document_control_republish_updates_the_same_kb_row(client):
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v1"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _clear_training_gate(client, doc["id"])
     first_rows = _kb_rows_for("document", doc["id"])
     assert len(first_rows) == 1
     kb_id = first_rows[0]["id"]
 
-    # Send it back to Draft, revise, and re-approve — Effective a second time.
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Rejected"})
+    # Send the Effective document into a new revision cycle, revise, and
+    # re-approve — Effective a second time. Document Control redesign: any
+    # rejection now requires a comment, and "Rejected" called on an already-
+    # Effective document starts a fresh revision cycle (forks a new Draft
+    # version, e.g. 0.1 -> ... -> 1.0 Effective -> 1.1 Revision Draft) rather
+    # than editing the Effective version in place.
+    r = client.post(f"/qms/documents/{doc['id']}/approval",
+                     json={"action": "Rejected", "comments": "Starting revision for updated procedure"})
+    assert r.status_code == 201, r.get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v2 — revised"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _clear_training_gate(client, doc["id"])
 
     rows = _kb_rows_for("document", doc["id"])
     assert len(rows) == 1, "re-approval must update the existing KB row, not create a second one"
@@ -66,6 +88,7 @@ def test_document_without_content_is_not_published_to_kb(client):
     doc = client.post("/qms/documents", json={"title": "Empty Draft SOP", "doc_type": "SOP"}).get_json()
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _clear_training_gate(client, doc["id"])
 
     assert _kb_rows_for("document", doc["id"]) == []
 
@@ -162,6 +185,7 @@ def test_consolidated_dq_fat_sat_are_published_to_kb(client, doc_type, expected_
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     resp = client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
     assert resp.status_code == 201
+    _clear_training_gate(client, doc["id"])
 
     rows = _kb_rows_for("document", doc["id"])
     assert len(rows) == 1
@@ -175,12 +199,15 @@ def test_republish_snapshots_the_outgoing_version_instead_of_discarding_it(clien
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v1"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _clear_training_gate(client, doc["id"])
     kb_row = _kb_rows_for("document", doc["id"])[0]
 
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Rejected"})
+    client.post(f"/qms/documents/{doc['id']}/approval",
+                json={"action": "Rejected", "comments": "Starting revision"})
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v2 — revised"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _clear_training_gate(client, doc["id"])
 
     versions = db.get_kb_versions(kb_row["id"])
     assert len(versions) == 1
@@ -194,6 +221,7 @@ def test_auto_published_kb_document_has_creator_attribution(client):
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _clear_training_gate(client, doc["id"])
 
     kb_row = _kb_rows_for("document", doc["id"])[0]
     assert kb_row["created_by"] == "Test User"  # conftest's fake authenticated tenant
@@ -205,6 +233,7 @@ def test_auto_publish_logs_uploaded_audit_entry(client):
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _clear_training_gate(client, doc["id"])
 
     kb_row = _kb_rows_for("document", doc["id"])[0]
     entries = client.get(f"/qms/kb_document/{kb_row['id']}/audit-trail").get_json()
@@ -217,12 +246,15 @@ def test_republish_logs_version_created_and_updated_audit_entries(client):
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v1"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _clear_training_gate(client, doc["id"])
     kb_row = _kb_rows_for("document", doc["id"])[0]
 
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Rejected"})
+    client.post(f"/qms/documents/{doc['id']}/approval",
+                json={"action": "Rejected", "comments": "Starting revision"})
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v2 — revised"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _clear_training_gate(client, doc["id"])
 
     entries = client.get(f"/qms/kb_document/{kb_row['id']}/audit-trail").get_json()
     assert [e["action"] for e in entries] == ["Uploaded", "Version created", "Updated"]

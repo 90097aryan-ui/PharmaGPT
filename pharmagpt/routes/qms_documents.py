@@ -294,6 +294,23 @@ def get_training(did):
     return jsonify(qdb.get_training(did))
 
 
+@bp.route("/<int:did>/training/gate", methods=["GET"])
+def get_training_gate(did):
+    """Document Control redesign (Phase 4): computed training-gate status
+    for the document's CURRENT version — completion percentage, trainee
+    count, whether the >=90%-with->=1-trainee gate has cleared. The single
+    source of truth try_clear_training_gate() itself reads, so the UI can
+    never show a percentage that disagrees with what actually gates
+    Effective."""
+    document = tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
+    if not document:
+        return jsonify({"error": "Not found"}), 404
+    version = qdb.get_current_version(did)
+    if not version:
+        return jsonify({"error": "This document has no current version"}), 404
+    return jsonify(qdb.training_gate_status(version["id"]))
+
+
 @bp.route("/<int:did>/training", methods=["POST"])
 def add_training(did):
     if not tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id):
@@ -337,6 +354,14 @@ def update_training(tid):
             record_type="document", record_id=existing["document_id"],
             old_status=existing.get("training_status", ""), new_status="Completed",
         )
+        # Document Control redesign (Phase 4): the training gate may have
+        # just cleared with this exact update — re-check immediately rather
+        # than requiring a separate manual "make Effective" action. No-op
+        # (returns None) unless the document's current version is 'approved'
+        # and >=90% of its (>=1) assigned trainees are now Completed.
+        cleared_document = qdb.try_clear_training_gate(existing["document_id"])
+        if cleared_document and (cleared_document.get("content") or "").strip():
+            _publish_effective_document_to_kb(cleared_document)
     return jsonify(entry)
 
 

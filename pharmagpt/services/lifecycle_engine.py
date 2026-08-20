@@ -27,19 +27,32 @@ from pharmagpt.services import urs_lifecycle
 # ── QMS Document Control (SOP, Protocol, Specification, ..., and — Phase 3 —
 # DQ/FAT/SAT once consolidated per services/lifecycle_engine.py's DQ/FAT/SAT
 # consolidation, see routes/qms_documents.py) ────────────────────────────────
-# Status vocabulary and the "Draft/Under Review/Pending Approval/Effective/
-# Under Revision/Obsolete" sequence come from qms_database.py's own schema
-# comment (qms_documents.status). Under Review -> Effective is reachable
-# directly (the "Approved" action always maps straight to Effective, matching
-# existing behaviour/tests — Pending Approval is an optional sub-step, not a
-# mandatory gate, exactly like URS's own PENDING_APPROVAL). "Rejected" (->
-# Draft) is legal from Under Review, Pending Approval, *and* Effective —
+# Status vocabulary and the "Draft/Under Review/Pending Approval/Approved/
+# Effective/Under Revision/Obsolete" sequence come from qms_database.py's own
+# schema comment (qms_documents.status). Under Review -> Effective is
+# reachable directly for older/other callers that don't route through the
+# training gate (Pending Approval is an optional sub-step, not a mandatory
+# gate, exactly like URS's own PENDING_APPROVAL). "Rejected" (-> Draft) is
+# legal from Under Review, Pending Approval, *and* Effective —
 # tests/test_kb_sync.py's republish test sends an already-Effective document
 # back to Draft via "Rejected" to model a post-approval correction cycle.
+#
+# "Approved" (Document Control redesign, Phase 4) is additive: quorum/
+# approval achieved on the final Approval step holds here, not at Effective,
+# until the training gate clears (services/workflow_engine.py's
+# _apply_document_status -> qms_document_database.try_clear_training_gate).
+# Reachable from Under Review (today's template's actual gate_status
+# sequence, see DOCUMENT_WORKFLOW_V1's seed — "Pending Approval" is not
+# reachable via this template) and from Pending Approval (for a future
+# template that does use that stage). Only ever advances to Effective —
+# by the time status reaches Approved, the approval step is already
+# decided, so there's no "reject back to Draft" transition out of it via
+# the normal workflow.
 _QMS_DOCUMENT_TRANSITIONS: dict[str, set[str]] = {
     "Draft":             {"Under Review"},
-    "Under Review":      {"Pending Approval", "Effective", "Draft"},
-    "Pending Approval":  {"Effective", "Draft"},
+    "Under Review":      {"Pending Approval", "Approved", "Effective", "Draft"},
+    "Pending Approval":  {"Approved", "Effective", "Draft"},
+    "Approved":          {"Effective"},
     "Effective":         {"Under Revision", "Obsolete", "Draft"},
     "Under Revision":    {"Under Review", "Draft", "Obsolete"},
     "Obsolete":          set(),
