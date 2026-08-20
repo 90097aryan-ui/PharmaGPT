@@ -121,6 +121,16 @@ def update_document(did):
                            reason="Obsolete documents are immutable")
         return jsonify({"error": "This document is Obsolete and cannot be edited"}), 409
     data = request.get_json() or {}
+    # Configurable quorum approval: a positive integer requires that many
+    # distinct Approver votes on this document's next review/approval steps
+    # (services/workflow_engine.py::start_instance's default_quorum); null
+    # reverts to the existing single-decider 'any' behaviour. Snapshotted
+    # onto the workflow instance only when the *next* review is started, so
+    # changing this never retroactively alters a review already in progress.
+    if "approval_quorum" in data:
+        aq = data.get("approval_quorum")
+        if aq is not None and (not isinstance(aq, int) or isinstance(aq, bool) or aq < 1):
+            return jsonify({"error": "approval_quorum must be a positive integer or null"}), 400
     updated = qdb.update_document(did, data)
     audit.log("document", did, "Updated", old=existing, new=updated)
     return jsonify(updated)
@@ -312,11 +322,13 @@ def get_workflow(did):
 
 @bp.route("/<int:did>/workflow/start", methods=["POST"])
 def start_workflow(did):
-    if not _record_scoped_or_404(did):
+    document = _record_scoped_or_404(did)
+    if not document:
         return jsonify({"error": "Not found"}), 404
     sig = tenancy.signing_identity(g.tenant)
     try:
-        state = wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, did, g.tenant.company_id, sig["performed_by"])
+        state = wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, did, g.tenant.company_id, sig["performed_by"],
+                                    default_quorum=document.get("approval_quorum"))
     except wfe.WorkflowError as e:
         audit.log_failure("document", did, "Workflow start blocked", reason=str(e))
         return jsonify({"error": str(e)}), 409
@@ -460,7 +472,8 @@ def submit_approval(did):
     else:
         try:
             if not wfdb.get_active_instance(RECORD_TYPE, did):
-                wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, did, g.tenant.company_id, sig["performed_by"])
+                wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, did, g.tenant.company_id, sig["performed_by"],
+                                    default_quorum=document.get("approval_quorum"))
             state = wfe.get_instance_state(RECORD_TYPE, did)
             instance = state["instance"]
             if not instance or instance["status"] != "in_progress":

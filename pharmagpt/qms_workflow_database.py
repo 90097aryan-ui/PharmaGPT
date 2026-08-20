@@ -134,17 +134,24 @@ def update_instance(instance_id: int, data: dict) -> None:
 
 # ── Instance steps ───────────────────────────────────────────────────────────
 
-def create_instance_step(instance_id: int, template_step: dict) -> dict:
+def create_instance_step(instance_id: int, template_step: dict, *,
+                          approval_mode: str = "any", required_quorum: int | None = None) -> dict:
+    """`approval_mode`/`required_quorum` are snapshotted onto the instance step
+    at creation time (mirrors required_quorum's role in start_instance()) so a
+    later change to a document's approval_quorum never retroactively alters a
+    review already in progress. Defaults reproduce the pre-quorum 'any one of'
+    behaviour exactly — every caller that doesn't pass them is unaffected."""
     conn = get_connection()
     cur = conn.execute(
         """INSERT INTO qms_workflow_instance_steps
            (instance_id, template_step_id, step_order, step_key, step_name, step_type,
-            eligible_roles, gate_status, status)
-           VALUES (?,?,?,?,?,?,?,?, 'pending')""",
+            eligible_roles, gate_status, status, approval_mode, required_quorum)
+           VALUES (?,?,?,?,?,?,?,?, 'pending', ?, ?)""",
         (
             instance_id, template_step["id"], template_step["step_order"],
             template_step["step_key"], template_step["step_name"], template_step["step_type"],
             template_step["eligible_roles"], template_step["gate_status"],
+            approval_mode, required_quorum,
         ),
     )
     conn.commit()
@@ -215,6 +222,52 @@ def get_step_approvers(instance_step_id: int) -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ── Quorum votes (Document Control configurable approval quorum) ────────────
+# Only written/read for instance steps with approval_mode='quorum' — every
+# other step ('any' mode, all of CAPA/Deviation/Change Control today) never
+# touches this table. See services/workflow_engine.py's quorum branch of
+# decide_step().
+
+def record_vote(instance_step_id: int, user_id: str, decision: str, reason: str, company_id: str | None) -> dict:
+    conn = get_connection()
+    cur = conn.execute(
+        """INSERT INTO qms_workflow_step_votes (instance_step_id, user_id, decision, reason, company_id)
+           VALUES (?,?,?,?,?)""",
+        (instance_step_id, user_id, decision, reason, company_id or ""),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM qms_workflow_step_votes WHERE id = ?", (cur.lastrowid,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def get_votes(instance_step_id: int) -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM qms_workflow_step_votes WHERE instance_step_id = ? ORDER BY voted_at ASC",
+        (instance_step_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def has_voted(instance_step_id: int, user_id: str) -> bool:
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT 1 FROM qms_workflow_step_votes WHERE instance_step_id = ? AND user_id = ?",
+        (instance_step_id, user_id),
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
+def clear_votes(instance_step_id: int) -> None:
+    conn = get_connection()
+    conn.execute("DELETE FROM qms_workflow_step_votes WHERE instance_step_id = ?", (instance_step_id,))
+    conn.commit()
+    conn.close()
 
 
 # ── Universal Workflow Inbox (Problem 1/7) ───────────────────────────────────

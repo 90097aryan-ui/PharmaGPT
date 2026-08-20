@@ -104,7 +104,7 @@ def update_document(document_id: int, data: dict) -> dict | None:
     fields = [
         "doc_type", "title", "department", "category", "version", "status",
         "effective_date", "review_date", "expiry_date", "superseded_date", "owner", "reviewer", "approver",
-        "content", "project_id",
+        "content", "project_id", "approval_quorum",
     ]
     updates, params = [], []
     for f in fields:

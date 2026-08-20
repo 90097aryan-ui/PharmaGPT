@@ -437,14 +437,16 @@ QMS_SCHEMA = """
     );
 
     CREATE TABLE IF NOT EXISTS qms_workflow_template_steps (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        template_id     INTEGER NOT NULL,
-        step_order      INTEGER NOT NULL,
-        step_key        TEXT    NOT NULL,
-        step_name       TEXT    NOT NULL DEFAULT '',
-        step_type       TEXT    NOT NULL DEFAULT 'activity',  -- approval | activity
-        eligible_roles  TEXT    NOT NULL DEFAULT '',          -- CSV of platform roles
-        gate_status     TEXT    NOT NULL DEFAULT '',          -- record status set on completion
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id       INTEGER NOT NULL,
+        step_order        INTEGER NOT NULL,
+        step_key          TEXT    NOT NULL,
+        step_name         TEXT    NOT NULL DEFAULT '',
+        step_type         TEXT    NOT NULL DEFAULT 'activity',  -- approval | activity
+        eligible_roles    TEXT    NOT NULL DEFAULT '',          -- CSV of platform roles
+        gate_status       TEXT    NOT NULL DEFAULT '',          -- record status set on completion
+        approval_mode     TEXT    NOT NULL DEFAULT 'any',       -- any (first assigned approver decides) | quorum (N distinct approve votes required)
+        required_quorum   INTEGER DEFAULT NULL,                 -- only meaningful when approval_mode='quorum'
         UNIQUE (template_id, step_order),
         UNIQUE (template_id, step_key),
         FOREIGN KEY (template_id) REFERENCES qms_workflow_templates(id) ON DELETE CASCADE
@@ -479,6 +481,8 @@ QMS_SCHEMA = """
         decided_by        TEXT    DEFAULT '',
         decided_at        TEXT    DEFAULT '',
         comments          TEXT    DEFAULT '',
+        approval_mode     TEXT    NOT NULL DEFAULT 'any',       -- snapshotted from the template step at start_instance()
+        required_quorum   INTEGER DEFAULT NULL,
         FOREIGN KEY (instance_id) REFERENCES qms_workflow_instances(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_qms_wf_instance_steps ON qms_workflow_instance_steps(instance_id, step_order);
@@ -492,6 +496,24 @@ QMS_SCHEMA = """
         FOREIGN KEY (instance_step_id) REFERENCES qms_workflow_instance_steps(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_qms_wf_step_approvers ON qms_workflow_step_approvers(instance_step_id);
+
+    -- Configurable-quorum voting (Document Control): one row per distinct
+    -- approver's decision on a quorum-mode instance step. Only used when the
+    -- owning qms_workflow_instance_steps.approval_mode = 'quorum' — 'any'-mode
+    -- steps (every other module, and Document Control by default) never write
+    -- here. UNIQUE guards against the same approver voting twice on one step.
+    CREATE TABLE IF NOT EXISTS qms_workflow_step_votes (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        instance_step_id  INTEGER NOT NULL,
+        user_id           TEXT    NOT NULL,
+        decision          TEXT    NOT NULL,  -- approve | reject
+        reason            TEXT    DEFAULT '',
+        company_id        TEXT    DEFAULT '',
+        voted_at          TEXT    DEFAULT (datetime('now')),
+        UNIQUE (instance_step_id, user_id),
+        FOREIGN KEY (instance_step_id) REFERENCES qms_workflow_instance_steps(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_wf_step_votes ON qms_workflow_step_votes(instance_step_id);
 
     -- ── Deviation Workflow Builder (Deviation UI & Workflow Refactor) ────────
     -- Draft-time, per-deviation configuration of the Review chain (steps that

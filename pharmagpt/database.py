@@ -423,6 +423,19 @@ def init_db() -> None:
     _add_column_if_missing(conn, "qms_workflow_instance_steps", "eligible_roles", "TEXT NOT NULL DEFAULT ''")
     conn.commit()
 
+    # ── Configurable quorum approval (Document Control) ───────────────────────
+    # Defensive: same reason as eligible_roles above — a DB that already ran
+    # an earlier QMS_SCHEMA needs these columns added explicitly. Default
+    # ('any' / NULL) reproduces today's single-decider behaviour exactly, so
+    # every existing workflow (CAPA, Deviation, Change Control, and Document
+    # Control documents with no approval_quorum override) is unaffected.
+    _add_column_if_missing(conn, "qms_workflow_template_steps", "approval_mode", "TEXT NOT NULL DEFAULT 'any'")
+    _add_column_if_missing(conn, "qms_workflow_template_steps", "required_quorum", "INTEGER DEFAULT NULL")
+    _add_column_if_missing(conn, "qms_workflow_instance_steps", "approval_mode", "TEXT NOT NULL DEFAULT 'any'")
+    _add_column_if_missing(conn, "qms_workflow_instance_steps", "required_quorum", "INTEGER DEFAULT NULL")
+    _add_column_if_missing(conn, "qms_documents", "approval_quorum", "INTEGER DEFAULT NULL")
+    conn.commit()
+
     # ── Investigation Case Phase 2 (Investigation Tasks / Evidence / ─────────
     # Interviews / Summary capability additions) ──────────────────────────────
     # Additive columns only — qms_investigation_tasks itself is a brand new

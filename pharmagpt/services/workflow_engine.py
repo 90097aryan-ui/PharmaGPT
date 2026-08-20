@@ -137,6 +137,14 @@ def get_instance_state(record_type: str, record_id: int) -> dict:
     steps = wfdb.get_instance_steps(instance["id"])
     for s in steps:
         s["approvers"] = wfdb.get_step_approvers(s["id"])
+        # Configurable quorum approval (Document Control): additive fields,
+        # only populated for approval_mode='quorum' steps — every 'any'-mode
+        # step (every other module, and Document Control by default) keeps
+        # exactly its pre-quorum response shape.
+        if s.get("approval_mode") == "quorum":
+            votes = wfdb.get_votes(s["id"])
+            s["votes"] = votes
+            s["votes_cast"] = sum(1 for v in votes if v["decision"] == "approve")
     return {"instance": instance, "steps": steps}
 
 
@@ -163,11 +171,18 @@ def is_unlocked(record_type: str, record_id: int, unlock_step_key: str) -> tuple
 
 
 def start_instance(workflow_key: str, record_type: str, record_id: int,
-                    company_id: str | None, performed_by: str) -> dict:
+                    company_id: str | None, performed_by: str, *,
+                    default_quorum: int | None = None) -> dict:
     """Instantiate a fresh workflow run for a record (e.g. on 'Submit for
     Review'). Step 1 is an 'activity' step representing the submission
     itself and is completed immediately by the caller; current_step_order
-    advances to step 2."""
+    advances to step 2.
+
+    `default_quorum` (Document Control only — every other caller omits it):
+    when given and > 1, every 'approval' step in this instance is snapshotted
+    as approval_mode='quorum' requiring that many distinct approve votes
+    (services/workflow_engine.py's decide_step()); omitted or <= 1 reproduces
+    today's single-decider 'any' mode exactly."""
     template = wfdb.get_template_by_key(workflow_key)
     if not template:
         raise WorkflowError(f"Unknown workflow template '{workflow_key}'")
@@ -181,7 +196,12 @@ def start_instance(workflow_key: str, record_type: str, record_id: int,
 
     instance = wfdb.create_instance(template["id"], record_type, record_id, company_id)
     for t_step in template_steps:
-        wfdb.create_instance_step(instance["id"], t_step)
+        use_quorum = t_step["step_type"] == "approval" and default_quorum and default_quorum > 1
+        wfdb.create_instance_step(
+            instance["id"], t_step,
+            approval_mode="quorum" if use_quorum else "any",
+            required_quorum=default_quorum if use_quorum else None,
+        )
 
     first_step = wfdb.get_instance_step(instance["id"], 1)
     now = _now()
@@ -229,6 +249,61 @@ def assign_approvers(record_type: str, record_id: int, step_order: int,
     return get_instance_state(record_type, record_id)
 
 
+def _decide_quorum_step(record_type: str, record_id: int, instance: dict, step: dict, decision: str, *,
+                         user_id: str, performed_by: str, comments: str) -> dict:
+    """Configurable-quorum approval (Document Control): a step in
+    approval_mode='quorum' requires `required_quorum` distinct approve votes
+    before it advances. A single reject vote immediately rejects the step
+    (same record-status effect as the 'any'-mode reject path below, via
+    _apply_gate_status's existing "Rejected" -> "Draft" mapping) and clears
+    every vote cast so far, so a resubmission starts its quorum count fresh —
+    mirrors the 'any'-mode single-decider reject, just for N voters instead
+    of one."""
+    approvers = wfdb.get_step_approvers(step["id"])
+    if not approvers:
+        raise WorkflowError(f"'{step['step_name']}' has no assigned approver yet")
+    if user_id not in {a["user_id"] for a in approvers}:
+        raise WorkflowPermissionError("You are not an assigned approver for this step")
+    if wfdb.has_voted(step["id"], user_id):
+        raise WorkflowError("You have already voted on this step")
+
+    wfdb.record_vote(step["id"], user_id, decision, comments, instance.get("company_id"))
+    now = _now()
+
+    if decision == "reject":
+        wfdb.clear_votes(step["id"])
+        wfdb.update_instance_step(step["id"], {
+            "status": "rejected", "decided_by": performed_by, "decided_at": now, "comments": comments,
+        })
+        wfdb.update_instance(instance["id"], {"status": "rejected", "completed_at": now})
+        _apply_gate_status(record_type, record_id, "Rejected")
+        audit.log(record_type, record_id, f"{step['step_name']}: Rejected (quorum vote)",
+                   reason=comments, detail=f"decided by {performed_by}")
+        return get_instance_state(record_type, record_id)
+
+    votes_cast = sum(1 for v in wfdb.get_votes(step["id"]) if v["decision"] == "approve")
+    required = step.get("required_quorum") or 1
+    audit.log(record_type, record_id, f"{step['step_name']}: Vote recorded ({votes_cast}/{required})",
+              detail=f"voted by {performed_by}")
+    if votes_cast < required:
+        return get_instance_state(record_type, record_id)
+
+    template_steps = wfdb.get_template_steps(instance["template_id"])
+    last_order = max(s["step_order"] for s in template_steps)
+    step_order = step["step_order"]
+    wfdb.update_instance_step(step["id"], {
+        "status": "approved", "decided_by": performed_by, "decided_at": now, "comments": comments,
+    })
+    if step_order >= last_order:
+        wfdb.update_instance(instance["id"], {"status": "completed", "completed_at": now})
+    else:
+        wfdb.update_instance(instance["id"], {"current_step_order": step_order + 1})
+    _apply_gate_status(record_type, record_id, _status_after_completing(template_steps, step_order, last_order))
+    audit.log(record_type, record_id, f"{step['step_name']}: Approved (quorum met {votes_cast}/{required})",
+              reason=comments, detail=f"decided by {performed_by}")
+    return get_instance_state(record_type, record_id)
+
+
 def decide_step(record_type: str, record_id: int, step_order: int, decision: str, *,
                  user_id: str, role: str, performed_by: str, comments: str = "",
                  return_to: str = "") -> dict:
@@ -266,6 +341,12 @@ def decide_step(record_type: str, record_id: int, step_order: int, decision: str
         raise WorkflowError(f"Unknown workflow step {step_order}")
     if step["status"] not in ("pending", "in_progress"):
         raise WorkflowError(f"'{step['step_name']}' is already {step['status']}")
+
+    if step["step_type"] == "approval" and step.get("approval_mode") == "quorum":
+        if decision not in ("approve", "reject"):
+            raise WorkflowError(f"Illegal decision '{decision}' for a quorum approval step")
+        return _decide_quorum_step(record_type, record_id, instance, step, decision,
+                                    user_id=user_id, performed_by=performed_by, comments=comments)
 
     if step["step_type"] == "approval":
         if decision not in ("approve", "reject", "return"):
