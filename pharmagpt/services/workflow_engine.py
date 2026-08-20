@@ -271,7 +271,17 @@ def start_instance(workflow_key: str, record_type: str, record_id: int,
     instance = wfdb.create_instance(template["id"], record_type, record_id, company_id,
                                      document_version_id=document_version_id)
     for t_step in template_steps:
-        use_quorum = t_step["step_type"] == "approval" and default_quorum and default_quorum > 1
+        # Document Control redesign (Phase 3): quorum_eligible (default 1)
+        # restricts which approval steps may ever be snapshotted as quorum
+        # mode. Document Control's own seed sets this 0 on its Review step
+        # (services/qms_database.py) so Review stays single-reviewer even
+        # when a document's approval_quorum override is set — only the
+        # final Approval step is ever quorum-gated. Every other module's
+        # steps default to 1 (unchanged) and none of them ever pass
+        # default_quorum > 1 in the first place, so this is a no-op for
+        # CAPA/Deviation/Change Control regardless.
+        use_quorum = (t_step["step_type"] == "approval" and t_step.get("quorum_eligible", 1)
+                      and default_quorum and default_quorum > 1)
         wfdb.create_instance_step(
             instance["id"], t_step,
             approval_mode="quorum" if use_quorum else "any",

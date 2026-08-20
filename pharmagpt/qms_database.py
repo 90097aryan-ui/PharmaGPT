@@ -787,6 +787,41 @@ QMS_SCHEMA = """
     ) s
     WHERE t.workflow_key = 'DOCUMENT_WORKFLOW_V1';
 
+    -- Document Control redesign (Phase 3): Review stays single-reviewer —
+    -- only the final approval stage ('effective') is ever quorum-gated.
+    -- An UPDATE (not part of the step INSERT above) so it's idempotent
+    -- and self-correcting even for a DB whose DOCUMENT_WORKFLOW_V1 rows
+    -- were already seeded by an earlier boot before quorum_eligible existed
+    -- (INSERT OR IGNORE is a no-op once the UNIQUE constraint is already
+    -- satisfied, so the column would otherwise stay stuck at its 1 default
+    -- forever without this).
+    UPDATE qms_workflow_template_steps
+    SET quorum_eligible = 0
+    WHERE step_key = 'under_review'
+      AND template_id = (SELECT id FROM qms_workflow_templates WHERE workflow_key = 'DOCUMENT_WORKFLOW_V1');
+
+    -- ── Configurable approver pool (Document Control redesign, Phase 3) ──────
+    -- Department Head and Quality Head/Designee are mandatory pool seats;
+    -- Plant Head is optional. Required quorum for the final Approval stage
+    -- is always 2 regardless of whether Plant Head is configured (2-of-2 or
+    -- 2-of-3) — computed by services/qms_document_database.py's
+    -- resolve_pool_approvers(), not stored here. `department = ''` is a
+    -- company-wide default pool, overridden per-department by a more
+    -- specific row when one exists (see get_approver_pool()).
+    CREATE TABLE IF NOT EXISTS qms_document_approver_pool (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id   TEXT    NOT NULL,
+        department   TEXT    NOT NULL DEFAULT '',
+        pool_role    TEXT    NOT NULL,   -- department_head | quality_head | plant_head
+        user_id      TEXT    NOT NULL DEFAULT '',
+        display_name TEXT    DEFAULT '',
+        active       INTEGER NOT NULL DEFAULT 1,
+        created_at   TEXT    DEFAULT (datetime('now')),
+        updated_at   TEXT    DEFAULT (datetime('now')),
+        UNIQUE (company_id, department, pool_role)
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_doc_approver_pool_company ON qms_document_approver_pool(company_id, department);
+
     -- ── Investigation Engine (new, record_type-agnostic) ─────────────────────
     -- Polymorphic on (record_type, record_id), exactly like qms_attachments/
     -- qms_comments above — so CAPA/Complaint/OOS/OOT/Audit Finding/Supplier/

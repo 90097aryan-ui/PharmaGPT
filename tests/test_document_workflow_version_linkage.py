@@ -166,19 +166,12 @@ def test_full_new_sop_reject_resubmit_numbering_sequence(db_path):
 # ── Quorum reject path also requires a comment and forks ─────────────────────
 
 def _clear_review_quorum(doc):
-    """Phase 2 does not yet restrict quorum to the final approval stage only
-    (that scoping fix is Phase 3's job — see workflow_engine.py's
-    quorum_eligible follow-up) — with a document-level quorum override set,
-    step 2 (Review) is ALSO quorum mode today, exactly like step 3. These
-    tests care about step 3's reject behaviour, so they satisfy step 2's
-    quorum honestly (two assigned approvers, both approve) rather than
-    assuming Review is single-reviewer, which only becomes true once
-    Phase 3 lands."""
-    wfe.assign_approvers("document", doc["id"], 2, [
-        {"user_id": "rev-1", "display_name": "Rita"}, {"user_id": "rev-2", "display_name": "Rob"},
-    ])
-    wfe.decide_step("document", doc["id"], 2, "approve", user_id="rev-1", role="reviewer_qa", performed_by="Rita")
-    return wfe.decide_step("document", doc["id"], 2, "approve", user_id="rev-2", role="reviewer_qa", performed_by="Rob")
+    """Since Phase 3, step 2 (Review) is never quorum-eligible regardless of
+    a document-level quorum override (qms_database.py's DOCUMENT_WORKFLOW_V1
+    seed sets quorum_eligible=0 on it) — a single reviewer always suffices
+    to advance past it, even when default_quorum was passed to _start()."""
+    wfe.assign_approvers("document", doc["id"], 2, [{"user_id": "rev-1", "display_name": "Rita"}])
+    return wfe.decide_step("document", doc["id"], 2, "approve", user_id="rev-1", role="reviewer_qa", performed_by="Rita")
 
 
 def test_quorum_approval_reject_without_comment_is_blocked(db_path):

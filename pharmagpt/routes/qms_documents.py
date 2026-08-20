@@ -100,6 +100,40 @@ def create_document():
     return jsonify(document), 201
 
 
+# ── Approver pool (Document Control redesign, Phase 3) ───────────────────────
+# Department Head + Quality Head/Designee mandatory, Plant Head optional.
+# Company-admin only — this configures who the final Approval stage's
+# quorum votes are auto-assigned to for the whole company (or one
+# department, overriding the company-wide default for just that
+# department). Not tied to a specific document id.
+
+@bp.route("/approver-pool", methods=["GET"])
+def get_approver_pool_route():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
+    department = request.args.get("department", "")
+    return jsonify(qdb.get_approver_pool(g.tenant.company_id, department))
+
+
+@bp.route("/approver-pool", methods=["POST"])
+@require_role("company_admin")
+def set_approver_pool_route():
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
+    data = request.get_json() or {}
+    pool_role = data.get("pool_role", "")
+    if pool_role not in qdb.ALL_POOL_ROLES:
+        return jsonify({"error": f"pool_role must be one of {', '.join(qdb.ALL_POOL_ROLES)}"}), 400
+    if not data.get("user_id"):
+        return jsonify({"error": "user_id is required"}), 400
+    entry = qdb.set_approver_pool_member(
+        g.tenant.company_id, data.get("department", ""), pool_role,
+        data["user_id"], data.get("display_name", ""),
+    )
+    audit.log("document_approver_pool", 0, f"Approver pool set: {pool_role}", detail=entry.get("display_name", ""))
+    return jsonify(entry), 201
+
+
 @bp.route("/<int:did>", methods=["GET"])
 def get_document(did):
     d = tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
@@ -320,15 +354,35 @@ def get_workflow(did):
     return jsonify(wfe.get_instance_state(RECORD_TYPE, did))
 
 
+def _effective_quorum_and_pool_approvers(document: dict) -> tuple[int | None, list[dict] | None]:
+    """Document Control redesign (Phase 3): if this document's department
+    (or the company-wide default) has both mandatory approver-pool roles
+    configured, the final Approval stage always uses quorum=2 (2-of-2
+    without Plant Head, 2-of-3 with) — a fixed business rule, not the
+    manually-set `approval_quorum` field. Falls back to the pre-existing
+    `approval_quorum` behaviour (None = single-decider 'any' mode) when no
+    pool is configured yet, so a company that hasn't set one up is
+    completely unaffected — same as before this phase."""
+    try:
+        approvers = qdb.resolve_pool_approvers(document)
+        return qdb.APPROVAL_QUORUM_REQUIRED, approvers
+    except ValueError:
+        return document.get("approval_quorum"), None
+
+
 @bp.route("/<int:did>/workflow/start", methods=["POST"])
 def start_workflow(did):
     document = _record_scoped_or_404(did)
     if not document:
         return jsonify({"error": "Not found"}), 404
     sig = tenancy.signing_identity(g.tenant)
+    effective_quorum, pool_approvers = _effective_quorum_and_pool_approvers(document)
     try:
         state = wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, did, g.tenant.company_id, sig["performed_by"],
-                                    default_quorum=document.get("approval_quorum"))
+                                    default_quorum=effective_quorum)
+        if pool_approvers:
+            approval_step = next(s for s in state["steps"] if s["step_key"] == "effective")
+            state = wfe.assign_approvers(RECORD_TYPE, did, approval_step["step_order"], pool_approvers)
     except wfe.WorkflowError as e:
         audit.log_failure("document", did, "Workflow start blocked", reason=str(e))
         return jsonify({"error": str(e)}), 409
@@ -472,8 +526,12 @@ def submit_approval(did):
     else:
         try:
             if not wfdb.get_active_instance(RECORD_TYPE, did):
-                wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, did, g.tenant.company_id, sig["performed_by"],
-                                    default_quorum=document.get("approval_quorum"))
+                effective_quorum, pool_approvers = _effective_quorum_and_pool_approvers(document)
+                start_state = wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, did, g.tenant.company_id,
+                                                  sig["performed_by"], default_quorum=effective_quorum)
+                if pool_approvers:
+                    approval_step = next(s for s in start_state["steps"] if s["step_key"] == "effective")
+                    wfe.assign_approvers(RECORD_TYPE, did, approval_step["step_order"], pool_approvers)
             state = wfe.get_instance_state(RECORD_TYPE, did)
             instance = state["instance"]
             if not instance or instance["status"] != "in_progress":
@@ -487,7 +545,16 @@ def submit_approval(did):
                 decision = "approve" if step["step_type"] == "approval" else "advance"
             if step["step_type"] == "approval":
                 approver_ids = {a["user_id"] for a in step.get("approvers", [])}
-                if g.tenant.user_id not in approver_ids:
+                # Document Control redesign (Phase 3): only auto-self-assign
+                # when NO approver is set yet at all. Once approvers exist
+                # (whether pool-derived mandatory Dept Head/Quality Head/
+                # Plant Head, or manually assigned by someone else), a
+                # caller who isn't one of them must never silently overwrite
+                # that assignment — decide_step()'s own
+                # WorkflowPermissionError (403) is the correct outcome for
+                # that case, exactly as it already is for the Workflow Panel
+                # path (/workflow/steps/<order>/decide).
+                if not approver_ids and g.tenant.user_id not in approver_ids:
                     wfe.assign_approvers(RECORD_TYPE, did, step["step_order"],
                                           [{"user_id": g.tenant.user_id, "display_name": sig["performed_by"]}])
             wfe.decide_step(RECORD_TYPE, did, step["step_order"], decision,

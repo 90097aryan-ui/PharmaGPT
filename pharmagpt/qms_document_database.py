@@ -384,6 +384,93 @@ def reject_and_fork_version(document_id: int, rejection_reason: str) -> dict:
     return new_version
 
 
+# ── Approver pool (Document Control redesign, Phase 3) ───────────────────────
+# Department Head and Quality Head/Designee are mandatory seats; Plant Head
+# is optional. Required quorum for the final Approval stage is always 2
+# regardless of pool size (2-of-2 without Plant Head, 2-of-3 with) — a fixed
+# business rule, not a per-document setting; see resolve_pool_approvers().
+
+MANDATORY_POOL_ROLES = ("department_head", "quality_head")
+ALL_POOL_ROLES = ("department_head", "quality_head", "plant_head")
+APPROVAL_QUORUM_REQUIRED = 2
+
+
+def get_approver_pool(company_id: str, department: str = "") -> list[dict]:
+    """Active pool rows for `department`, falling back to the company-wide
+    default pool (department='') for any role not specifically configured
+    for this department. At most one row per pool_role in the result."""
+    conn = get_connection()
+    dept_rows = conn.execute(
+        "SELECT * FROM qms_document_approver_pool WHERE company_id = ? AND department = ? AND active = 1",
+        (company_id, department),
+    ).fetchall()
+    by_role = {r["pool_role"]: dict(r) for r in dept_rows}
+    if department:
+        default_rows = conn.execute(
+            "SELECT * FROM qms_document_approver_pool WHERE company_id = ? AND department = '' AND active = 1",
+            (company_id,),
+        ).fetchall()
+        for r in default_rows:
+            by_role.setdefault(r["pool_role"], dict(r))
+    conn.close()
+    return list(by_role.values())
+
+
+def set_approver_pool_member(company_id: str, department: str, pool_role: str,
+                              user_id: str, display_name: str = "") -> dict:
+    if pool_role not in ALL_POOL_ROLES:
+        raise ValueError(f"Unknown pool_role '{pool_role}'")
+    conn = get_connection()
+    conn.execute(
+        """INSERT INTO qms_document_approver_pool (company_id, department, pool_role, user_id, display_name, active)
+           VALUES (?,?,?,?,?,1)
+           ON CONFLICT (company_id, department, pool_role)
+           DO UPDATE SET user_id = excluded.user_id, display_name = excluded.display_name,
+                         active = 1, updated_at = datetime('now')""",
+        (company_id, department, pool_role, user_id, display_name),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM qms_document_approver_pool WHERE company_id = ? AND department = ? AND pool_role = ?",
+        (company_id, department, pool_role),
+    ).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def deactivate_approver_pool_member(company_id: str, department: str, pool_role: str) -> None:
+    conn = get_connection()
+    conn.execute(
+        "UPDATE qms_document_approver_pool SET active = 0, updated_at = datetime('now') "
+        "WHERE company_id = ? AND department = ? AND pool_role = ?",
+        (company_id, department, pool_role),
+    )
+    conn.commit()
+    conn.close()
+
+
+def resolve_pool_approvers(document: dict) -> list[dict]:
+    """[{'user_id', 'display_name', 'pool_role'}, ...] for a document's
+    department (falling back to the company-wide pool for any unconfigured
+    role) — Department Head and Quality Head only (Plant Head appended
+    only when configured). Raises ValueError naming whichever mandatory
+    role(s) are missing; callers (routes) catch this and fall back to
+    manual approver assignment rather than blocking the workflow."""
+    pool = get_approver_pool(document.get("company_id", ""), document.get("department", ""))
+    by_role = {p["pool_role"]: p for p in pool if p.get("user_id")}
+    missing = [r for r in MANDATORY_POOL_ROLES if r not in by_role]
+    if missing:
+        raise ValueError(f"Approver pool is missing mandatory role(s): {', '.join(missing)}")
+    approvers = [
+        {"user_id": by_role[r]["user_id"], "display_name": by_role[r].get("display_name", ""), "pool_role": r}
+        for r in MANDATORY_POOL_ROLES
+    ]
+    if "plant_head" in by_role:
+        approvers.append({"user_id": by_role["plant_head"]["user_id"],
+                           "display_name": by_role["plant_head"].get("display_name", ""), "pool_role": "plant_head"})
+    return approvers
+
+
 # ── Distribution ───────────────────────────────────────────────────────────────
 
 def add_distribution(document_id: int, data: dict) -> dict:
