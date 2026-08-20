@@ -224,6 +224,20 @@ def review_document(did):
     return jsonify(review)
 
 
+# ── Author Self-Check (Document Control redesign, Phase 5, hard gate) ───────
+
+@bp.route("/<int:did>/self-check", methods=["POST"])
+def record_self_check(did):
+    if not tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id):
+        return jsonify({"error": "Not found"}), 404
+    try:
+        version = qdb.record_self_check(did, tenancy.signing_identity(g.tenant)["performed_by"])
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 409
+    audit.log("document", did, "Author Self-Check completed", detail=f"version {version['version_number']}")
+    return jsonify(version)
+
+
 # ── Version history ────────────────────────────────────────────────────────────
 
 @bp.route("/<int:did>/versions", methods=["GET"])
@@ -395,11 +409,24 @@ def _effective_quorum_and_pool_approvers(document: dict) -> tuple[int | None, li
         return document.get("approval_quorum"), None
 
 
+_SELF_CHECK_REQUIRED_ERROR = (
+    "Author Self-Check must be completed for the current version before Submit for Review "
+    "— see POST /qms/documents/<id>/self-check"
+)
+
+
 @bp.route("/<int:did>/workflow/start", methods=["POST"])
 def start_workflow(did):
     document = _record_scoped_or_404(did)
     if not document:
         return jsonify({"error": "Not found"}), 404
+    # Author Self-Check hard gate (Document Control redesign, Phase 5):
+    # blocks Submit for Review until recorded against the CURRENT version —
+    # never carried forward from a prior version (see
+    # qms_document_database.record_self_check's docstring).
+    if not qdb.is_self_check_cleared(did):
+        audit.log_failure("document", did, "Workflow start blocked", reason=_SELF_CHECK_REQUIRED_ERROR)
+        return jsonify({"error": _SELF_CHECK_REQUIRED_ERROR}), 409
     sig = tenancy.signing_identity(g.tenant)
     effective_quorum, pool_approvers = _effective_quorum_and_pool_approvers(document)
     try:
@@ -551,6 +578,21 @@ def submit_approval(did):
     else:
         try:
             if not wfdb.get_active_instance(RECORD_TYPE, did):
+                # Known limitation: when this auto-start branch is reached via
+                # action="Rejected" on an already-Effective document (the
+                # legacy shortcut for starting a new revision cycle, Phase 4's
+                # start_new_revision()), this checks the OUTGOING Effective
+                # version's self-check flag, not a fresh one on the new draft
+                # that start_instance() is about to fork — because the fork
+                # and the submit happen inside the same wfe.start_instance()
+                # call below. The newer /workflow/start endpoint doesn't have
+                # this gap (it never operates mid-fork). Flagged for a
+                # follow-up that splits "start new revision" from "submit for
+                # review" into two explicit steps on this legacy endpoint too.
+                if not qdb.is_self_check_cleared(did):
+                    audit.log_failure("document", did, f"Approval action blocked ({action_name})",
+                                       reason=_SELF_CHECK_REQUIRED_ERROR)
+                    return jsonify({"error": _SELF_CHECK_REQUIRED_ERROR}), 409
                 effective_quorum, pool_approvers = _effective_quorum_and_pool_approvers(document)
                 start_state = wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, did, g.tenant.company_id,
                                                   sig["performed_by"], default_quorum=effective_quorum)

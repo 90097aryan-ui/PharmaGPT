@@ -294,6 +294,42 @@ def set_document_current_version(document_id: int, version_id: int) -> None:
     conn.close()
 
 
+def record_self_check(document_id: int, performed_by: str) -> dict:
+    """Author Self-Check (Document Control redesign, Phase 5) — a HARD gate:
+    Submit for Review is blocked until this has been recorded against the
+    CURRENT version specifically (see is_self_check_cleared() below). Only
+    legal while the version is still 'draft' — self-check is a pre-
+    submission author action, not something that can be backfilled onto a
+    version already under review. Never carries forward to a new version:
+    every version row is created fresh with self_check_completed_at=''
+    (see _insert_version_row) — a version forked by rejection or by a new
+    revision cycle always requires its own fresh self-check."""
+    version = get_current_version(document_id)
+    if not version:
+        raise ValueError(f"Document {document_id} has no current version")
+    if version["status"] != "draft":
+        raise ValueError(f"Self-Check can only be recorded while the version is Draft (current status: "
+                          f"'{version['status']}')")
+    from datetime import datetime, timezone
+    completed_at = datetime.now(timezone.utc).isoformat()
+    conn = get_connection()
+    conn.execute(
+        "UPDATE qms_document_versions SET self_check_completed_at = ? WHERE id = ?",
+        (completed_at, version["id"]),
+    )
+    conn.commit()
+    conn.close()
+    return get_version(version["id"])
+
+
+def is_self_check_cleared(document_id: int) -> bool:
+    """Whether the document's CURRENT version has a recorded self-check —
+    the hard-gate check routes/qms_documents.py calls before allowing
+    Submit for Review."""
+    version = get_current_version(document_id)
+    return bool(version and version.get("self_check_completed_at"))
+
+
 _TRANSITION_EXTRA_FIELDS = {"rejection_reason", "effective_date", "workflow_instance_id",
                             "self_check_completed_at", "source_attachment_id",
                             "version", "version_number"}

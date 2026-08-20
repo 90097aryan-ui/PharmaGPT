@@ -24,6 +24,15 @@ def _kb_rows_for(source_type: str, source_id: int):
     return [row] if row else []
 
 
+def _self_check(client, did):
+    """Document Control redesign (Phase 5): Author Self-Check is now a
+    mandatory hard gate before Submit for Review can start — see
+    routes/qms_documents.py's _SELF_CHECK_REQUIRED_ERROR. Applies to
+    Document Control only (URS/Qualification/Validation Report below are
+    unaffected)."""
+    client.post(f"/qms/documents/{did}/self-check")
+
+
 def _clear_training_gate(client, did):
     """Document Control redesign (Phase 4): quorum/approval achieved now
     holds a document at 'Approved', not 'Effective', until the training
@@ -40,6 +49,7 @@ def test_effective_document_control_record_is_published_to_kb(client):
     doc = client.post("/qms/documents", json={"title": "Autoclave Operation SOP", "doc_type": "SOP"}).get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP\n\nOperate the autoclave safely."})
 
+    _self_check(client, doc["id"])
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     resp = client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
     assert resp.status_code == 201
@@ -56,6 +66,7 @@ def test_effective_document_control_record_is_published_to_kb(client):
 def test_document_control_republish_updates_the_same_kb_row(client):
     doc = client.post("/qms/documents", json={"title": "Recalibration SOP", "doc_type": "SOP"}).get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v1"})
+    _self_check(client, doc["id"])
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
     _clear_training_gate(client, doc["id"])
@@ -73,6 +84,7 @@ def test_document_control_republish_updates_the_same_kb_row(client):
                      json={"action": "Rejected", "comments": "Starting revision for updated procedure"})
     assert r.status_code == 201, r.get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v2 — revised"})
+    _self_check(client, doc["id"])
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
     _clear_training_gate(client, doc["id"])
@@ -86,6 +98,7 @@ def test_document_without_content_is_not_published_to_kb(client):
     """An Effective document with no drafted content yet has nothing
     meaningful to publish — must not create an empty KB entry."""
     doc = client.post("/qms/documents", json={"title": "Empty Draft SOP", "doc_type": "SOP"}).get_json()
+    _self_check(client, doc["id"])
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
     _clear_training_gate(client, doc["id"])
@@ -182,6 +195,7 @@ def test_approved_but_not_released_report_is_not_published_to_kb(client):
 def test_consolidated_dq_fat_sat_are_published_to_kb(client, doc_type, expected_folder):
     doc = client.post("/qms/documents", json={"title": f"{doc_type} Protocol", "doc_type": doc_type}).get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": f"# {doc_type} Protocol\n\nTest content."})
+    _self_check(client, doc["id"])
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     resp = client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
     assert resp.status_code == 201
@@ -197,6 +211,7 @@ def test_consolidated_dq_fat_sat_are_published_to_kb(client, doc_type, expected_
 def test_republish_snapshots_the_outgoing_version_instead_of_discarding_it(client):
     doc = client.post("/qms/documents", json={"title": "Versioned SOP", "doc_type": "SOP"}).get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v1"})
+    _self_check(client, doc["id"])
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
     _clear_training_gate(client, doc["id"])
@@ -205,6 +220,7 @@ def test_republish_snapshots_the_outgoing_version_instead_of_discarding_it(clien
     client.post(f"/qms/documents/{doc['id']}/approval",
                 json={"action": "Rejected", "comments": "Starting revision"})
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v2 — revised"})
+    _self_check(client, doc["id"])
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
     _clear_training_gate(client, doc["id"])
@@ -219,6 +235,7 @@ def test_republish_snapshots_the_outgoing_version_instead_of_discarding_it(clien
 def test_auto_published_kb_document_has_creator_attribution(client):
     doc = client.post("/qms/documents", json={"title": "Attributed SOP", "doc_type": "SOP"}).get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP"})
+    _self_check(client, doc["id"])
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
     _clear_training_gate(client, doc["id"])
@@ -231,6 +248,7 @@ def test_auto_published_kb_document_has_creator_attribution(client):
 def test_auto_publish_logs_uploaded_audit_entry(client):
     doc = client.post("/qms/documents", json={"title": "Audited SOP", "doc_type": "SOP"}).get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP"})
+    _self_check(client, doc["id"])
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
     _clear_training_gate(client, doc["id"])
@@ -244,6 +262,7 @@ def test_auto_publish_logs_uploaded_audit_entry(client):
 def test_republish_logs_version_created_and_updated_audit_entries(client):
     doc = client.post("/qms/documents", json={"title": "Republished SOP", "doc_type": "SOP"}).get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v1"})
+    _self_check(client, doc["id"])
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
     _clear_training_gate(client, doc["id"])
@@ -252,6 +271,7 @@ def test_republish_logs_version_created_and_updated_audit_entries(client):
     client.post(f"/qms/documents/{doc['id']}/approval",
                 json={"action": "Rejected", "comments": "Starting revision"})
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v2 — revised"})
+    _self_check(client, doc["id"])
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
     _clear_training_gate(client, doc["id"])

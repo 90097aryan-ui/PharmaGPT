@@ -154,6 +154,7 @@ def test_training_completion_after_approval_flips_to_effective_via_route(client)
 
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "content": "x"}).get_json()
     did = doc["id"]
+    client.post(f"/qms/documents/{did}/self-check")  # Phase 5 hard gate
     client.post(f"/qms/documents/{did}/workflow/start")
     client.post(f"/qms/documents/{did}/workflow/steps/2/assign",
                 json={"approvers": [{"user_id": caller_user_id, "display_name": "Rita"}]})

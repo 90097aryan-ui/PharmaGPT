@@ -115,6 +115,7 @@ def test_document_approval_transitions_status(client):
     doc = client.post("/qms/documents", json={"title": "Doc"}).get_json()
     did = doc["id"]
 
+    client.post(f"/qms/documents/{did}/self-check")  # Phase 5 hard gate
     r = client.post(f"/qms/documents/{did}/approval", json={"action": "Submitted for Review", "performed_by": "J Doe"})
     assert r.status_code == 201
     assert client.get(f"/qms/documents/{did}").get_json()["status"] == "Under Review"

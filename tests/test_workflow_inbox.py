@@ -174,6 +174,7 @@ def test_inbox_lists_pending_document_once_assigned(client):
     # DOCUMENT_WORKFLOW_V1's step 2 ("under_review") is an approval step.
     doc = client.post("/qms/documents", json={"title": "Doc one"}).get_json()
     did = doc["id"]
+    client.post(f"/qms/documents/{did}/self-check")  # Phase 5 hard gate
     client.post(f"/qms/documents/{did}/workflow/start")
     assert client.get("/workflow/inbox").get_json() == []
 

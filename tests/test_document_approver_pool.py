@@ -134,6 +134,7 @@ def test_start_workflow_auto_assigns_pool_approvers_with_quorum_2(client):
     qdb.set_approver_pool_member(COMPANY_ID, "", "quality_head", "qh-1", "Quinn Head")
 
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP"}).get_json()
+    client.post(f"/qms/documents/{doc['id']}/self-check")  # Phase 5 hard gate
     state = client.post(f"/qms/documents/{doc['id']}/workflow/start").get_json()
 
     step3 = next(s for s in state["steps"] if s["step_order"] == 3)
@@ -149,6 +150,7 @@ def test_start_workflow_includes_plant_head_but_quorum_stays_2(client):
     qdb.set_approver_pool_member(COMPANY_ID, "", "plant_head", "ph-1", "Pat Head")
 
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP"}).get_json()
+    client.post(f"/qms/documents/{doc['id']}/self-check")  # Phase 5 hard gate
     state = client.post(f"/qms/documents/{doc['id']}/workflow/start").get_json()
 
     step3 = next(s for s in state["steps"] if s["step_order"] == 3)
@@ -162,6 +164,7 @@ def test_start_workflow_falls_back_to_manual_quorum_when_pool_unconfigured(clien
     (approval_quorum field, or 'any' mode if that's also unset). Confirms
     backward compatibility for a company that hasn't set up a pool yet."""
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP"}).get_json()
+    client.post(f"/qms/documents/{doc['id']}/self-check")  # Phase 5 hard gate
     state = client.post(f"/qms/documents/{doc['id']}/workflow/start").get_json()
 
     step3 = next(s for s in state["steps"] if s["step_order"] == 3)
@@ -180,6 +183,7 @@ def test_legacy_approval_endpoint_does_not_overwrite_pool_approvers(client):
 
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP"}).get_json()
     did = doc["id"]
+    client.post(f"/qms/documents/{did}/self-check")  # Phase 5 hard gate
     client.post(f"/qms/documents/{did}/workflow/start")
     # advance past Review with a manually assigned reviewer so we reach the
     # quorum-gated Approval step
