@@ -127,6 +127,79 @@ def _apply_gate_status(record_type: str, record_id: int, status: str) -> None:
     applier(record_id, status)
 
 
+# ── Document Control redesign — version-linkage hooks ────────────────────────
+# Same registry-dispatch shape as STATUS_APPLIERS/CREATOR_LOOKUP above: one
+# entry per record_type, absent (no-op) for every module that has no version
+# concept (CAPA, Deviation, Change Control are all unaffected — decide_step/
+# start_instance call these unconditionally, but the .get() lookup returns
+# None for them and nothing fires). Only "document" has an entry. The engine
+# itself never references a document-specific step_key or status string —
+# that knowledge lives entirely inside these three handler functions.
+
+def _document_version_lookup(record_id: int) -> int | None:
+    from pharmagpt import qms_document_database as qdb
+    version = qdb.get_current_version(record_id)
+    return version["id"] if version else None
+
+
+CURRENT_VERSION_LOOKUP: dict[str, Callable[[int], int | None]] = {
+    "document": _document_version_lookup,
+}
+
+
+def _document_version_on_instance_start(record_id: int, instance: dict) -> None:
+    """Submit for Review: the document's current (draft) version moves to
+    under_review and records which workflow instance owns this review
+    cycle."""
+    from pharmagpt import qms_document_database as qdb
+    qdb.start_review_cycle_for_version(record_id, instance["id"])
+
+
+def _document_version_on_step_approved(record_id: int, step: dict) -> None:
+    """Review accepted (the 'under_review' step specifically) advances the
+    version to pending_approval. The final approval step's own advance to
+    'approved'/'effective' is deliberately NOT handled here — that requires
+    the training-gate check (Document Control redesign, later phase) and is
+    wired in alongside it, not here."""
+    if step.get("step_key") != "under_review":
+        return
+    from pharmagpt import qms_document_database as qdb
+    qdb.advance_version_to_pending_approval(record_id)
+
+
+def _document_version_on_step_rejected(record_id: int, reason: str) -> None:
+    """Any Review or Approval rejection: the current version becomes
+    permanently immutable (review_rejected/approval_rejected, chosen by its
+    own current status — see qms_document_database.reject_and_fork_version),
+    the rejection reason is recorded against it, and a brand-new Draft
+    version is forked and becomes current. Old votes/approvers never carry
+    forward because the next Submit for Review creates an entirely new
+    workflow instance (start_instance's own "already in progress" guard
+    prevents reusing the rejected one)."""
+    from pharmagpt import qms_document_database as qdb
+    qdb.reject_and_fork_version(record_id, reason)
+
+
+VERSION_ON_INSTANCE_START: dict[str, Callable[[int, dict], None]] = {
+    "document": _document_version_on_instance_start,
+}
+VERSION_ON_STEP_APPROVED: dict[str, Callable[[int, dict], None]] = {
+    "document": _document_version_on_step_approved,
+}
+VERSION_ON_STEP_REJECTED: dict[str, Callable[[int, str], None]] = {
+    "document": _document_version_on_step_rejected,
+}
+
+
+def _require_comment_on_document_reject(record_type: str, comments: str) -> None:
+    """Any Review or Approval rejection on a Document Control record must
+    carry a non-empty comment (locked spec requirement) — scoped strictly to
+    record_type=='document' so CAPA/Deviation/Change Control's existing
+    reject behaviour (empty comment always allowed today) is unchanged."""
+    if record_type == "document" and not (comments or "").strip():
+        raise WorkflowError("A comment is required to reject this document")
+
+
 def get_instance_state(record_type: str, record_id: int) -> dict:
     """Full workflow state for a record: the latest instance (if any) plus
     every step and its assigned approvers. Used by GET .../workflow and by
@@ -194,7 +267,9 @@ def start_instance(workflow_key: str, record_type: str, record_id: int,
     if existing:
         raise WorkflowError("A workflow is already in progress for this record")
 
-    instance = wfdb.create_instance(template["id"], record_type, record_id, company_id)
+    document_version_id = CURRENT_VERSION_LOOKUP.get(record_type, lambda _r: None)(record_id)
+    instance = wfdb.create_instance(template["id"], record_type, record_id, company_id,
+                                     document_version_id=document_version_id)
     for t_step in template_steps:
         use_quorum = t_step["step_type"] == "approval" and default_quorum and default_quorum > 1
         wfdb.create_instance_step(
@@ -214,6 +289,9 @@ def start_instance(workflow_key: str, record_type: str, record_id: int,
     else:
         wfdb.update_instance(instance["id"], {"status": "completed", "completed_at": now})
     _apply_gate_status(record_type, record_id, _status_after_completing(template_steps, 1, last_order))
+    version_start_hook = VERSION_ON_INSTANCE_START.get(record_type)
+    if version_start_hook:
+        version_start_hook(record_id, instance)
     audit.log(record_type, record_id, f"Workflow started: {first_step['step_name']}")
     return get_instance_state(record_type, record_id)
 
@@ -266,6 +344,8 @@ def _decide_quorum_step(record_type: str, record_id: int, instance: dict, step: 
         raise WorkflowPermissionError("You are not an assigned approver for this step")
     if wfdb.has_voted(step["id"], user_id):
         raise WorkflowError("You have already voted on this step")
+    if decision == "reject":
+        _require_comment_on_document_reject(record_type, comments)
 
     wfdb.record_vote(step["id"], user_id, decision, comments, instance.get("company_id"))
     now = _now()
@@ -277,6 +357,9 @@ def _decide_quorum_step(record_type: str, record_id: int, instance: dict, step: 
         })
         wfdb.update_instance(instance["id"], {"status": "rejected", "completed_at": now})
         _apply_gate_status(record_type, record_id, "Rejected")
+        version_reject_hook = VERSION_ON_STEP_REJECTED.get(record_type)
+        if version_reject_hook:
+            version_reject_hook(record_id, comments)
         audit.log(record_type, record_id, f"{step['step_name']}: Rejected (quorum vote)",
                    reason=comments, detail=f"decided by {performed_by}")
         return get_instance_state(record_type, record_id)
@@ -299,6 +382,9 @@ def _decide_quorum_step(record_type: str, record_id: int, instance: dict, step: 
     else:
         wfdb.update_instance(instance["id"], {"current_step_order": step_order + 1})
     _apply_gate_status(record_type, record_id, _status_after_completing(template_steps, step_order, last_order))
+    version_approved_hook = VERSION_ON_STEP_APPROVED.get(record_type)
+    if version_approved_hook:
+        version_approved_hook(record_id, step)
     audit.log(record_type, record_id, f"{step['step_name']}: Approved (quorum met {votes_cast}/{required})",
               reason=comments, detail=f"decided by {performed_by}")
     return get_instance_state(record_type, record_id)
@@ -368,6 +454,9 @@ def decide_step(record_type: str, record_id: int, step_order: int, decision: str
     template_steps = wfdb.get_template_steps(instance["template_id"])
     last_order = max(s["step_order"] for s in template_steps)
 
+    if decision == "reject":
+        _require_comment_on_document_reject(record_type, comments)
+
     if decision in ("approve", "advance"):
         wfdb.update_instance_step(step["id"], {
             "status": "approved", "decided_by": performed_by, "decided_at": now, "comments": comments,
@@ -377,6 +466,9 @@ def decide_step(record_type: str, record_id: int, step_order: int, decision: str
         else:
             wfdb.update_instance(instance["id"], {"current_step_order": step_order + 1})
         _apply_gate_status(record_type, record_id, _status_after_completing(template_steps, step_order, last_order))
+        version_approved_hook = VERSION_ON_STEP_APPROVED.get(record_type)
+        if version_approved_hook:
+            version_approved_hook(record_id, step)
         audit.log(record_type, record_id, f"{step['step_name']}: Approved",
                    reason=comments, detail=f"decided by {performed_by}")
 
@@ -386,6 +478,9 @@ def decide_step(record_type: str, record_id: int, step_order: int, decision: str
         })
         wfdb.update_instance(instance["id"], {"status": "rejected", "completed_at": now})
         _apply_gate_status(record_type, record_id, "Rejected")
+        version_reject_hook = VERSION_ON_STEP_REJECTED.get(record_type)
+        if version_reject_hook:
+            version_reject_hook(record_id, comments)
         audit.log(record_type, record_id, f"{step['step_name']}: Rejected", reason=comments)
 
     else:  # return

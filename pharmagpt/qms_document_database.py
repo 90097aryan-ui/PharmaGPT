@@ -330,6 +330,60 @@ def transition_version_status(version_id: int, new_status: str, **extra_fields) 
     return get_version(version_id)
 
 
+# ── Workflow <-> version linkage (Document Control redesign, Phase 2) ───────
+# Called only from services/workflow_engine.py's document-scoped hook
+# registry (VERSION_ON_INSTANCE_START / VERSION_ON_STEP_APPROVED /
+# VERSION_ON_STEP_REJECTED) — never directly from routes.
+
+def start_review_cycle_for_version(document_id: int, instance_id: int) -> dict:
+    """Submit for Review: the document's current (draft) version moves to
+    under_review and records which workflow instance owns this cycle."""
+    version = get_current_version(document_id)
+    if not version:
+        raise ValueError(f"Document {document_id} has no current version to submit")
+    return transition_version_status(version["id"], "under_review", workflow_instance_id=instance_id)
+
+
+def advance_version_to_pending_approval(document_id: int) -> dict:
+    """Review accepted: the version moves from under_review to
+    pending_approval, awaiting the final quorum approval stage."""
+    version = get_current_version(document_id)
+    if not version:
+        raise ValueError(f"Document {document_id} has no current version")
+    return transition_version_status(version["id"], "pending_approval")
+
+
+def reject_and_fork_version(document_id: int, rejection_reason: str) -> dict:
+    """Any Review or Approval rejection: the current version is marked
+    permanently immutable (review_rejected if it was under_review,
+    approval_rejected if it was pending_approval — chosen by its own
+    current status, never passed in) with `rejection_reason` recorded
+    against it forever, and a brand-new Draft version is forked from its
+    content and becomes the document's current version. The forked
+    version's self_check_completed_at starts empty (a new Self-Check is
+    always required — see qms_database.py's column default) and its
+    created_by_user_id carries forward from the rejected version (nothing
+    has been authored yet; the human author edits this draft next).
+
+    Returns the NEW draft version."""
+    current = get_current_version(document_id)
+    if not current:
+        raise ValueError(f"Document {document_id} has no current version to reject")
+    reject_status = {"under_review": "review_rejected", "pending_approval": "approval_rejected"}.get(current["status"])
+    if not reject_status:
+        raise ValueError(f"Version {current['id']} cannot be rejected from status '{current['status']}'")
+    transition_version_status(current["id"], reject_status, rejection_reason=rejection_reason)
+
+    next_number = dv.next_version_number(current["version_number"], "rework")
+    new_version = _insert_version_row(
+        document_id, version_number=next_number, parent_version_id=current["id"],
+        content_snapshot=current["content_snapshot"], created_by_user_id=current["created_by_user_id"],
+        change_summary=f"Forked after rejection of version {current['version_number']}",
+    )
+    set_document_current_version(document_id, new_version["id"])
+    return new_version
+
+
 # ── Distribution ───────────────────────────────────────────────────────────────
 
 def add_distribution(document_id: int, data: dict) -> dict:

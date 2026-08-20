@@ -77,13 +77,19 @@ def create_template_step(template_id: int, step_order: int, step_key: str, step_
 
 # ── Instances ────────────────────────────────────────────────────────────────
 
-def create_instance(template_id: int, record_type: str, record_id: int, company_id: str | None) -> dict:
+def create_instance(template_id: int, record_type: str, record_id: int, company_id: str | None,
+                     *, document_version_id: int | None = None) -> dict:
+    """`document_version_id` (Document Control redesign only — every other
+    caller omits it) ties this instance to the exact
+    qms_document_versions row it reviews/approves, so votes and audit
+    entries can be traced to a specific version transitively via this
+    instance."""
     conn = get_connection()
     cur = conn.execute(
         """INSERT INTO qms_workflow_instances
-           (template_id, record_type, record_id, company_id, status, current_step_order)
-           VALUES (?,?,?,?, 'in_progress', 1)""",
-        (template_id, record_type, record_id, company_id or ""),
+           (template_id, record_type, record_id, company_id, status, current_step_order, document_version_id)
+           VALUES (?,?,?,?, 'in_progress', 1, ?)""",
+        (template_id, record_type, record_id, company_id or "", document_version_id),
     )
     conn.commit()
     row = conn.execute(
