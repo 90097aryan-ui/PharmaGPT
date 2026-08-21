@@ -122,10 +122,12 @@ def test_approval_holds_at_approved_with_zero_trainees(db_path):
     assert qdb.get_document(doc["id"])["status"] == "Approved"
 
 
-def test_approval_becomes_effective_immediately_if_training_already_cleared(db_path):
-    """If trainees were completed BEFORE the final approval finished, the
-    document should become Effective the moment approval completes — no
-    second manual action required."""
+def test_approval_holds_at_approved_even_if_training_already_cleared_until_released(db_path):
+    """Corrected (spec §17/§20): even if trainees were completed BEFORE the
+    final approval finished, the document must NOT become Effective
+    automatically — an explicit Quality Coordinator release
+    (qdb.try_clear_training_gate, now only invoked from the dedicated
+    /release route) is always required regardless of training-gate timing."""
     doc = _make_document()
     wfe.start_instance("DOCUMENT_WORKFLOW_V1", "document", doc["id"], COMPANY_ID, "Ada Author")
     wfe.assign_approvers("document", doc["id"], 2, [{"user_id": "rev-1", "display_name": "Rita"}])
@@ -139,14 +141,20 @@ def test_approval_becomes_effective_immediately_if_training_already_cleared(db_p
     wfe.decide_step("document", doc["id"], 3, "approve", user_id="appr-1", role="company_admin", performed_by="Al")
 
     doc_after = qdb.get_document(doc["id"])
-    assert doc_after["status"] == "Effective"
-    assert doc_after["effective_date"]
+    assert doc_after["status"] == "Approved"
+    assert not doc_after.get("effective_date")
+    version = qdb.get_current_version(doc["id"])
+    assert version["status"] == "approved"
+
+    released = qdb.try_clear_training_gate(doc["id"])
+    assert released["status"] == "Effective"
+    assert released["effective_date"]
     version = qdb.get_current_version(doc["id"])
     assert version["status"] == "effective"
     assert version["effective_date"]
 
 
-def test_training_completion_after_approval_flips_to_effective_via_route(client):
+def test_training_completion_after_approval_requires_explicit_release_via_route(client):
     # The `client` fixture's fake tenant (tests/conftest.py) always acts as
     # this fixed user_id — the approver assigned to each step must match it
     # for decide_step()'s "only a named assignee may decide" check to pass.
@@ -182,6 +190,14 @@ def test_training_completion_after_approval_flips_to_effective_via_route(client)
 
     gate_after = client.get(f"/qms/documents/{did}/training/gate").get_json()
     assert gate_after["cleared"] is True
+    # Training completion alone must NOT flip the document to Effective —
+    # spec §17/§20: only an explicit Quality Coordinator release does.
+    assert client.get(f"/qms/documents/{did}").get_json()["status"] == "Approved"
+
+    with _reauth(True):
+        r = client.post(f"/qms/documents/{did}/release", json=SIGN)
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["status"] == "Effective"
     assert client.get(f"/qms/documents/{did}").get_json()["status"] == "Effective"
 
 

@@ -27,6 +27,8 @@ async function qmsDocShowList(filters = {}) {
         <p>SOPs, Protocols, Specifications, and controlled documents — lifecycle, versioning, and training</p>
       </div>
       <div class="qms-header-actions">
+        ${((window.PharmaAuth && window.PharmaAuth.getUser()) || {}).role === "company_admin"
+          ? `<button class="btn-secondary" onclick="qmsDocOpenApproverPoolSettings()">Configure Approver Pool</button>` : ""}
         <button class="btn-primary" onclick="qmsDocOpenNew()">+ New Document</button>
       </div>
     </div>
@@ -122,8 +124,15 @@ async function qmsDocLoadList(filters = {}) {
 // document is pre-typed and tagged to the active project — this module
 // still does all the actual work (modal, validation, POST), Project
 // Workspace just supplies a starting point.
-function qmsDocOpenNew(prefill) {
+// Document Control redesign (spec §4/§6): the create step is where the
+// author picks the CONTROLLED SOP TEMPLATE (index + controlled headings/
+// sub-headings) — creating the document immediately creates its 0.1 Draft
+// (qms_document_database.create_initial_version, server-side, automatic).
+// Workflow initiation happens later, only once Self-Check + Final Author
+// Version are complete — see qmsDocRenderWorkflowTab.
+async function qmsDocOpenNew(prefill) {
   if (window.PharmaAuth && !window.PharmaAuth.requireCompanyContext()) return;
+  await qmsLoadMeta();
   const meta = window.QMS_META || { document_types: [] };
   const presetType = (prefill && prefill.doc_type) || "SOP";
   const overlay = document.createElement("div");
@@ -133,7 +142,7 @@ function qmsDocOpenNew(prefill) {
   overlay.innerHTML = `
     <div class="modal open qms-modal-lg">
       <div class="modal-header">
-        <h2>New Controlled Document</h2>
+        <h2>Create Document</h2>
         <button class="modal-close" onclick="document.getElementById('qms-doc-new-modal').remove()">&times;</button>
       </div>
       <div class="modal-body">
@@ -144,7 +153,11 @@ function qmsDocOpenNew(prefill) {
           </div>
           <div class="form-field">
             <label>Document Type</label>
-            <select id="qms-new-doc-type">${qmsOptions(meta.document_types, presetType)}</select>
+            <select id="qms-new-doc-type" onchange="qmsDocRefreshTemplateOptions()">${qmsOptions(meta.document_types, presetType)}</select>
+          </div>
+          <div class="form-field">
+            <label>Controlled SOP Template</label>
+            <select id="qms-new-doc-template"><option value="">Loading templates…</option></select>
           </div>
           <div class="form-field">
             <label>Department</label>
@@ -159,6 +172,10 @@ function qmsDocOpenNew(prefill) {
             <input type="text" id="qms-new-doc-owner" placeholder="Document owner" />
           </div>
         </div>
+        <p style="font-size:11.5px;color:var(--text-muted);margin-top:10px">
+          Creating the document creates its first Draft version (0.1) automatically. The template's
+          controlled headings/sub-headings cannot be removed, renamed, or reordered by AI Assist.
+        </p>
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" onclick="document.getElementById('qms-doc-new-modal').remove()">Cancel</button>
@@ -167,8 +184,26 @@ function qmsDocOpenNew(prefill) {
     </div>
   `;
   document.body.appendChild(overlay);
+  qmsDocRefreshTemplateOptions();
 }
 window.qmsDocOpenNew = qmsDocOpenNew;
+
+async function qmsDocRefreshTemplateOptions() {
+  const typeSel = document.getElementById("qms-new-doc-type");
+  const tplSel = document.getElementById("qms-new-doc-template");
+  if (!typeSel || !tplSel) return;
+  tplSel.innerHTML = `<option value="">Loading templates…</option>`;
+  try {
+    const templates = await qmsFetch(`/qms/documents/templates?doc_type=${encodeURIComponent(typeSel.value)}`);
+    tplSel.innerHTML = templates.length
+      ? `<option value="">No template (free-form)</option>` +
+        templates.map(t => `<option value="${t.id}">${t.name}</option>`).join("")
+      : `<option value="">No controlled template defined for ${typeSel.value} yet</option>`;
+  } catch (e) {
+    tplSel.innerHTML = `<option value="">Failed to load templates</option>`;
+  }
+}
+window.qmsDocRefreshTemplateOptions = qmsDocRefreshTemplateOptions;
 
 async function qmsDocCreate() {
   const title = document.getElementById("qms-new-doc-title").value.trim();
@@ -176,6 +211,7 @@ async function qmsDocCreate() {
   const btn = document.getElementById("qms-doc-create-btn");
   if (btn.disabled) return;
   btn.disabled = true;
+  const templateId = document.getElementById("qms-new-doc-template").value;
   const data = {
     title,
     doc_type: document.getElementById("qms-new-doc-type").value,
@@ -183,6 +219,7 @@ async function qmsDocCreate() {
     category: document.getElementById("qms-new-doc-category").value.trim(),
     owner: document.getElementById("qms-new-doc-owner").value.trim(),
   };
+  if (templateId) data.template_id = Number(templateId);
   // Optional project tag set by qmsDocOpenNew's prefill (Phase C) — absent
   // for every pre-existing caller, so their payload is unchanged.
   const modalEl = document.getElementById("qms-doc-new-modal");
@@ -285,15 +322,19 @@ function qmsDocRenderTab(doc) {
       <div class="qms-section-card">
         <h3>Document Control Information</h3>
         <div class="form-grid">
-          <div class="form-field"><label>Version</label><input type="text" id="qms-ov-version" value="${doc.version}" /></div>
+          <div class="form-field"><label>Version</label><input type="text" value="${doc.version}" disabled title="System-controlled — see Version History tab" /></div>
           <div class="form-field"><label>Status</label><input type="text" value="${doc.status}" disabled /></div>
-          <div class="form-field"><label>Effective Date</label><input type="date" id="qms-ov-effective" value="${doc.effective_date || ""}" /></div>
-          <div class="form-field"><label>Review Date</label><input type="date" id="qms-ov-review" value="${doc.review_date || ""}" /></div>
+          <div class="form-field"><label>Effective Date</label><input type="text" value="${doc.effective_date || "—"}" disabled title="Set automatically when the Quality Coordinator releases this document" /></div>
+          <div class="form-field"><label>Review Date</label><input type="text" value="${doc.review_date || "—"}" disabled title="Set automatically when Review is accepted" /></div>
           <div class="form-field"><label>Expiry Date</label><input type="date" id="qms-ov-expiry" value="${doc.expiry_date || ""}" /></div>
           <div class="form-field"><label>Owner</label><input type="text" id="qms-ov-owner" value="${doc.owner || ""}" /></div>
           <div class="form-field"><label>Reviewer</label><input type="text" id="qms-ov-reviewer" list="qms-doc-approver-directory" value="${doc.reviewer || ""}" placeholder="Search or type a name" /></div>
           <div class="form-field"><label>Approver</label><input type="text" id="qms-ov-approver" list="qms-doc-approver-directory" value="${doc.approver || ""}" placeholder="Search or type a name" /></div>
         </div>
+        <p style="font-size:11.5px;color:var(--text-muted);margin-top:2px">
+          Version, Status, Effective Date, and Review Date are system-controlled and cannot be edited here —
+          see the <strong>Workflow</strong> tab for the current lifecycle stage and required actions.
+        </p>
         <div class="qms-form-actions">
           <button class="btn-primary" onclick="qmsDocSaveOverview(${id})">Save</button>
         </div>
@@ -306,13 +347,16 @@ function qmsDocRenderTab(doc) {
       <div class="qms-section-card">
         <h3>AI Draft Generation</h3>
         <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px">
-          Generates complete ${doc.doc_type} content (Purpose, Scope, Responsibilities, Procedure, Acceptance Criteria, References) using the Yuktav regulatory intelligence engine.
+          ${doc.template_id
+            ? "Generates content under this document's Controlled SOP Template — the controlled headings/sub-headings are preserved; missing site-specific detail is flagged for you to complete."
+            : `Generates complete ${doc.doc_type} content (Purpose, Scope, Responsibilities, Procedure, Acceptance Criteria, References) — no controlled template was selected at creation.`}
         </p>
         <div class="qms-form-actions" style="justify-content:flex-start;margin-top:0;margin-bottom:14px">
           <button class="btn-primary" id="qms-doc-generate-btn" onclick="qmsDocGenerateDraft(${id})"><span class=\'icon\' data-lucide=\'sparkles\'></span> Generate Draft with AI</button>
           <button class="btn-secondary" id="qms-doc-review-btn" onclick="qmsDocRunReview(${id})">Run Regulatory Compliance Review</button>
         </div>
         <div id="qms-doc-review-result"></div>
+        <div id="qms-doc-structure-warning"></div>
         <textarea id="qms-doc-content-editor" style="width:100%;min-height:400px;font-family:monospace;font-size:12px;padding:14px;border:1px solid var(--border);border-radius:6px" placeholder="Document content (markdown)…">${doc.content || ""}</textarea>
         <div class="qms-form-actions">
           <button class="btn-primary" onclick="qmsDocSaveContent(${id})">Save Content</button>
@@ -323,16 +367,24 @@ function qmsDocRenderTab(doc) {
       qmsDocRenderReview(doc.ai_review_data);
     }
   } else if (qmsDocActiveTab === "workflow") {
-    el.innerHTML = `<div id="qms-workflow-document-${id}"></div>`;
-    renderWorkflowPanel(`qms-workflow-document-${id}`, "document", "/qms/documents", id);
+    qmsDocRenderWorkflowTab(id, doc);
   } else if (qmsDocActiveTab === "versions") {
-    qmsDocRenderVersions(id);
+    qmsDocRenderVersions(id, doc);
   } else if (qmsDocActiveTab === "training") {
     qmsDocRenderTraining(id);
   } else if (qmsDocActiveTab === "distribution") {
     qmsDocRenderDistribution(id);
   } else if (qmsDocActiveTab === "attachments") {
-    el.innerHTML = `<div id="qms-attachments-document-${id}"></div>`;
+    el.innerHTML = `
+      <div class="qms-section-card" style="margin-bottom:14px">
+        <p style="font-size:12.5px;color:var(--text-muted);margin:0">
+          <strong>Supporting records only</strong> — specifications, risk assessments, validation reports,
+          reference material. This is <strong>not</strong> the controlled document content. Use
+          <strong>Upload Final Author Version</strong> on the Workflow tab for the content that Review and
+          Approval act on.
+        </p>
+      </div>
+      <div id="qms-attachments-document-${id}"></div>`;
     qmsRenderAttachments(`qms-attachments-document-${id}`, "document", id);
   } else if (qmsDocActiveTab === "comments") {
     el.innerHTML = `<div id="qms-comments-document-${id}"></div>`;
@@ -341,34 +393,311 @@ function qmsDocRenderTab(doc) {
     el.innerHTML = `<div id="qms-audit-document-${id}"></div>`;
     qmsRenderAuditTrail(`qms-audit-document-${id}`, "document", id);
   } else if (qmsDocActiveTab === "approval") {
-    el.innerHTML = `<div id="qms-approval-document-${id}"></div>`;
-    const actions = ["Submitted for Review", "Reviewed", "Submitted for Approval", "Approved", "Rejected", "Send for Revision", "Made Obsolete"];
-    qmsRenderApproval(`qms-approval-document-${id}`, "document", id, actions, `/qms/documents/${id}/approval`,
-      () => qmsDocRefreshApprovalTab(id));
+    qmsDocRenderApprovalTrailReadOnly(id);
   }
 }
 
-async function qmsDocRefreshApprovalTab(id) {
-  const doc = await qmsFetch(`/qms/documents/${id}`);
-  const metaEl = document.querySelector(".qms-detail-meta");
-  if (metaEl) {
-    metaEl.innerHTML = `
-      <span>${qmsBadge(doc.status)}</span>
-      <span>Version ${doc.version}</span>
-      <span>Department: ${doc.department || "—"}</span>
-      <span>Owner: ${doc.owner || "—"}</span>
+// Document Control redesign: Review Accept/Reject and Approval votes are now
+// decided exclusively from the Workflow tab (state-machine-enforced, one
+// action per current step). This tab is read-only history — showing the
+// free-form legacy action dropdown here would let a user attempt an action
+// that bypasses the engine and gets rejected server-side with a confusing
+// 409, or (for a genuinely legal legacy action) duplicate the Workflow tab.
+async function qmsDocRenderApprovalTrailReadOnly(id) {
+  const el = document.getElementById("qms-doc-tab-body");
+  el.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading approval trail…</div>`;
+  try {
+    const entries = await qmsFetch(`/qms/document/${id}/approval`);
+    el.innerHTML = `
+      <div class="qms-section-card" style="margin-bottom:14px">
+        <p style="font-size:12px;color:var(--text-muted);margin:0">
+          Review Accept/Reject and Approval votes are decided from the <strong>Workflow</strong> tab.
+          This is a read-only record of those decisions; see <strong>Audit Trail</strong> for the complete
+          lifecycle history.
+        </p>
+      </div>
+      ${entries.length ? entries.map(a => `
+        <div class="qms-panel-item">
+          <div>
+            <span class="qms-audit-action">${a.action}</span>
+            <div class="qms-panel-item-meta">${a.performed_by || ""}${a.role ? ` (${a.role})` : ""} · ${a.created_at}</div>
+            ${a.comments ? `<div>${a.comments}</div>` : ""}
+          </div>
+        </div>`).join("") : `<div class="qms-empty"><p>No approval actions recorded yet.</p></div>`}
     `;
+  } catch (e) {
+    el.innerHTML = `<div class="qms-empty"><p>Failed to load approval trail: ${e.message}</p></div>`;
   }
-  const actions = ["Submitted for Review", "Reviewed", "Submitted for Approval", "Approved", "Rejected", "Send for Revision", "Made Obsolete"];
-  qmsRenderApproval(`qms-approval-document-${id}`, "document", id, actions, `/qms/documents/${id}/approval`,
-    () => qmsDocRefreshApprovalTab(id));
+}
+
+// ── Workflow tab (Document Control redesign): state-aware Author Workspace /
+// Review & Approval / Quality Release panel — replaces the raw "Start
+// Workflow" generic panel as the primary Document Control UI. Only once a
+// workflow instance actually exists does this delegate to the shared
+// renderWorkflowPanel (workflow_panel.js) for the live step-decision UI. ───
+
+async function qmsDocRenderWorkflowTab(id, doc) {
+  const el = document.getElementById("qms-doc-tab-body");
+  el.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading workflow…</div>`;
+  let version;
+  try {
+    version = await qmsFetch(`/qms/documents/${id}/versions/current`);
+  } catch (e) {
+    el.innerHTML = `<div class="qms-empty"><p>Failed to load current version: ${e.message}</p></div>`;
+    return;
+  }
+
+  if (version.status === "draft") {
+    await qmsDocRenderDraftStepper(id, doc, version);
+  } else if (version.status === "under_review" || version.status === "pending_approval") {
+    await qmsDocRenderReviewApprovalPanel(id, doc, version);
+  } else if (version.status === "approved") {
+    await qmsDocRenderReleasePanel(id, doc, version);
+  } else if (version.status === "effective") {
+    qmsDocRenderEffectivePanel(id, doc, version);
+  } else {
+    // review_rejected / approval_rejected / superseded should never be the
+    // CURRENT version (a rejection always forks a fresh Draft current
+    // version) — rendered read-only as a defensive fallback only.
+    qmsDocRenderImmutableVersionPanel(id, doc, version);
+  }
+}
+
+async function qmsDocRenderDraftStepper(id, doc, version) {
+  const el = document.getElementById("qms-doc-tab-body");
+  const selfCheckDone = !!version.self_check_completed_at;
+  const finalUploaded = !!version.source_attachment_id;
+  let finalFile = null;
+  if (finalUploaded) {
+    try {
+      const atts = await qmsFetch(`/qms/document/${id}/attachments`);
+      finalFile = atts.find(a => a.id === version.source_attachment_id) || null;
+    } catch (e) { /* non-fatal — upload confirmation still shown without file details */ }
+  }
+  const readyToSubmit = selfCheckDone && finalUploaded;
+  const missing = [!selfCheckDone && "Author Self-Check", !finalUploaded && "Final Author Version upload"].filter(Boolean);
+
+  el.innerHTML = `
+    <div class="qms-section-card">
+      <h3>Draft ${version.version_number} — Author Workspace</h3>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:0">Complete these steps in order, then Submit for Review.</p>
+    </div>
+    <div class="qms-workflow-stepper">
+      <div class="qms-stat-card">
+        <strong>1. Download Draft Template</strong>
+        <div class="qms-form-actions" style="margin-top:6px">
+          <button class="btn-secondary" onclick="qmsDocDownloadDraftTemplate(${id})">Download</button>
+        </div>
+      </div>
+      <div class="qms-stat-card">
+        <strong>2. Content / AI Assist</strong>
+        <div class="qms-form-actions" style="margin-top:6px">
+          <button class="btn-secondary" onclick="qmsDocSwitchTab('content')">Go to Content Tab</button>
+        </div>
+      </div>
+      <div class="qms-stat-card ${selfCheckDone ? "success" : "info"}">
+        <strong>3. Author Self-Check${selfCheckDone ? " — Complete" : ""}</strong>
+        ${selfCheckDone
+          ? `<div class="qms-panel-item-meta">Completed ${version.self_check_completed_at}</div>`
+          : `<p style="font-size:11.5px;color:var(--text-muted);margin:4px 0">Confirms the content has been reviewed against the controlled headings and is accurate and complete.</p>
+             <div class="qms-form-actions"><button class="btn-primary" onclick="qmsDocRecordSelfCheck(${id})">Complete Author Self-Check</button></div>`}
+      </div>
+      <div class="qms-stat-card ${finalUploaded ? "success" : "info"}">
+        <strong>4. Upload Final Author Version${finalUploaded ? " — Uploaded" : ""}</strong>
+        ${finalUploaded ? `<div class="qms-panel-item-meta">${finalFile ? (finalFile.original_name || finalFile.filename) : "File"}${finalFile && finalFile.uploaded_by ? " · uploaded by " + finalFile.uploaded_by : ""}${finalFile && finalFile.created_at ? " · " + finalFile.created_at : ""}</div>` : ""}
+        <p style="font-size:11.5px;color:var(--text-muted);margin:4px 0">Edit the file locally, then upload it here — it becomes the controlled content for this version. This is separate from Attachments.</p>
+        <div class="form-field"><input type="file" id="qms-final-version-file-${id}" /></div>
+        <div class="qms-form-actions" style="margin-top:6px">
+          <button class="btn-secondary" onclick="qmsDocUploadFinalVersion(${id})">${finalUploaded ? "Re-upload" : "Upload"} Final Author Version</button>
+        </div>
+      </div>
+      <div class="qms-stat-card ${readyToSubmit ? "info" : ""}">
+        <strong>5. Submit for Review</strong>
+        <p style="font-size:11.5px;color:var(--text-muted);margin:4px 0">
+          ${readyToSubmit ? "All gates complete." : `Blocked — needs: ${missing.join(", ")}.`}
+        </p>
+        <div class="qms-form-actions">
+          <button class="btn-primary" ${readyToSubmit ? "" : "disabled"} onclick="qmsDocSubmitForReview(${id})">Submit for Review</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function qmsDocDownloadDraftTemplate(id) {
+  qmsDocDownloadReportAsFile(id, `Document_${id}_draft.md`);
+}
+window.qmsDocDownloadDraftTemplate = qmsDocDownloadDraftTemplate;
+
+async function qmsDocDownloadReportAsFile(id, filename) {
+  try {
+    const { markdown } = await qmsFetch(`/qms/documents/${id}/report`);
+    const blob = new Blob([markdown], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    qmsToast("Download failed: " + e.message);
+  }
+}
+
+async function qmsDocRecordSelfCheck(id) {
+  const confirmed = confirm(
+    "Confirm Author Self-Check: the content has been reviewed against the controlled headings/" +
+    "sub-headings, is accurate and complete, and is ready for Final Author Version upload."
+  );
+  if (!confirmed) return;
+  try {
+    await qmsPostJSON(`/qms/documents/${id}/self-check`, {});
+    qmsToast("Author Self-Check recorded");
+    qmsDocSwitchTab("workflow");
+  } catch (e) {
+    qmsToast("Failed: " + e.message);
+  }
+}
+window.qmsDocRecordSelfCheck = qmsDocRecordSelfCheck;
+
+async function qmsDocUploadFinalVersion(id) {
+  const input = document.getElementById(`qms-final-version-file-${id}`);
+  if (!input || !input.files.length) { qmsToast("Choose a file first"); return; }
+  const fd = new FormData();
+  fd.append("file", input.files[0]);
+  try {
+    const res = await fetch(`/qms/documents/${id}/versions/upload`, { method: "POST", body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
+    qmsToast("Final Author Version uploaded");
+    qmsDocSwitchTab("workflow");
+  } catch (e) {
+    qmsToast("Upload failed: " + e.message);
+  }
+}
+window.qmsDocUploadFinalVersion = qmsDocUploadFinalVersion;
+
+async function qmsDocSubmitForReview(id) {
+  try {
+    await qmsPostJSON(`/qms/documents/${id}/workflow/start`, {});
+    qmsToast("Submitted for Review");
+    qmsDocSwitchTab("workflow");
+  } catch (e) {
+    qmsToast("Failed: " + e.message);
+  }
+}
+window.qmsDocSubmitForReview = qmsDocSubmitForReview;
+
+async function qmsDocRenderReviewApprovalPanel(id, doc, version) {
+  const el = document.getElementById("qms-doc-tab-body");
+  el.innerHTML = `
+    <div class="qms-section-card" style="margin-bottom:14px">
+      <h3>Version ${version.version_number} — ${QMS_VERSION_STATUS_LABEL[version.status] || version.status}</h3>
+      <div class="qms-panel-item-meta">
+        Author Self-Check completed ${version.self_check_completed_at || "—"} ·
+        Final Author Version uploaded: ${version.source_attachment_id ? "Yes" : "No"}
+      </div>
+      <p style="font-size:11.5px;color:var(--text-muted);margin-top:4px">This version is frozen while under Review/Approval — no further author edits until it is Accepted, Rejected, or Approved.</p>
+    </div>
+    <div id="qms-workflow-document-${id}"></div>
+  `;
+  await renderWorkflowPanel(`qms-workflow-document-${id}`, "document", "/qms/documents", id);
+}
+
+async function qmsDocRenderReleasePanel(id, doc, version) {
+  const el = document.getElementById("qms-doc-tab-body");
+  el.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading training gate…</div>`;
+  let gate;
+  try {
+    gate = await qmsFetch(`/qms/documents/${id}/training/gate`);
+  } catch (e) {
+    el.innerHTML = `<div class="qms-empty"><p>Failed to load training gate: ${e.message}</p></div>`;
+    return;
+  }
+  const user = (window.PharmaAuth && window.PharmaAuth.getUser()) || {};
+  const canRelease = user.role === "company_admin" || user.role === "reviewer_qa";
+  const pct = gate.completion_pct == null ? "—" : `${gate.completion_pct.toFixed(1)}%`;
+
+  el.innerHTML = `
+    <div class="qms-section-card">
+      <h3>Version ${version.version_number} — Approved, Awaiting Release</h3>
+      <p style="font-size:12px;color:var(--text-muted)">
+        Quorum Approval is complete. Training completion must reach ${gate.threshold_pct.toFixed(0)}%
+        before this document can be released as Effective by the Quality Coordinator.
+      </p>
+      <div class="qms-stats-grid">
+        <div class="qms-stat-card ${gate.cleared ? "success" : "critical"}">
+          <div class="qms-stat-value">${pct}</div>
+          <div class="qms-stat-label">Training Completion (${gate.trainee_count} trainee${gate.trainee_count === 1 ? "" : "s"})</div>
+        </div>
+      </div>
+      ${gate.cleared ? "" : `<p style="font-size:12.5px;color:var(--danger,#c0392b)">Blocked — go to the Training tab to record/complete training.</p>`}
+      ${canRelease
+        ? `<div class="qms-form-actions"><button class="btn-primary" ${gate.cleared ? "" : "disabled"} onclick="qmsDocReleaseEffective(${id})">Release / Make Effective</button></div>`
+        : `<p style="font-size:11.5px;color:var(--text-muted)">Only a Quality Coordinator / authorized Quality role can release this document — the Author cannot make an SOP Effective.</p>`}
+    </div>
+  `;
+}
+
+async function qmsDocReleaseEffective(id) {
+  if (!window.PharmaESign) { qmsToast("Electronic Signature dialog failed to load"); return; }
+  // 21 CFR Part 11 / EU GMP Annex 11: releasing a document as Effective is a
+  // GMP decision and requires a fresh Electronic Signature.
+  window.PharmaESign.open({
+    meaning: "Released",
+    onConfirm: async ({ password, meaning, reason }) => {
+      try {
+        await qmsPostJSON(`/qms/documents/${id}/release`, { password, meaning, reason });
+        qmsToast("Released as Effective");
+        qmsDocSwitchTab("workflow");
+      } catch (e) {
+        qmsToast("Release failed: " + e.message);
+      }
+    },
+  });
+}
+window.qmsDocReleaseEffective = qmsDocReleaseEffective;
+
+function qmsDocRenderEffectivePanel(id, doc, version) {
+  const el = document.getElementById("qms-doc-tab-body");
+  el.innerHTML = `
+    <div class="qms-section-card">
+      <h3>Version ${version.version_number} — Effective</h3>
+      <div class="qms-panel-item-meta">Effective ${version.effective_date || "—"}</div>
+      <p style="font-size:12px;color:var(--text-muted)">This version is the controlled, released document. To make a change, start a new revision cycle.</p>
+      <div class="qms-form-actions">
+        <button class="btn-primary" onclick="qmsDocStartRevision(${id})">Start New Revision</button>
+      </div>
+    </div>
+  `;
+}
+
+async function qmsDocStartRevision(id) {
+  try {
+    await qmsPostJSON(`/qms/documents/${id}/versions/start-revision`, {});
+    qmsToast("New revision started");
+    qmsDocSwitchTab("workflow");
+  } catch (e) {
+    qmsToast("Failed: " + e.message);
+  }
+}
+window.qmsDocStartRevision = qmsDocStartRevision;
+
+function qmsDocRenderImmutableVersionPanel(id, doc, version) {
+  const el = document.getElementById("qms-doc-tab-body");
+  el.innerHTML = `
+    <div class="qms-section-card">
+      <h3>Version ${version.version_number} — ${QMS_VERSION_STATUS_LABEL[version.status] || version.status}</h3>
+      <p style="font-size:12px;color:var(--text-muted)">This version is immutable. See the Version History tab for the full timeline.</p>
+    </div>
+  `;
 }
 
 async function qmsDocSaveOverview(id) {
+  // Version/Status/Effective Date/Review Date are system-controlled (spec
+  // §8/§9/§22) — not sent from this form. The backend independently drops
+  // effective_date/review_date if a stale client build still sends them.
   const data = {
-    version: document.getElementById("qms-ov-version").value.trim(),
-    effective_date: document.getElementById("qms-ov-effective").value,
-    review_date: document.getElementById("qms-ov-review").value,
     expiry_date: document.getElementById("qms-ov-expiry").value,
     owner: document.getElementById("qms-ov-owner").value.trim(),
     reviewer: document.getElementById("qms-ov-reviewer").value.trim(),
@@ -398,6 +727,8 @@ function qmsDocGenerateDraft(id) {
   const editor = document.getElementById("qms-doc-content-editor");
   const reviewBtn = document.getElementById("qms-doc-review-btn");
   const genBtn = document.getElementById("qms-doc-generate-btn");
+  const warnEl = document.getElementById("qms-doc-structure-warning");
+  if (warnEl) warnEl.innerHTML = "";
   editor.value = "";
   editor.disabled = true;
   if (reviewBtn) reviewBtn.disabled = true;
@@ -405,11 +736,26 @@ function qmsDocGenerateDraft(id) {
   qmsToast("Generating draft…");
   qmsStream(`/qms/documents/${id}/generate`, {}, {
     onChunk: chunk => { editor.value += chunk; editor.scrollTop = editor.scrollHeight; },
-    onDone: () => {
+    onDone: (event) => {
       editor.disabled = false;
       if (reviewBtn) reviewBtn.disabled = false;
       if (genBtn) genBtn.disabled = false;
       qmsToast("Draft generated");
+      // Document Control redesign (spec §6): AI Assist must never remove,
+      // rename, or reorder controlled headings — validate_template_structure()
+      // (services/qms_document_prompt.py) is the deterministic backstop; this
+      // surfaces its result so the Author sees a violation immediately
+      // instead of only finding it in the audit trail.
+      const check = event && event.structure_check;
+      if (warnEl && check && !check.valid) {
+        warnEl.innerHTML = `
+          <div class="qms-section-card" style="border-color:var(--danger,#c0392b);margin-top:12px">
+            <h3 style="color:var(--danger,#c0392b)">Controlled Template Structure Violation</h3>
+            ${check.missing_headings && check.missing_headings.length ? `<p><strong>Missing controlled heading(s):</strong> ${check.missing_headings.join(", ")}</p>` : ""}
+            ${check.out_of_order && check.out_of_order.length ? `<p><strong>Out-of-order heading(s):</strong> ${check.out_of_order.join(", ")}</p>` : ""}
+            <p style="font-size:12px;color:var(--text-muted)">Fix the content below before Author Self-Check — the controlled index/headings/sub-headings must be preserved exactly.</p>
+          </div>`;
+      }
     },
     onError: err => {
       editor.disabled = false;
@@ -451,48 +797,81 @@ function qmsDocRenderReview(review) {
   `;
 }
 
-async function qmsDocRenderVersions(id) {
+// Document Control redesign (spec §3/§21): version creation is entirely
+// system-controlled (Self-Check + Final Author Version + Review + Approval +
+// Training drive numbering — see services/document_versioning.py). This tab
+// is now a READ-ONLY historical timeline — no "Create New Version" /
+// "New Version Label" / "Snapshot Current Content" form. Every version row
+// except the current Draft is permanently immutable.
+const QMS_VERSION_STATUS_LABEL = {
+  draft: "Draft", under_review: "Under Review", pending_approval: "Pending Approval",
+  approved: "Approved", effective: "Effective", review_rejected: "Review Rejected",
+  approval_rejected: "Approval Rejected", superseded: "Superseded",
+};
+
+async function qmsDocRenderVersions(id, doc) {
   const el = document.getElementById("qms-doc-tab-body");
-  el.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading versions…</div>`;
-  const versions = await qmsFetch(`/qms/documents/${id}/versions`);
+  el.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading version history…</div>`;
+  const versions = (await qmsFetch(`/qms/documents/${id}/versions`)).slice().reverse(); // oldest -> newest
+  if (!versions.length) {
+    el.innerHTML = `<div class="qms-empty"><p>No version history recorded.</p></div>`;
+    return;
+  }
   el.innerHTML = `
-    <div class="qms-section-card">
-      <h3>Create New Version</h3>
-      <div class="form-grid cols-3">
-        <div class="form-field"><label>New Version Label</label><input type="text" id="qms-newver-label" placeholder="e.g. 2.0" /></div>
-        <div class="form-field span-2"><label>Change Summary</label><input type="text" id="qms-newver-summary" placeholder="What changed" /></div>
-      </div>
-      <div class="qms-form-actions">
-        <button class="btn-primary" onclick="qmsDocCreateVersion(${id})">Snapshot Current Content as New Version</button>
-      </div>
+    <div class="qms-section-card" style="margin-bottom:14px">
+      <h3>Version History</h3>
+      <p style="font-size:12px;color:var(--text-muted);margin:0">
+        Read-only timeline. Version numbers are assigned automatically and never reused; every version
+        except the current Draft is permanently immutable.
+      </p>
     </div>
-    ${versions.length ? `
-      <table class="qms-table">
-        <thead><tr><th>Version</th><th>Change Summary</th><th>Changed By</th><th>Date</th></tr></thead>
-        <tbody>${versions.map(v => `<tr><td>${v.version}</td><td>${v.change_summary || "—"}</td><td>${v.changed_by || "—"}</td><td>${v.created_at}</td></tr>`).join("")}</tbody>
-      </table>` : `<div class="qms-empty"><p>No prior versions recorded.</p></div>`}
+    <div class="qms-workflow-stepper">
+      ${versions.map(v => qmsVersionTimelineRowHTML(id, doc, v)).join("")}
+    </div>
   `;
 }
 
-async function qmsDocCreateVersion(id) {
-  const version = document.getElementById("qms-newver-label").value.trim();
-  const change_summary = document.getElementById("qms-newver-summary").value.trim();
-  if (!version) { qmsToast("Version label is required"); return; }
-  try {
-    await qmsPostJSON(`/qms/documents/${id}/versions`, { version, change_summary, changed_by: "" });
-    qmsToast("New version created");
-    qmsDocRenderVersions(id);
-  } catch (e) {
-    qmsToast("Failed: " + e.message);
-  }
+function qmsVersionTimelineRowHTML(id, doc, v) {
+  const versionLabel = v.version_number || v.version;
+  const isCurrent = doc && doc.current_version_id === v.id;
+  const stateClass = v.status === "effective" ? "success"
+    : (v.status === "review_rejected" || v.status === "approval_rejected") ? "critical"
+    : isCurrent ? "info" : "";
+  return `
+    <div class="qms-stat-card ${stateClass}" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong>${versionLabel} — ${QMS_VERSION_STATUS_LABEL[v.status] || v.status || "Draft"}</strong>
+        <span class="qms-panel-item-meta">${isCurrent ? "Current — editable by Author" : "Immutable"}</span>
+      </div>
+      <div class="qms-panel-item-meta">
+        Created ${v.created_at || "—"}${v.created_by_user_id ? ` by ${v.created_by_user_id}` : ""}
+        ${v.self_check_completed_at ? ` · Self-Check completed ${v.self_check_completed_at}` : ""}
+        ${v.effective_date ? ` · Effective ${v.effective_date}` : ""}
+      </div>
+      ${v.rejection_reason ? `<div class="qms-panel-item-meta">Rejection reason: "${v.rejection_reason}"</div>` : ""}
+      <div class="qms-form-actions" style="margin-top:6px">
+        <button class="btn-secondary" onclick="qmsDocPrint(${id}, ${v.id})">View / Export</button>
+      </div>
+    </div>
+  `;
 }
-window.qmsDocCreateVersion = qmsDocCreateVersion;
 
 async function qmsDocRenderTraining(id) {
   const el = document.getElementById("qms-doc-tab-body");
   el.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading training records…</div>`;
-  const records = await qmsFetch(`/qms/documents/${id}/training`);
+  const [records, gate] = await Promise.all([
+    qmsFetch(`/qms/documents/${id}/training`),
+    qmsFetch(`/qms/documents/${id}/training/gate`).catch(() => null),
+  ]);
+  const gateCard = gate ? `
+    <div class="qms-stats-grid" style="margin-bottom:14px">
+      <div class="qms-stat-card ${gate.cleared ? "success" : "critical"}">
+        <div class="qms-stat-value">${gate.completion_pct == null ? "—" : gate.completion_pct.toFixed(1) + "%"}</div>
+        <div class="qms-stat-label">Training Completion vs. ${gate.threshold_pct.toFixed(0)}% required (current version, ${gate.trainee_count} trainee${gate.trainee_count === 1 ? "" : "s"})</div>
+      </div>
+    </div>` : "";
   el.innerHTML = `
+    ${gateCard}
     <div class="qms-section-card">
       <h3>Add Training Requirement</h3>
       <div class="form-grid cols-3">
@@ -610,11 +989,92 @@ async function qmsDocAcknowledgeDistribution(docId, distId) {
 }
 window.qmsDocAcknowledgeDistribution = qmsDocAcknowledgeDistribution;
 
+// ── Approver Pool settings (Document Control redesign, spec §13) ────────────
+// company_admin-only: Department Head + Quality Head (mandatory) and Plant
+// Head (optional) — the final Approval step's quorum is auto-derived from
+// this pool (routes/qms_documents.py::_effective_quorum_and_pool_approvers),
+// scoped by department with a company-wide default (department="").
+
+const QMS_APPROVER_POOL_ROLES = [
+  { role: "department_head", label: "Department Head" },
+  { role: "quality_head", label: "Quality Head / Designee" },
+  { role: "plant_head", label: "Plant Head (Optional)" },
+];
+
+async function qmsDocOpenApproverPoolSettings() {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay open";
+  overlay.id = "qms-approver-pool-modal";
+  overlay.innerHTML = `
+    <div class="modal open qms-modal-lg">
+      <div class="modal-header">
+        <h2>Configure Approver Pool</h2>
+        <button class="modal-close" onclick="document.getElementById('qms-approver-pool-modal').remove()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-field">
+          <label>Department (leave blank for the company-wide default pool)</label>
+          <input type="text" id="qms-pool-dept" placeholder="e.g. Quality Assurance" oninput="qmsDocLoadApproverPool()" />
+        </div>
+        <div id="qms-pool-rows"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="document.getElementById('qms-approver-pool-modal').remove()">Close</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  await qmsDocLoadApproverPool();
+}
+window.qmsDocOpenApproverPoolSettings = qmsDocOpenApproverPoolSettings;
+
+async function qmsDocLoadApproverPool() {
+  const dept = document.getElementById("qms-pool-dept").value.trim();
+  const rowsEl = document.getElementById("qms-pool-rows");
+  rowsEl.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading…</div>`;
+  const pool = await qmsFetch(`/qms/documents/approver-pool?department=${encodeURIComponent(dept)}`);
+  const byRole = {};
+  pool.forEach(p => { byRole[p.pool_role] = p; });
+  rowsEl.innerHTML = QMS_APPROVER_POOL_ROLES.map(r => {
+    const current = byRole[r.role];
+    return `
+      <div class="qms-section-card" style="margin-top:10px">
+        <h3 style="margin-top:0">${r.label}</h3>
+        ${current ? `<div class="qms-panel-item-meta">Currently: ${current.display_name || current.user_id}</div>` : `<div class="qms-panel-item-meta">Not configured</div>`}
+        <div class="form-grid cols-3">
+          <div class="form-field"><label>User ID</label><input type="text" id="qms-pool-uid-${r.role}" placeholder="Supabase user id" /></div>
+          <div class="form-field"><label>Display Name</label><input type="text" id="qms-pool-name-${r.role}" placeholder="Full name" /></div>
+        </div>
+        <div class="qms-form-actions">
+          <button class="btn-primary" onclick="qmsDocSaveApproverPoolRole('${r.role}')">Save</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+window.qmsDocLoadApproverPool = qmsDocLoadApproverPool;
+
+async function qmsDocSaveApproverPoolRole(pool_role) {
+  const dept = document.getElementById("qms-pool-dept").value.trim();
+  const user_id = document.getElementById(`qms-pool-uid-${pool_role}`).value.trim();
+  const display_name = document.getElementById(`qms-pool-name-${pool_role}`).value.trim();
+  if (!user_id) { qmsToast("User ID is required"); return; }
+  try {
+    await qmsPostJSON(`/qms/documents/approver-pool`, { department: dept, pool_role, user_id, display_name });
+    qmsToast("Approver pool updated");
+    qmsDocLoadApproverPool();
+  } catch (e) {
+    qmsToast("Failed: " + e.message);
+  }
+}
+window.qmsDocSaveApproverPoolRole = qmsDocSaveApproverPoolRole;
+
 // ── Print / Export ──────────────────────────────────────────────────────────
 
-async function qmsDocPrint(id) {
+async function qmsDocPrint(id, versionId) {
   try {
-    const { markdown, title } = await qmsFetch(`/qms/documents/${id}/report`);
+    const url = versionId ? `/qms/documents/${id}/report?version_id=${versionId}` : `/qms/documents/${id}/report`;
+    const { markdown, title } = await qmsFetch(url);
     const win = window.open("", "_blank");
     win.document.write(`<html><head><title>${title}</title></head><body>${window.marked ? marked.parse(markdown) : `<pre>${markdown}</pre>`}</body></html>`);
     win.document.close();

@@ -83,13 +83,52 @@ function wfPanelStepHTML(containerId, recordType, routePrefix, recordId, step, i
         ${step.step_type === "approval" ? wfPanelApproversBadge(step.approvers) : ""}
       </div>
       ${body}
+      ${wfPanelPoolSummaryHTML(step)}
     </div>
   `;
 }
 
 function wfPanelApproversBadge(approvers) {
   if (!approvers || !approvers.length) return `<span class="qms-panel-item-meta">No approver assigned</span>`;
-  return `<span class="qms-panel-item-meta">Assigned To: ${approvers.map(a => a.display_name || a.user_id).join(", ")}</span>`;
+  return `<span class="qms-panel-item-meta">Assigned To: ${approvers.map(a => {
+    const label = a.display_name || a.user_id;
+    return a.pool_role ? `${label} (${wfPanelRoleLabel(a.pool_role)})` : label;
+  }).join(", ")}</span>`;
+}
+
+function wfPanelRoleLabel(pool_role) {
+  return String(pool_role || "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// Document Control redesign (spec §13/§15/§20): routes/qms_documents.py's
+// GET .../workflow additively attaches `pool_summary` to the final Approval
+// step (Department Head / Quality Head / Plant Head-optional) — absent for
+// every other record_type (CAPA/Deviation/Change Control), so this renders
+// nothing for them. Shows "Department Head Pending / Quality Head Pending /
+// Plant Head Optional" plus "Required approvals: X of Y".
+function wfPanelPoolSummaryHTML(step) {
+  if (!step.pool_summary) return "";
+  const approvedUserIds = new Set(
+    (step.votes || []).filter(v => v.decision === "approve").map(v => v.user_id)
+  );
+  const rows = step.pool_summary.map(p => {
+    const label = wfPanelRoleLabel(p.pool_role);
+    if (!p.configured) {
+      return `<div class="qms-panel-item-meta">${label}: ${p.optional ? "Optional — Not Configured" : "Not Configured"}</div>`;
+    }
+    const approver = (step.approvers || []).find(a => a.pool_role === p.pool_role);
+    const status = approver && approvedUserIds.has(approver.user_id) ? "Approved" : "Pending";
+    return `<div class="qms-panel-item-meta">${label}: ${status}${p.optional ? " (Optional)" : ""}</div>`;
+  }).join("");
+  const required = step.required_quorum || 0;
+  const configuredCount = step.pool_summary.filter(p => p.configured).length;
+  const cast = step.votes_cast || 0;
+  return `
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+      ${rows}
+      ${required ? `<div class="qms-panel-item-meta" style="margin-top:4px"><strong>Required approvals: ${required} of ${configuredCount}</strong> — Current approvals: ${cast} of ${required}</div>` : ""}
+    </div>
+  `;
 }
 
 function wfPanelActionHTML(containerId, recordType, routePrefix, recordId, step, user) {

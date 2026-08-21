@@ -121,13 +121,17 @@ def test_document_approval_transitions_status(client):
     assert client.get(f"/qms/documents/{did}").get_json()["status"] == "Under Review"
 
     client.post(f"/qms/documents/{did}/approval", json={"action": "Approved", "performed_by": "M Shah"})
-    # Document Control redesign (Phase 4): quorum/approval achieved now
-    # holds at 'Approved', not 'Effective', until the training gate clears
-    # (>=90% completion, >=1 trainee — zero trainees is never treated as
-    # 100%). Complete one trainee to reach the true terminal 'Effective'.
+    # Document Control redesign (Phase 4, corrected per spec §17/§20):
+    # quorum/approval achieved holds at 'Approved' until the training gate
+    # clears (>=90% completion, >=1 trainee) AND an explicit Quality
+    # Coordinator release is issued (POST .../release) — training
+    # completion alone no longer auto-flips the document to Effective; see
+    # tests/test_document_quality_release.py for dedicated coverage.
     assert client.get(f"/qms/documents/{did}").get_json()["status"] == "Approved"
     t = client.post(f"/qms/documents/{did}/training", json={"trainee_name": "T1"}).get_json()
     client.put(f"/qms/documents/training/{t['id']}", json={"training_status": "Completed", "training_date": "2026-01-01"})
+    assert client.get(f"/qms/documents/{did}").get_json()["status"] == "Approved"
+    client.post(f"/qms/documents/{did}/release", json={"meaning": "Released"})
     assert client.get(f"/qms/documents/{did}").get_json()["status"] == "Effective"
 
 

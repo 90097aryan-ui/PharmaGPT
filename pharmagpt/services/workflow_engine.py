@@ -100,23 +100,20 @@ def _apply_change_control_status(record_id: int, status: str) -> None:
 
 def _apply_document_status(record_id: int, status: str) -> None:
     from pharmagpt import qms_document_database as qdb
-    from pharmagpt.routes.qms_documents import _publish_effective_document_to_kb
     mapped = "Draft" if status == "Rejected" else status
     if mapped == "Effective":
-        # Document Control redesign (Phase 4): quorum/approval achieved on
-        # the final Approval step means the version is 'approved', not yet
-        # Effective — it must hold there until the training gate (>=90%
-        # completion, >=1 trainee, never vacuously 100% at zero trainees)
-        # clears. try_clear_training_gate() checks immediately (covers the
-        # case training was already complete before approval finished) and
-        # is also called again from routes/qms_documents.py::update_training
-        # every time a training record's status changes, so the document
-        # flips to Effective the moment the last required training clears
-        # without requiring a second manual action.
+        # Document Control redesign (spec §16/§17/§20, corrected): quorum
+        # achieved on the final Approval step means the version is
+        # 'approved', not Effective — it holds there until BOTH the training
+        # gate (>=90% completion, >=1 trainee) has cleared AND the Quality
+        # Coordinator / authorized Quality role explicitly releases it (see
+        # routes/qms_documents.py::release_document). This module
+        # deliberately does not auto-transition to Effective on its own —
+        # that would let quorum completion (an Approval decision) or a
+        # training record update (any user with training-update access)
+        # silently perform what must be a distinct, explicitly authorized
+        # release action.
         qdb.update_document(record_id, {"status": "Approved"})
-        document = qdb.try_clear_training_gate(record_id)
-        if document and (document.get("content") or "").strip():
-            _publish_effective_document_to_kb(document)
     else:
         qdb.update_document(record_id, {"status": mapped})
 
@@ -189,9 +186,16 @@ def _document_version_on_step_approved(record_id: int, step: dict) -> None:
     called from _apply_document_status(), already sees the version as
     'approved' and can check the training gate immediately rather than
     requiring a second, separate action."""
+    from datetime import date
     from pharmagpt import qms_document_database as qdb
     if step.get("step_key") == "under_review":
         qdb.advance_version_to_pending_approval(record_id)
+        # Document Control redesign (spec §8): Review Date is captured by
+        # the system at the moment the review activity completes, never
+        # author-entered. Overwritten on every review cycle (including
+        # re-review after a rejection/rework), so it always reflects the
+        # MOST RECENT review acceptance, not the first one.
+        qdb.update_document(record_id, {"review_date": date.today().isoformat()})
     elif step.get("step_key") == "effective":
         qdb.advance_version_to_approved(record_id)
 

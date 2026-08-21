@@ -13,24 +13,44 @@ Routes
 GET    /qms/documents                        list documents (filterable, includes keyword search)
 POST   /qms/documents                        create document (auto doc_number)
 GET    /qms/documents/<id>                   get one document
-PUT    /qms/documents/<id>                   update document fields
+PUT    /qms/documents/<id>                   update document fields (effective_date/review_date
+                                              are system-controlled and silently ignored here —
+                                              see _AUTHOR_READONLY_FIELDS)
 DELETE /qms/documents/<id>                   delete document
 
 POST   /qms/documents/<id>/generate          AI draft generation (SSE stream)
 POST   /qms/documents/<id>/review            AI regulatory compliance review
 
-GET    /qms/documents/<id>/versions          version history
-POST   /qms/documents/<id>/versions          snapshot current content as a new version
+POST   /qms/documents/<id>/self-check        Author Self-Check hard gate
+GET    /qms/documents/<id>/versions          version history (read-only timeline)
+GET    /qms/documents/<id>/versions/current  the document's current version row
+POST   /qms/documents/<id>/versions/upload   Upload Final Author Version (becomes the
+                                              controlled content for the current Draft version)
+POST   /qms/documents/<id>/versions/start-revision   fork a new Draft off an Effective version
+POST   /qms/documents/<id>/versions          company_admin-only escape hatch — snapshot current
+                                              content as a free-labelled version. NOT part of the
+                                              normal author workflow (system controls all normal
+                                              version numbering — see services/document_versioning.py)
 
 GET    /qms/documents/<id>/distribution      distribution list
 POST   /qms/documents/<id>/distribution      add distribution entry
 POST   /qms/documents/distribution/<did>/acknowledge   acknowledge distribution
 
 GET    /qms/documents/<id>/training          training list
+GET    /qms/documents/<id>/training/gate     computed >=90% training-gate status
 POST   /qms/documents/<id>/training          add training record
 PUT    /qms/documents/training/<tid>         update training status
 
-POST   /qms/documents/<id>/approval          status transition + e-signature entry
+GET    /qms/documents/<id>/workflow          workflow instance/steps, enriched with approver-pool
+                                              role labels + quorum summary on the final Approval step
+POST   /qms/documents/<id>/workflow/start    Submit for Review (Author Self-Check + Final Author
+                                              Version required first)
+POST   /qms/documents/<id>/workflow/steps/<order>/decide   Review Accept/Reject, Approval vote
+POST   /qms/documents/<id>/release           Quality Coordinator release to Effective — only legal
+                                              once the version is 'approved' AND the training gate
+                                              (>=90%) has cleared; author roles are not permitted
+
+POST   /qms/documents/<id>/approval          status transition + e-signature entry (legacy)
 
 GET    /qms/documents/<id>/report            markdown report (preview / print)
 POST   /qms/documents/<id>/export/docx       DOCX export
@@ -185,6 +205,17 @@ def get_document(did):
     return jsonify(d)
 
 
+# Document Control redesign (spec §8/§9/§22): Review Date and Effective Date
+# are system-controlled, not author-editable. Review Date is auto-stamped
+# when the Review step is accepted (workflow_engine.py's
+# _document_version_on_step_approved) and Effective Date is stamped only by
+# the Quality Coordinator's explicit release (see release_document() below).
+# Silently dropped here rather than 400ing — the author-facing Overview form
+# no longer renders these as inputs, but this keeps the API defensive against
+# a stale client build.
+_AUTHOR_READONLY_FIELDS = ("effective_date", "review_date")
+
+
 @bp.route("/<int:did>", methods=["PUT"])
 def update_document(did):
     existing = tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
@@ -198,6 +229,8 @@ def update_document(did):
                            reason="Obsolete documents are immutable")
         return jsonify({"error": "This document is Obsolete and cannot be edited"}), 409
     data = request.get_json() or {}
+    for f in _AUTHOR_READONLY_FIELDS:
+        data.pop(f, None)
     # Configurable quorum approval: a positive integer requires that many
     # distinct Approver votes on this document's next review/approval steps
     # (services/workflow_engine.py::start_instance's default_quorum); null
@@ -310,6 +343,16 @@ def get_versions(did):
     return jsonify(qdb.get_versions(did))
 
 
+@bp.route("/<int:did>/versions/current", methods=["GET"])
+def get_current_version_route(did):
+    if not tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id):
+        return jsonify({"error": "Not found"}), 404
+    version = qdb.get_current_version(did)
+    if not version:
+        return jsonify({"error": "This document has no current version"}), 404
+    return jsonify(version)
+
+
 @bp.route("/<int:did>/versions/upload", methods=["POST"])
 def upload_final_author_version(did):
     """Author Local Edit / Upload Final Author Version (Document Control
@@ -377,7 +420,17 @@ def upload_final_author_version(did):
 
 
 @bp.route("/<int:did>/versions", methods=["POST"])
+@require_role("company_admin")
 def create_version(did):
+    """Document Control redesign (spec §3/§21): the normal author workflow
+    NEVER creates a version this way — version numbering is entirely system
+    controlled (0.1 -> 0.2 -> ... -> 1.0, driven by Self-Check + Final Author
+    Version + Review + Approval + Training, see services/document_versioning.py
+    and qms_document_database.transition_version_status/reject_and_fork_version/
+    start_new_revision/try_clear_training_gate). This free-text-labelled
+    snapshot endpoint is kept only as a company_admin-only escape hatch (e.g.
+    correcting a legacy/imported record) and is deliberately NOT exposed in
+    the author-facing UI."""
     document = tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
     if not document:
         return jsonify({"error": "Not found"}), 404
@@ -497,14 +550,13 @@ def update_training(tid):
             record_type="document", record_id=existing["document_id"],
             old_status=existing.get("training_status", ""), new_status="Completed",
         )
-        # Document Control redesign (Phase 4): the training gate may have
-        # just cleared with this exact update — re-check immediately rather
-        # than requiring a separate manual "make Effective" action. No-op
-        # (returns None) unless the document's current version is 'approved'
-        # and >=90% of its (>=1) assigned trainees are now Completed.
-        cleared_document = qdb.try_clear_training_gate(existing["document_id"])
-        if cleared_document and (cleared_document.get("content") or "").strip():
-            _publish_effective_document_to_kb(cleared_document)
+        # Document Control redesign (spec §17/§20, corrected — training
+        # completion no longer auto-flips the document to Effective; that
+        # let ANY user with training-update access silently perform what
+        # must be an explicit Quality Coordinator action). Once this update
+        # brings the gate to >=90%, GET .../training/gate reports
+        # cleared=true and the UI surfaces a "Release / Make Effective"
+        # action to an authorized role — see release_document() below.
     return jsonify(entry)
 
 
@@ -517,9 +569,32 @@ def _record_scoped_or_404(did):
 
 @bp.route("/<int:did>/workflow", methods=["GET"])
 def get_workflow(did):
-    if not _record_scoped_or_404(did):
+    document = _record_scoped_or_404(did)
+    if not document:
         return jsonify({"error": "Not found"}), 404
-    return jsonify(wfe.get_instance_state(RECORD_TYPE, did))
+    state = wfe.get_instance_state(RECORD_TYPE, did)
+    # Document Control redesign (spec §13/§15/§20): attach approver-pool role
+    # labels ("Department Head" / "Quality Head" / "Plant Head") and a
+    # quorum summary to the final Approval step so the UI can render
+    # "Department Head Pending / Quality Head Pending / Plant Head Optional"
+    # and "Required approvals: X of Y" without a second round trip or
+    # duplicating pool-resolution logic. Purely additive keys — every other
+    # record_type's workflow response (CAPA/Deviation/Change Control, which
+    # don't reach this route) and every pre-existing key here are unchanged.
+    pool = qdb.get_approver_pool(document.get("company_id", ""), document.get("department", ""))
+    pool_by_user = {p["user_id"]: p["pool_role"] for p in pool if p.get("user_id")}
+    configured_roles = {p["pool_role"] for p in pool if p.get("user_id")}
+    for step in state.get("steps", []):
+        if step.get("step_type") != "approval":
+            continue
+        for a in step.get("approvers", []):
+            a["pool_role"] = pool_by_user.get(a["user_id"], "")
+        if step.get("step_key") == "effective":
+            step["pool_summary"] = [
+                {"pool_role": r, "configured": r in configured_roles, "optional": r == "plant_head"}
+                for r in qdb.ALL_POOL_ROLES
+            ]
+    return jsonify(state)
 
 
 def _effective_quorum_and_pool_approvers(document: dict) -> tuple[int | None, list[dict] | None]:
@@ -684,6 +759,60 @@ def decide_workflow_step(did, step_order):
         old_status=old_status, new_status=document.get("status", ""),
     )
     return jsonify(state)
+
+
+# ── Quality Coordinator release (Document Control redesign, spec §17/§20) ────
+
+@bp.route("/<int:did>/release", methods=["POST"])
+@require_role("company_admin", "reviewer_qa")
+def release_document(did):
+    """Quality Coordinator / authorized Quality role release: the ONLY way a
+    document ever becomes Effective. Requires the current version to already
+    be 'approved' (quorum achieved) AND the training gate (>=90% completion,
+    >=1 trainee — see qms_document_database.training_gate_status) to have
+    cleared. The Author role is never granted company_admin/reviewer_qa, so
+    this enforces spec §7's "Author is NOT responsible for ... making the
+    SOP Effective" at the route layer, not just in the UI."""
+    document = _record_scoped_or_404(did)
+    if not document:
+        return jsonify({"error": "Not found"}), 404
+    version = qdb.get_current_version(did)
+    if not version or version["status"] != "approved":
+        return jsonify({"error": "This document is not awaiting release — the current version must "
+                                  "have completed Quorum Approval first"}), 409
+    gate = qdb.training_gate_status(version["id"])
+    if not gate["cleared"]:
+        return jsonify({"error": f"Training completion is {gate['completion_pct'] or 0:.0f}% — "
+                                  f"must reach {gate['threshold_pct']:.0f}% with at least 1 trainee "
+                                  f"before this document can be released"}), 409
+
+    old_status = document["status"]
+    data = request.get_json() or {}
+    try:
+        esignature_service.require_esignature(
+            g.tenant, data.get("password", ""), data.get("meaning", "Released"), data.get("reason", ""),
+        )
+    except esignature_service.ReauthenticationError as exc:
+        audit.log_failure("document", did, "Release blocked — e-signature failed", reason=str(exc))
+        return jsonify({"error": str(exc)}), 401
+    except esignature_service.ESignatureError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    released_document = qdb.try_clear_training_gate(did)
+    if not released_document:
+        # Gate was verified above; a concurrent change (e.g. training record
+        # edited between the check and here) can still legitimately race.
+        return jsonify({"error": "Release conditions are no longer met — please retry"}), 409
+    audit.log("document", did, "Released as Effective by Quality Coordinator",
+              detail=f"version {released_document.get('version', '')}")
+    esignature_service.record_signature(
+        tenant=g.tenant, meaning=data.get("meaning", "Released"), reason=data.get("reason", ""),
+        record_type="document", record_id=did, version_number=str(released_document.get("version", "")),
+        old_status=old_status, new_status="Effective",
+    )
+    if (released_document.get("content") or "").strip():
+        _publish_effective_document_to_kb(released_document)
+    return jsonify(released_document)
 
 
 # ── Approval / status transition (legacy compatibility wrapper) ──────────────

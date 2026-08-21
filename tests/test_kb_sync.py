@@ -34,13 +34,18 @@ def _self_check(client, did):
 
 
 def _clear_training_gate(client, did):
-    """Document Control redesign (Phase 4): quorum/approval achieved now
-    holds a document at 'Approved', not 'Effective', until the training
-    gate clears (>=90% completion, >=1 trainee). Existing tests that expect
-    'Approved' to reach 'Effective' immediately need one trainee completed
-    first — this helper does exactly that, nothing more."""
+    """Document Control redesign (Phase 4, corrected per spec §17/§20):
+    quorum/approval achieved holds a document at 'Approved' until the
+    training gate clears (>=90% completion, >=1 trainee) AND an explicit
+    Quality Coordinator release (POST .../release) is issued — training
+    completion alone no longer auto-flips the document to Effective (see
+    routes/qms_documents.py::release_document and
+    tests/test_document_quality_release.py). This helper clears the gate
+    and performs that release, so every existing caller here still reaches
+    'Effective' exactly as before, just via the explicit call."""
     t = client.post(f"/qms/documents/{did}/training", json={"trainee_name": "KB Sync Test Trainee"}).get_json()
     client.put(f"/qms/documents/training/{t['id']}", json={"training_status": "Completed", "training_date": "2026-01-01"})
+    client.post(f"/qms/documents/{did}/release", json={"meaning": "Released"})
 
 
 # ── Document Control ─────────────────────────────────────────────────────────

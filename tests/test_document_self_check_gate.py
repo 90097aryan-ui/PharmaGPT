@@ -123,6 +123,12 @@ def _drive_document_to_effective(client):
                 json={"decision": "approve", "meaning": "Approved"})
     t = client.post(f"/qms/documents/{did}/training", json={"trainee_name": "T1"}).get_json()
     client.put(f"/qms/documents/training/{t['id']}", json={"training_status": "Completed", "training_date": "2026-01-01"})
+    # Document Control redesign (spec §17/§20): training completion alone no
+    # longer auto-flips the document to Effective — an explicit Quality
+    # Coordinator release is required (routes/qms_documents.py::release_document,
+    # see tests/test_document_quality_release.py for its dedicated coverage).
+    assert client.get(f"/qms/documents/{did}").get_json()["status"] == "Approved"
+    client.post(f"/qms/documents/{did}/release", json={"meaning": "Released"})
     assert client.get(f"/qms/documents/{did}").get_json()["status"] == "Effective"
     return did
 
