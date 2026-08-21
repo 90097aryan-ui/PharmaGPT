@@ -522,6 +522,57 @@ _SELF_CHECK_REQUIRED_ERROR = (
     "Author Self-Check must be completed for the current version before Submit for Review "
     "— see POST /qms/documents/<id>/self-check"
 )
+_START_REVISION_REQUIRED_ERROR = (
+    "This document is Effective. Start a new revision first — see "
+    "POST /qms/documents/<id>/versions/start-revision — complete Author Self-Check on the "
+    "new draft, then submit for review. A version forked from an Effective document can "
+    "never already have a Self-Check recorded, so this cannot be done in a single call."
+)
+
+
+def _submission_gate_error(did) -> str | None:
+    """Author Self-Check hard gate, corrected: if the CURRENT version is
+    still 'draft', checks its own self-check as before. If it's 'effective'
+    (Submit for Review would otherwise trigger
+    qms_document_database.start_new_revision() to fork a fresh Draft as a
+    side effect of wfe.start_instance()'s own version lookup), submission
+    is now always blocked here instead — a version that doesn't exist yet
+    cannot possibly already have a recorded Self-Check, so the old
+    single-call "fork and submit" shortcut could never have satisfied a
+    fresh-Self-Check requirement. Callers must fork explicitly via
+    POST .../versions/start-revision, record Self-Check on the resulting
+    new Draft, then submit — three distinct calls, matching the fact that a
+    human must actually review the carried-over draft in between. Returns
+    None when it's safe to proceed, else the error string to return as a
+    409."""
+    version = qdb.get_current_version(did)
+    if not version:
+        return None
+    if version["status"] == "effective":
+        return _START_REVISION_REQUIRED_ERROR
+    if not qdb.is_self_check_cleared(did):
+        return _SELF_CHECK_REQUIRED_ERROR
+    return None
+
+
+@bp.route("/<int:did>/versions/start-revision", methods=["POST"])
+def start_revision(did):
+    """Explicitly start a new revision cycle against an Effective document
+    (the spec's '1.0 Effective -> 1.1 Revision Draft' case) — forks a fresh
+    Draft version (qms_document_database.start_new_revision()) WITHOUT
+    submitting it, so the author can review/edit it and complete a genuine
+    Author Self-Check before Submit for Review. Kept as its own explicit
+    step specifically so a fresh Self-Check is always possible before
+    submission — see _submission_gate_error()'s docstring."""
+    document = _record_scoped_or_404(did)
+    if not document:
+        return jsonify({"error": "Not found"}), 404
+    try:
+        version = qdb.start_new_revision(did)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 409
+    audit.log("document", did, "New revision cycle started", detail=f"version {version['version_number']}")
+    return jsonify(version), 201
 
 
 @bp.route("/<int:did>/workflow/start", methods=["POST"])
@@ -529,13 +580,15 @@ def start_workflow(did):
     document = _record_scoped_or_404(did)
     if not document:
         return jsonify({"error": "Not found"}), 404
-    # Author Self-Check hard gate (Document Control redesign, Phase 5):
-    # blocks Submit for Review until recorded against the CURRENT version —
-    # never carried forward from a prior version (see
-    # qms_document_database.record_self_check's docstring).
-    if not qdb.is_self_check_cleared(did):
-        audit.log_failure("document", did, "Workflow start blocked", reason=_SELF_CHECK_REQUIRED_ERROR)
-        return jsonify({"error": _SELF_CHECK_REQUIRED_ERROR}), 409
+    # Author Self-Check hard gate (Document Control redesign, Phase 5, fixed
+    # post-Phase-5a): blocks Submit for Review until recorded against the
+    # CURRENT version — never carried forward from a prior version (see
+    # qms_document_database.record_self_check's docstring and
+    # _submission_gate_error() above for the Effective-document case).
+    gate_error = _submission_gate_error(did)
+    if gate_error:
+        audit.log_failure("document", did, "Workflow start blocked", reason=gate_error)
+        return jsonify({"error": gate_error}), 409
     sig = tenancy.signing_identity(g.tenant)
     effective_quorum, pool_approvers = _effective_quorum_and_pool_approvers(document)
     try:
@@ -687,21 +740,23 @@ def submit_approval(did):
     else:
         try:
             if not wfdb.get_active_instance(RECORD_TYPE, did):
-                # Known limitation: when this auto-start branch is reached via
-                # action="Rejected" on an already-Effective document (the
-                # legacy shortcut for starting a new revision cycle, Phase 4's
-                # start_new_revision()), this checks the OUTGOING Effective
-                # version's self-check flag, not a fresh one on the new draft
-                # that start_instance() is about to fork — because the fork
-                # and the submit happen inside the same wfe.start_instance()
-                # call below. The newer /workflow/start endpoint doesn't have
-                # this gap (it never operates mid-fork). Flagged for a
-                # follow-up that splits "start new revision" from "submit for
-                # review" into two explicit steps on this legacy endpoint too.
-                if not qdb.is_self_check_cleared(did):
+                # Fixed (previously a documented known limitation): this
+                # auto-start branch used to check the OUTGOING Effective
+                # version's self-check flag when reached via action="Rejected"
+                # on an already-Effective document, not a fresh one on the new
+                # draft start_instance() was about to fork mid-call — meaning
+                # a version could reach Submit for Review having never had a
+                # real Self-Check recorded on it. _submission_gate_error() now
+                # blocks this case outright (a forked-but-not-yet-created
+                # version can never already have a Self-Check): the caller
+                # must call POST .../versions/start-revision explicitly,
+                # complete Self-Check on the resulting new Draft, then
+                # resubmit — the same gate /workflow/start applies.
+                gate_error = _submission_gate_error(did)
+                if gate_error:
                     audit.log_failure("document", did, f"Approval action blocked ({action_name})",
-                                       reason=_SELF_CHECK_REQUIRED_ERROR)
-                    return jsonify({"error": _SELF_CHECK_REQUIRED_ERROR}), 409
+                                       reason=gate_error)
+                    return jsonify({"error": gate_error}), 409
                 effective_quorum, pool_approvers = _effective_quorum_and_pool_approvers(document)
                 start_state = wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, did, g.tenant.company_id,
                                                   sig["performed_by"], default_quorum=effective_quorum)

@@ -75,13 +75,14 @@ def test_document_control_republish_updates_the_same_kb_row(client):
     kb_id = first_rows[0]["id"]
 
     # Send the Effective document into a new revision cycle, revise, and
-    # re-approve — Effective a second time. Document Control redesign: any
-    # rejection now requires a comment, and "Rejected" called on an already-
-    # Effective document starts a fresh revision cycle (forks a new Draft
-    # version, e.g. 0.1 -> ... -> 1.0 Effective -> 1.1 Revision Draft) rather
-    # than editing the Effective version in place.
-    r = client.post(f"/qms/documents/{doc['id']}/approval",
-                     json={"action": "Rejected", "comments": "Starting revision for updated procedure"})
+    # re-approve — Effective a second time. Document Control redesign
+    # (fixed): starting a new revision cycle against an Effective document
+    # is now its own explicit step (POST .../versions/start-revision) —
+    # the old single-call "Rejected on Effective" shortcut is blocked
+    # because a version it would fork can never already have a fresh
+    # Self-Check recorded on it (see routes/qms_documents.py's
+    # _submission_gate_error()).
+    r = client.post(f"/qms/documents/{doc['id']}/versions/start-revision")
     assert r.status_code == 201, r.get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v2 — revised"})
     _self_check(client, doc["id"])
@@ -217,8 +218,7 @@ def test_republish_snapshots_the_outgoing_version_instead_of_discarding_it(clien
     _clear_training_gate(client, doc["id"])
     kb_row = _kb_rows_for("document", doc["id"])[0]
 
-    client.post(f"/qms/documents/{doc['id']}/approval",
-                json={"action": "Rejected", "comments": "Starting revision"})
+    client.post(f"/qms/documents/{doc['id']}/versions/start-revision")
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v2 — revised"})
     _self_check(client, doc["id"])
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
@@ -268,8 +268,7 @@ def test_republish_logs_version_created_and_updated_audit_entries(client):
     _clear_training_gate(client, doc["id"])
     kb_row = _kb_rows_for("document", doc["id"])[0]
 
-    client.post(f"/qms/documents/{doc['id']}/approval",
-                json={"action": "Rejected", "comments": "Starting revision"})
+    client.post(f"/qms/documents/{doc['id']}/versions/start-revision")
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v2 — revised"})
     _self_check(client, doc["id"])
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
