@@ -235,7 +235,8 @@ def generate_draft(did):
         return jsonify({"error": "Not found"}), 404
 
     info = {**document, **body}
-    prompt = qp.build_draft_prompt(info, body.get("knowledge_base", ""))
+    template = qdb.get_template(document["template_id"]) if document.get("template_id") else None
+    prompt = qp.build_draft_prompt(info, body.get("knowledge_base", ""), template=template)
 
     def stream():
         full = ""
@@ -245,7 +246,26 @@ def generate_draft(did):
                 yield f"data: {json.dumps({'chunk': chunk})}\n\n"
             qdb.update_document(did, {"content": full})
             audit.log("document", did, "AI draft generated", new={"content_length": len(full)})
-            yield f"data: {json.dumps({'done': True})}\n\n"
+            # Controlled-template structure enforcement (Document Control
+            # redesign, fix): a prompt instruction alone cannot *guarantee*
+            # the AI preserved every controlled heading — this is the
+            # actual, deterministic check. Content is still saved either
+            # way (discarding the AI's work entirely would leave the author
+            # with nothing to fix), but a violation is logged to the audit
+            # trail and surfaced in the SSE 'done' event so the caller can
+            # warn the author — who must still pass the existing Author
+            # Self-Check hard gate before this document can ever reach
+            # Submit for Review, which is the actual enforcement backstop.
+            structure_check = None
+            if template and template.get("structure"):
+                structure_check = qp.validate_template_structure(full, template["structure"])
+                if not structure_check["valid"]:
+                    audit.log_failure(
+                        "document", did, "AI draft generation violated controlled template structure",
+                        reason=f"missing={structure_check['missing_headings']} "
+                               f"out_of_order={structure_check['out_of_order']}",
+                    )
+            yield f"data: {json.dumps({'done': True, 'structure_check': structure_check})}\n\n"
         except Exception as e:
             audit.log_failure("document", did, "AI draft generation failed", reason=str(e))
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
