@@ -115,8 +115,16 @@ def create_document():
     data = request.get_json() or {}
     if not data.get("title", "").strip():
         return jsonify({"error": "Document title is required"}), 400
+    # Document Control Information (spec §2): "Prepared By" is always the
+    # authenticated creator, mirroring routes/urs.py's identical
+    # _current_display_name() pattern — never a client-supplied value.
+    data["prepared_by"] = g.tenant.display_name or g.tenant.email
     document = qdb.create_document(data, company_id=g.tenant.company_id)
     audit.log("document", document["id"], "Document created", new=document)
+    if document.get("template_id"):
+        template = qdb.get_template(document["template_id"])
+        audit.log("document", document["id"], "Controlled SOP Template selected",
+                  detail=template.get("name", "") if template else str(document["template_id"]))
     return jsonify(document), 201
 
 
@@ -205,15 +213,17 @@ def get_document(did):
     return jsonify(d)
 
 
-# Document Control redesign (spec §8/§9/§22): Review Date and Effective Date
-# are system-controlled, not author-editable. Review Date is auto-stamped
-# when the Review step is accepted (workflow_engine.py's
-# _document_version_on_step_approved) and Effective Date is stamped only by
-# the Quality Coordinator's explicit release (see release_document() below).
-# Silently dropped here rather than 400ing — the author-facing Overview form
-# no longer renders these as inputs, but this keeps the API defensive against
-# a stale client build.
-_AUTHOR_READONLY_FIELDS = ("effective_date", "review_date")
+# Document Control redesign (spec §2/§8/§9/§22): the whole Document Control
+# Information header is system-controlled, not author-editable. Review Date/
+# Reviewed By are auto-stamped when the Review step is accepted
+# (workflow_engine.py's _document_version_on_step_approved), Approved By when
+# the final Approval step is decided, and Effective Date only by the Quality
+# Coordinator's explicit release (see release_document() below). Prepared By
+# is stamped once at create_document() and never changes afterward. Silently
+# dropped here rather than 400ing — the author-facing Overview form no longer
+# renders these as inputs, but this keeps the API defensive against a stale
+# client build.
+_AUTHOR_READONLY_FIELDS = ("effective_date", "review_date", "prepared_by", "reviewed_by", "approved_by")
 
 
 @bp.route("/<int:did>", methods=["PUT"])
@@ -617,6 +627,11 @@ _SELF_CHECK_REQUIRED_ERROR = (
     "Author Self-Check must be completed for the current version before Submit for Review "
     "— see POST /qms/documents/<id>/self-check"
 )
+_FINAL_VERSION_REQUIRED_ERROR = (
+    "The Final Author Version must be uploaded for the current version before Submit for Review "
+    "— see POST /qms/documents/<id>/versions/upload. Attachments are supporting records only and "
+    "do not satisfy this requirement."
+)
 _START_REVISION_REQUIRED_ERROR = (
     "This document is Effective. Start a new revision first — see "
     "POST /qms/documents/<id>/versions/start-revision — complete Author Self-Check on the "
@@ -626,17 +641,19 @@ _START_REVISION_REQUIRED_ERROR = (
 
 
 def _submission_gate_error(did) -> str | None:
-    """Author Self-Check hard gate, corrected: if the CURRENT version is
-    still 'draft', checks its own self-check as before. If it's 'effective'
-    (Submit for Review would otherwise trigger
-    qms_document_database.start_new_revision() to fork a fresh Draft as a
-    side effect of wfe.start_instance()'s own version lookup), submission
-    is now always blocked here instead — a version that doesn't exist yet
-    cannot possibly already have a recorded Self-Check, so the old
-    single-call "fork and submit" shortcut could never have satisfied a
-    fresh-Self-Check requirement. Callers must fork explicitly via
-    POST .../versions/start-revision, record Self-Check on the resulting
-    new Draft, then submit — three distinct calls, matching the fact that a
+    """Author Self-Check + Final Author Version hard gates, corrected: if the
+    CURRENT version is still 'draft', checks its own self-check and Final
+    Author Version upload (spec §10: "The workflow must require Final Author
+    Version before Review submission" — Attachments are supporting records
+    only and must never satisfy this). If it's 'effective' (Submit for
+    Review would otherwise trigger qms_document_database.start_new_revision()
+    to fork a fresh Draft as a side effect of wfe.start_instance()'s own
+    version lookup), submission is now always blocked here instead — a
+    version that doesn't exist yet cannot possibly already have a recorded
+    Self-Check or Final Author Version, so the old single-call "fork and
+    submit" shortcut could never have satisfied a fresh gate. Callers must
+    fork explicitly via POST .../versions/start-revision, complete both
+    gates on the resulting new Draft, then submit — matching the fact that a
     human must actually review the carried-over draft in between. Returns
     None when it's safe to proceed, else the error string to return as a
     409."""
@@ -647,6 +664,8 @@ def _submission_gate_error(did) -> str | None:
         return _START_REVISION_REQUIRED_ERROR
     if not qdb.is_self_check_cleared(did):
         return _SELF_CHECK_REQUIRED_ERROR
+    if not version.get("source_attachment_id"):
+        return _FINAL_VERSION_REQUIRED_ERROR
     return None
 
 
@@ -785,9 +804,22 @@ def release_document(did):
         return jsonify({"error": f"Training completion is {gate['completion_pct'] or 0:.0f}% — "
                                   f"must reach {gate['threshold_pct']:.0f}% with at least 1 trainee "
                                   f"before this document can be released"}), 409
+    if not (document.get("content") or "").strip():
+        return jsonify({"error": "This document has no drafted content — required document "
+                                  "information must be complete before Quality Release"}), 409
 
     old_status = document["status"]
     data = request.get_json() or {}
+    # Effective date is supplied/confirmed at release (spec §4) — defaults to
+    # today when the caller doesn't pass one; validated so a malformed value
+    # never gets silently written to an otherwise-immutable version row.
+    effective_date = (data.get("effective_date") or "").strip() or None
+    if effective_date:
+        try:
+            from datetime import date as _date
+            _date.fromisoformat(effective_date)
+        except ValueError:
+            return jsonify({"error": "effective_date must be an ISO date (YYYY-MM-DD)"}), 400
     try:
         esignature_service.require_esignature(
             g.tenant, data.get("password", ""), data.get("meaning", "Released"), data.get("reason", ""),
@@ -798,12 +830,14 @@ def release_document(did):
     except esignature_service.ESignatureError as exc:
         return jsonify({"error": str(exc)}), 400
 
-    released_document = qdb.try_clear_training_gate(did)
+    audit.log("document", did, "Quality Release requested",
+              detail=f"version {version.get('version_number', '')}")
+    released_document = qdb.try_clear_training_gate(did, effective_date=effective_date)
     if not released_document:
         # Gate was verified above; a concurrent change (e.g. training record
         # edited between the check and here) can still legitimately race.
         return jsonify({"error": "Release conditions are no longer met — please retry"}), 409
-    audit.log("document", did, "Released as Effective by Quality Coordinator",
+    audit.log("document", did, "Quality Release approved — document made Effective",
               detail=f"version {released_document.get('version', '')}")
     esignature_service.record_signature(
         tenant=g.tenant, meaning=data.get("meaning", "Released"), reason=data.get("reason", ""),

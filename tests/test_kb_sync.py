@@ -13,6 +13,8 @@ And the idempotent-upsert behaviour: re-approving the same record updates
 the existing kb_documents row rather than creating a duplicate.
 """
 
+import io
+
 import pytest
 
 from pharmagpt import database as db
@@ -25,12 +27,22 @@ def _kb_rows_for(source_type: str, source_id: int):
 
 
 def _self_check(client, did):
-    """Document Control redesign (Phase 5): Author Self-Check is now a
-    mandatory hard gate before Submit for Review can start — see
-    routes/qms_documents.py's _SELF_CHECK_REQUIRED_ERROR. Applies to
-    Document Control only (URS/Qualification/Validation Report below are
-    unaffected)."""
+    """Document Control redesign (Phase 5, and gap-closure): Author
+    Self-Check AND Final Author Version upload are both mandatory hard gates
+    before Submit for Review can start — see routes/qms_documents.py's
+    _SELF_CHECK_REQUIRED_ERROR / _FINAL_VERSION_REQUIRED_ERROR (spec §10:
+    "The workflow must require Final Author Version before Review
+    submission"). Applies to Document Control only (URS/Qualification/
+    Validation Report below are unaffected). Kept under the original
+    `_self_check` name so every existing call site here (13+) picks up the
+    fix with no per-test change."""
     client.post(f"/qms/documents/{did}/self-check")
+    r = client.post(
+        f"/qms/documents/{did}/versions/upload",
+        data={"file": (io.BytesIO(b"Final author-uploaded content."), "final.txt")},
+        content_type="multipart/form-data",
+    )
+    assert r.status_code == 201, r.get_json()
 
 
 def _clear_training_gate(client, did):
@@ -100,15 +112,19 @@ def test_document_control_republish_updates_the_same_kb_row(client):
     assert rows[0]["id"] == kb_id
 
 
-def test_document_without_content_is_not_published_to_kb(client):
-    """An Effective document with no drafted content yet has nothing
-    meaningful to publish — must not create an empty KB entry."""
+def test_document_without_content_cannot_reach_review_at_all(client):
+    """Gap-closure (spec §10/§11): Final Author Version is now itself a hard
+    gate before Submit for Review, and the upload endpoint rejects a file
+    with no extractable text (routes/qms_documents.py::upload_final_author_version).
+    A document can therefore no longer reach Effective — and so can no
+    longer publish an empty KB entry — via the normal workflow at all, a
+    stronger guarantee than the original Phase 2 "don't publish empty
+    content" check this test used to exercise post-hoc."""
     doc = client.post("/qms/documents", json={"title": "Empty Draft SOP", "doc_type": "SOP"}).get_json()
-    _self_check(client, doc["id"])
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
-    _clear_training_gate(client, doc["id"])
-
+    client.post(f"/qms/documents/{doc['id']}/self-check")
+    r = client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
+    assert r.status_code == 409
+    assert "Final Author Version" in r.get_json()["error"]
     assert _kb_rows_for("document", doc["id"]) == []
 
 

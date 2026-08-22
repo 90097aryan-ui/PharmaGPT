@@ -9,6 +9,8 @@ style as tests/test_quorum_approval.py. Route-level tests use the `client`
 fixture (tests/conftest.py — company_admin role, BOOTSTRAP_COMPANY_ID tenant).
 """
 
+import io
+
 import pytest
 
 from pharmagpt import qms_document_database as qdb
@@ -135,6 +137,11 @@ def test_start_workflow_auto_assigns_pool_approvers_with_quorum_2(client):
 
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP"}).get_json()
     client.post(f"/qms/documents/{doc['id']}/self-check")  # Phase 5 hard gate
+    client.post(
+        f"/qms/documents/{doc['id']}/versions/upload",
+        data={"file": (io.BytesIO(b"final content"), "final.txt")},
+        content_type="multipart/form-data",
+    )
     state = client.post(f"/qms/documents/{doc['id']}/workflow/start").get_json()
 
     step3 = next(s for s in state["steps"] if s["step_order"] == 3)
@@ -151,6 +158,11 @@ def test_start_workflow_includes_plant_head_but_quorum_stays_2(client):
 
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP"}).get_json()
     client.post(f"/qms/documents/{doc['id']}/self-check")  # Phase 5 hard gate
+    client.post(
+        f"/qms/documents/{doc['id']}/versions/upload",
+        data={"file": (io.BytesIO(b"final content"), "final.txt")},
+        content_type="multipart/form-data",
+    )
     state = client.post(f"/qms/documents/{doc['id']}/workflow/start").get_json()
 
     step3 = next(s for s in state["steps"] if s["step_order"] == 3)
@@ -165,6 +177,11 @@ def test_start_workflow_falls_back_to_manual_quorum_when_pool_unconfigured(clien
     backward compatibility for a company that hasn't set up a pool yet."""
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP"}).get_json()
     client.post(f"/qms/documents/{doc['id']}/self-check")  # Phase 5 hard gate
+    client.post(
+        f"/qms/documents/{doc['id']}/versions/upload",
+        data={"file": (io.BytesIO(b"final content"), "final.txt")},
+        content_type="multipart/form-data",
+    )
     state = client.post(f"/qms/documents/{doc['id']}/workflow/start").get_json()
 
     step3 = next(s for s in state["steps"] if s["step_order"] == 3)
@@ -184,6 +201,11 @@ def test_legacy_approval_endpoint_does_not_overwrite_pool_approvers(client):
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP"}).get_json()
     did = doc["id"]
     client.post(f"/qms/documents/{did}/self-check")  # Phase 5 hard gate
+    client.post(
+        f"/qms/documents/{did}/versions/upload",
+        data={"file": (io.BytesIO(b"final content"), "final.txt")},
+        content_type="multipart/form-data",
+    )
     client.post(f"/qms/documents/{did}/workflow/start")
     # advance past Review with a manually assigned reviewer so we reach the
     # quorum-gated Approval step

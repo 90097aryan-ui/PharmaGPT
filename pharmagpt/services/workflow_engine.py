@@ -177,7 +177,7 @@ def _document_version_on_instance_start(record_id: int, instance: dict) -> None:
     qdb.start_review_cycle_for_version(record_id, instance["id"])
 
 
-def _document_version_on_step_approved(record_id: int, step: dict) -> None:
+def _document_version_on_step_approved(record_id: int, step: dict, performed_by: str = "") -> None:
     """Review accepted ('under_review') advances the version to
     pending_approval. Quorum/approval achieved on the final Approval step
     ('effective') advances it to 'approved' — NOT 'effective' yet; this
@@ -185,7 +185,12 @@ def _document_version_on_step_approved(record_id: int, step: dict) -> None:
     call order) specifically so qms_document_database.try_clear_training_gate(),
     called from _apply_document_status(), already sees the version as
     'approved' and can check the training gate immediately rather than
-    requiring a second, separate action."""
+    requiring a second, separate action.
+
+    `performed_by` (spec §2 gap closure): stamps Reviewed By / Approved By on
+    the Document Control Information header — the identity of whoever
+    actually decided the step, mirroring routes/urs.py's identical
+    reviewed_by/approved_by-on-decision pattern. Never author-entered."""
     from datetime import date
     from pharmagpt import qms_document_database as qdb
     if step.get("step_key") == "under_review":
@@ -195,9 +200,10 @@ def _document_version_on_step_approved(record_id: int, step: dict) -> None:
         # author-entered. Overwritten on every review cycle (including
         # re-review after a rejection/rework), so it always reflects the
         # MOST RECENT review acceptance, not the first one.
-        qdb.update_document(record_id, {"review_date": date.today().isoformat()})
+        qdb.update_document(record_id, {"review_date": date.today().isoformat(), "reviewed_by": performed_by})
     elif step.get("step_key") == "effective":
         qdb.advance_version_to_approved(record_id)
+        qdb.update_document(record_id, {"approved_by": performed_by})
 
 
 def _document_version_on_step_rejected(record_id: int, reason: str) -> None:
@@ -216,7 +222,7 @@ def _document_version_on_step_rejected(record_id: int, reason: str) -> None:
 VERSION_ON_INSTANCE_START: dict[str, Callable[[int, dict], None]] = {
     "document": _document_version_on_instance_start,
 }
-VERSION_ON_STEP_APPROVED: dict[str, Callable[[int, dict], None]] = {
+VERSION_ON_STEP_APPROVED: dict[str, Callable[..., None]] = {
     "document": _document_version_on_step_approved,
 }
 VERSION_ON_STEP_REJECTED: dict[str, Callable[[int, str], None]] = {
@@ -429,7 +435,7 @@ def _decide_quorum_step(record_type: str, record_id: int, instance: dict, step: 
     # the version already moved to 'approved' to see it.
     version_approved_hook = VERSION_ON_STEP_APPROVED.get(record_type)
     if version_approved_hook:
-        version_approved_hook(record_id, step)
+        version_approved_hook(record_id, step, performed_by)
     _apply_gate_status(record_type, record_id, _status_after_completing(template_steps, step_order, last_order))
     audit.log(record_type, record_id, f"{step['step_name']}: Approved (quorum met {votes_cast}/{required})",
               reason=comments, detail=f"decided by {performed_by}")
@@ -515,7 +521,7 @@ def decide_step(record_type: str, record_id: int, step_order: int, decision: str
         # comment in _decide_quorum_step above.
         version_approved_hook = VERSION_ON_STEP_APPROVED.get(record_type)
         if version_approved_hook:
-            version_approved_hook(record_id, step)
+            version_approved_hook(record_id, step, performed_by)
         _apply_gate_status(record_type, record_id, _status_after_completing(template_steps, step_order, last_order))
         audit.log(record_type, record_id, f"{step['step_name']}: Approved",
                    reason=comments, detail=f"decided by {performed_by}")

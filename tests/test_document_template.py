@@ -32,11 +32,18 @@ def test_create_and_get_template(db_path):
 
 
 def test_list_templates_filters_by_doc_type(db_path):
+    # database.py::init_db() always seeds one platform-wide default SOP
+    # template ("Standard Operating Procedure (Default)", spec §1 gap
+    # closure — the controlled SOP template picker must have a real row to
+    # resolve, not just describe headings in the AI prompt) — every SOP-scoped
+    # assertion here accounts for that seeded row rather than asserting an
+    # exact count of only the templates this test itself creates.
     qdb.create_template("SOP", "SOP Template", STRUCTURE, company_id=COMPANY_ID)
     qdb.create_template("Protocol", "Protocol Template", STRUCTURE, company_id=COMPANY_ID)
     sop_only = qdb.list_templates("SOP", COMPANY_ID)
-    assert len(sop_only) == 1
-    assert sop_only[0]["name"] == "SOP Template"
+    sop_names = {t["name"] for t in sop_only}
+    assert "SOP Template" in sop_names
+    assert "Protocol Template" not in sop_names
 
 
 def test_list_templates_includes_platform_default_and_company_specific(db_path):
@@ -44,7 +51,7 @@ def test_list_templates_includes_platform_default_and_company_specific(db_path):
     qdb.create_template("SOP", "Company-Specific SOP", STRUCTURE, company_id=COMPANY_ID)
     templates = qdb.list_templates("SOP", COMPANY_ID)
     names = {t["name"] for t in templates}
-    assert names == {"Platform Default SOP", "Company-Specific SOP"}
+    assert {"Platform Default SOP", "Company-Specific SOP"} <= names
 
 
 def test_document_can_be_created_from_a_template(db_path):

@@ -300,18 +300,11 @@ async function qmsDocSwitchTab(tab) {
 }
 window.qmsDocSwitchTab = qmsDocSwitchTab;
 
-// Reviewer/Approver name-search picker (static/js/user_picker.js) —
-// re-attached after every render since the overview tab replaces its own DOM.
+// Approver Pool name-search picker (static/js/user_picker.js) — used by the
+// Configure Approver Pool modal's User ID fields (see
+// qmsDocOpenApproverPoolSettings below) so a company_admin can search by
+// name instead of typing a raw Supabase user id.
 let qmsDocApproverDirectory = null;
-
-async function qmsDocWireApproverPicker() {
-  if (!qmsDocApproverDirectory) qmsDocApproverDirectory = await window.UserPicker.loadDirectory();
-  const datalist = document.getElementById("qms-doc-approver-directory");
-  if (datalist) datalist.outerHTML = window.UserPicker.datalistHTML("qms-doc-approver-directory", qmsDocApproverDirectory);
-  ["qms-ov-reviewer", "qms-ov-approver"].forEach((id) => {
-    window.UserPicker.attachNamePicker(document.getElementById(id), qmsDocApproverDirectory);
-  });
-}
 
 function qmsDocRenderTab(doc) {
   const el = document.getElementById("qms-doc-tab-body");
@@ -322,26 +315,29 @@ function qmsDocRenderTab(doc) {
       <div class="qms-section-card">
         <h3>Document Control Information</h3>
         <div class="form-grid">
+          <div class="form-field"><label>Document Number</label><input type="text" value="${doc.doc_number || "—"}" disabled /></div>
+          <div class="form-field"><label>Title</label><input type="text" value="${doc.title || ""}" disabled /></div>
           <div class="form-field"><label>Version</label><input type="text" value="${doc.version}" disabled title="System-controlled — see Version History tab" /></div>
           <div class="form-field"><label>Status</label><input type="text" value="${doc.status}" disabled /></div>
-          <div class="form-field"><label>Effective Date</label><input type="text" value="${doc.effective_date || "—"}" disabled title="Set automatically when the Quality Coordinator releases this document" /></div>
+          <div class="form-field"><label>Department</label><input type="text" value="${doc.department || "—"}" disabled /></div>
+          <div class="form-field"><label>Effective Date</label><input type="text" value="${doc.effective_date || "—"}" disabled title="Assigned/confirmed only at Quality Release" /></div>
+          <div class="form-field"><label>Prepared By</label><input type="text" value="${doc.prepared_by || "—"}" disabled title="Automatically derived from the Author who created this document" /></div>
+          <div class="form-field"><label>Reviewed By</label><input type="text" value="${doc.reviewed_by || "—"}" disabled title="Automatically populated when Review is accepted" /></div>
+          <div class="form-field"><label>Approved By</label><input type="text" value="${doc.approved_by || "—"}" disabled title="Automatically populated when Approval quorum is achieved" /></div>
           <div class="form-field"><label>Review Date</label><input type="text" value="${doc.review_date || "—"}" disabled title="Set automatically when Review is accepted" /></div>
           <div class="form-field"><label>Expiry Date</label><input type="date" id="qms-ov-expiry" value="${doc.expiry_date || ""}" /></div>
           <div class="form-field"><label>Owner</label><input type="text" id="qms-ov-owner" value="${doc.owner || ""}" /></div>
-          <div class="form-field"><label>Reviewer</label><input type="text" id="qms-ov-reviewer" list="qms-doc-approver-directory" value="${doc.reviewer || ""}" placeholder="Search or type a name" /></div>
-          <div class="form-field"><label>Approver</label><input type="text" id="qms-ov-approver" list="qms-doc-approver-directory" value="${doc.approver || ""}" placeholder="Search or type a name" /></div>
         </div>
         <p style="font-size:11.5px;color:var(--text-muted);margin-top:2px">
-          Version, Status, Effective Date, and Review Date are system-controlled and cannot be edited here —
-          see the <strong>Workflow</strong> tab for the current lifecycle stage and required actions.
+          Document Number, Version, Status, Department, Effective Date, Prepared By, Reviewed By, and Approved By
+          are system-controlled and cannot be edited here — see the <strong>Workflow</strong> tab for the current
+          lifecycle stage and required actions.
         </p>
         <div class="qms-form-actions">
           <button class="btn-primary" onclick="qmsDocSaveOverview(${id})">Save</button>
         </div>
       </div>
-      <datalist id="qms-doc-approver-directory"></datalist>
     `;
-    qmsDocWireApproverPicker();
   } else if (qmsDocActiveTab === "content") {
     el.innerHTML = `
       <div class="qms-section-card">
@@ -617,10 +613,11 @@ async function qmsDocRenderReleasePanel(id, doc, version) {
   const user = (window.PharmaAuth && window.PharmaAuth.getUser()) || {};
   const canRelease = user.role === "company_admin" || user.role === "reviewer_qa";
   const pct = gate.completion_pct == null ? "—" : `${gate.completion_pct.toFixed(1)}%`;
+  const today = new Date().toISOString().slice(0, 10);
 
   el.innerHTML = `
     <div class="qms-section-card">
-      <h3>Version ${version.version_number} — Approved, Awaiting Release</h3>
+      <h3>Version ${version.version_number} — Approved, Awaiting Quality Release</h3>
       <p style="font-size:12px;color:var(--text-muted)">
         Quorum Approval is complete. Training completion must reach ${gate.threshold_pct.toFixed(0)}%
         before this document can be released as Effective by the Quality Coordinator.
@@ -628,30 +625,38 @@ async function qmsDocRenderReleasePanel(id, doc, version) {
       <div class="qms-stats-grid">
         <div class="qms-stat-card ${gate.cleared ? "success" : "critical"}">
           <div class="qms-stat-value">${pct}</div>
-          <div class="qms-stat-label">Training Completion (${gate.trainee_count} trainee${gate.trainee_count === 1 ? "" : "s"})</div>
+          <div class="qms-stat-label">Training Completion: minimum 90% required for Quality Release (${gate.trainee_count} trainee${gate.trainee_count === 1 ? "" : "s"})</div>
         </div>
       </div>
       ${gate.cleared ? "" : `<p style="font-size:12.5px;color:var(--danger,#c0392b)">Blocked — go to the Training tab to record/complete training.</p>`}
-      ${canRelease
-        ? `<div class="qms-form-actions"><button class="btn-primary" ${gate.cleared ? "" : "disabled"} onclick="qmsDocReleaseEffective(${id})">Release / Make Effective</button></div>`
-        : `<p style="font-size:11.5px;color:var(--text-muted)">Only a Quality Coordinator / authorized Quality role can release this document — the Author cannot make an SOP Effective.</p>`}
+      ${canRelease ? `
+        <div class="form-field" style="max-width:220px;margin-top:10px">
+          <label>Effective Date</label>
+          <input type="date" id="qms-release-effective-date-${id}" value="${today}" />
+        </div>
+        <div class="qms-form-actions">
+          <button class="btn-primary" ${gate.cleared ? "" : "disabled"} onclick="qmsDocReleaseEffective(${id})">Quality Release</button>
+        </div>`
+        : `<p style="font-size:11.5px;color:var(--text-muted)">Only a Quality Coordinator / authorized Quality role can perform Quality Release — the Author cannot make an SOP Effective.</p>`}
     </div>
   `;
 }
 
 async function qmsDocReleaseEffective(id) {
   if (!window.PharmaESign) { qmsToast("Electronic Signature dialog failed to load"); return; }
-  // 21 CFR Part 11 / EU GMP Annex 11: releasing a document as Effective is a
-  // GMP decision and requires a fresh Electronic Signature.
+  const dateEl = document.getElementById(`qms-release-effective-date-${id}`);
+  const effective_date = dateEl ? dateEl.value : "";
+  // 21 CFR Part 11 / EU GMP Annex 11: Quality Release is a GMP decision and
+  // requires a fresh Electronic Signature.
   window.PharmaESign.open({
     meaning: "Released",
     onConfirm: async ({ password, meaning, reason }) => {
       try {
-        await qmsPostJSON(`/qms/documents/${id}/release`, { password, meaning, reason });
-        qmsToast("Released as Effective");
+        await qmsPostJSON(`/qms/documents/${id}/release`, { password, meaning, reason, effective_date });
+        qmsToast("Quality Release complete — document is now Effective");
         qmsDocSwitchTab("workflow");
       } catch (e) {
-        qmsToast("Release failed: " + e.message);
+        qmsToast("Quality Release failed: " + e.message);
       }
     },
   });
@@ -700,8 +705,6 @@ async function qmsDocSaveOverview(id) {
   const data = {
     expiry_date: document.getElementById("qms-ov-expiry").value,
     owner: document.getElementById("qms-ov-owner").value.trim(),
-    reviewer: document.getElementById("qms-ov-reviewer").value.trim(),
-    approver: document.getElementById("qms-ov-approver").value.trim(),
   };
   try {
     await qmsPutJSON(`/qms/documents/${id}`, data);
@@ -864,12 +867,15 @@ async function qmsDocRenderTraining(id) {
     qmsFetch(`/qms/documents/${id}/training/gate`).catch(() => null),
   ]);
   const gateCard = gate ? `
-    <div class="qms-stats-grid" style="margin-bottom:14px">
+    <div class="qms-stats-grid" style="margin-bottom:6px">
       <div class="qms-stat-card ${gate.cleared ? "success" : "critical"}">
-        <div class="qms-stat-value">${gate.completion_pct == null ? "—" : gate.completion_pct.toFixed(1) + "%"}</div>
-        <div class="qms-stat-label">Training Completion vs. ${gate.threshold_pct.toFixed(0)}% required (current version, ${gate.trainee_count} trainee${gate.trainee_count === 1 ? "" : "s"})</div>
+        <div class="qms-stat-value">Training Completion: ${gate.completion_pct == null ? "—" : gate.completion_pct.toFixed(1) + "%"}</div>
+        <div class="qms-stat-label">${gate.trainee_count} trainee${gate.trainee_count === 1 ? "" : "s"} on the current version</div>
       </div>
-    </div>` : "";
+    </div>
+    <p style="font-size:12px;color:${gate.cleared ? "var(--text-muted)" : "var(--danger,#c0392b)"};margin:0 0 14px">
+      Minimum ${gate.threshold_pct.toFixed(0)}% training completion required for Quality Release.
+    </p>` : "";
   el.innerHTML = `
     ${gateCard}
     <div class="qms-section-card">
@@ -1017,6 +1023,7 @@ async function qmsDocOpenApproverPoolSettings() {
           <input type="text" id="qms-pool-dept" placeholder="e.g. Quality Assurance" oninput="qmsDocLoadApproverPool()" />
         </div>
         <div id="qms-pool-rows"></div>
+        <datalist id="qms-pool-directory"></datalist>
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" onclick="document.getElementById('qms-approver-pool-modal').remove()">Close</button>
@@ -1032,7 +1039,10 @@ async function qmsDocLoadApproverPool() {
   const dept = document.getElementById("qms-pool-dept").value.trim();
   const rowsEl = document.getElementById("qms-pool-rows");
   rowsEl.innerHTML = `<div class="qms-loading"><div class="qms-spinner"></div> Loading…</div>`;
-  const pool = await qmsFetch(`/qms/documents/approver-pool?department=${encodeURIComponent(dept)}`);
+  const [pool] = await Promise.all([
+    qmsFetch(`/qms/documents/approver-pool?department=${encodeURIComponent(dept)}`),
+    (async () => { if (!qmsDocApproverDirectory) qmsDocApproverDirectory = await window.UserPicker.loadDirectory(); })(),
+  ]);
   const byRole = {};
   pool.forEach(p => { byRole[p.pool_role] = p; });
   rowsEl.innerHTML = QMS_APPROVER_POOL_ROLES.map(r => {
@@ -1042,6 +1052,7 @@ async function qmsDocLoadApproverPool() {
         <h3 style="margin-top:0">${r.label}</h3>
         ${current ? `<div class="qms-panel-item-meta">Currently: ${current.display_name || current.user_id}</div>` : `<div class="qms-panel-item-meta">Not configured</div>`}
         <div class="form-grid cols-3">
+          <div class="form-field"><label>Search by Name</label><input type="text" id="qms-pool-search-${r.role}" list="qms-pool-directory" placeholder="Type a name…" oninput="qmsDocPoolPickerInput('${r.role}')" /></div>
           <div class="form-field"><label>User ID</label><input type="text" id="qms-pool-uid-${r.role}" placeholder="Supabase user id" /></div>
           <div class="form-field"><label>Display Name</label><input type="text" id="qms-pool-name-${r.role}" placeholder="Full name" /></div>
         </div>
@@ -1051,8 +1062,19 @@ async function qmsDocLoadApproverPool() {
       </div>
     `;
   }).join("");
+  const datalist = document.getElementById("qms-pool-directory");
+  if (datalist) datalist.outerHTML = window.UserPicker.datalistHTML("qms-pool-directory", qmsDocApproverDirectory);
 }
 window.qmsDocLoadApproverPool = qmsDocLoadApproverPool;
+
+function qmsDocPoolPickerInput(pool_role) {
+  const searchEl = document.getElementById(`qms-pool-search-${pool_role}`);
+  const entry = window.UserPicker.findByLabel(searchEl.value, qmsDocApproverDirectory || []);
+  if (!entry) return;
+  document.getElementById(`qms-pool-uid-${pool_role}`).value = entry.user_id;
+  document.getElementById(`qms-pool-name-${pool_role}`).value = entry.display_name;
+}
+window.qmsDocPoolPickerInput = qmsDocPoolPickerInput;
 
 async function qmsDocSaveApproverPoolRole(pool_role) {
   const dept = document.getElementById("qms-pool-dept").value.trim();

@@ -83,12 +83,19 @@ def generate_report_markdown(document_id: int, version_id: int | None = None) ->
     md.append("| Field | Value |")
     md.append("|-------|-------|")
     field_overrides = {"version": version_label, "status": status_label}
+    # Document Control Information (spec §1/§2): Document Number, Title,
+    # Version, Effective Date, Department, Prepared By, Reviewed By,
+    # Approved By are the controlled template's mandatory header fields —
+    # every one of them is system-derived (see routes/qms_documents.py's
+    # create_document()/release_document() and services/workflow_engine.py's
+    # _document_version_on_step_approved), never author-typed.
     for label, key in [
         ("Document Number", "doc_number"), ("Document Type", "doc_type"),
         ("Department", "department"), ("Category", "category"),
         ("Version", "version"), ("Status", "status"),
         ("Effective Date", "effective_date"), ("Review Date", "review_date"),
         ("Expiry Date", "expiry_date"), ("Owner", "owner"),
+        ("Prepared By", "prepared_by"), ("Reviewed By", "reviewed_by"), ("Approved By", "approved_by"),
         ("Reviewer", "reviewer"), ("Approver", "approver"),
     ]:
         val = field_overrides.get(key, document.get(key, ""))

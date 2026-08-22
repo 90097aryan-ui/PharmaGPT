@@ -5,6 +5,8 @@ the Inbox needs zero new code to pick up a module once it has a workflow
 template + a services/workflow_registry.py entry.
 """
 
+import io
+
 import pytest
 
 from pharmagpt import qms_workflow_database as wfdb
@@ -175,6 +177,11 @@ def test_inbox_lists_pending_document_once_assigned(client):
     doc = client.post("/qms/documents", json={"title": "Doc one"}).get_json()
     did = doc["id"]
     client.post(f"/qms/documents/{did}/self-check")  # Phase 5 hard gate
+    client.post(
+        f"/qms/documents/{did}/versions/upload",
+        data={"file": (io.BytesIO(b"Final content"), "final.txt")},
+        content_type="multipart/form-data",
+    )  # spec §10/§11 hard gate
     client.post(f"/qms/documents/{did}/workflow/start")
     assert client.get("/workflow/inbox").get_json() == []
 

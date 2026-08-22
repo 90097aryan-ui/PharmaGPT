@@ -4,10 +4,21 @@ as a mandatory hard gate on Submit for Review, scoped to the CURRENT
 version, never carried forward to a new version.
 """
 
+import io
+
 import pytest
 
 from pharmagpt import qms_document_database as qdb
 from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID as COMPANY_ID
+
+
+def _upload_final_version(client, did, text=b"final content"):
+    r = client.post(
+        f"/qms/documents/{did}/versions/upload",
+        data={"file": (io.BytesIO(text), "final.txt")},
+        content_type="multipart/form-data",
+    )
+    assert r.status_code == 201, r.get_json()
 
 
 @pytest.fixture(autouse=True)
@@ -75,6 +86,7 @@ def test_workflow_start_allowed_after_self_check(client):
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "content": "x"}).get_json()
     r = client.post(f"/qms/documents/{doc['id']}/self-check")
     assert r.status_code == 200
+    _upload_final_version(client, doc["id"])
     r = client.post(f"/qms/documents/{doc['id']}/workflow/start")
     assert r.status_code == 201
 
@@ -89,6 +101,7 @@ def test_legacy_approval_submit_for_review_blocked_without_self_check(client):
 def test_legacy_approval_submit_for_review_allowed_after_self_check(client):
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "content": "x"}).get_json()
     client.post(f"/qms/documents/{doc['id']}/self-check")
+    _upload_final_version(client, doc["id"])
     r = client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     assert r.status_code == 201
 
@@ -96,6 +109,7 @@ def test_legacy_approval_submit_for_review_allowed_after_self_check(client):
 def test_self_check_route_blocked_once_under_review(client):
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "content": "x"}).get_json()
     client.post(f"/qms/documents/{doc['id']}/self-check")
+    _upload_final_version(client, doc["id"])
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     r = client.post(f"/qms/documents/{doc['id']}/self-check")
     assert r.status_code == 409
@@ -112,6 +126,7 @@ def _drive_document_to_effective(client):
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "content": "v1"}).get_json()
     did = doc["id"]
     client.post(f"/qms/documents/{did}/self-check")
+    _upload_final_version(client, did)
     client.post(f"/qms/documents/{did}/workflow/start")
     client.post(f"/qms/documents/{did}/workflow/steps/2/assign",
                 json={"approvers": [{"user_id": _CALLER_USER_ID, "display_name": "Rita"}]})
@@ -177,6 +192,7 @@ def test_submit_blocked_after_start_revision_until_fresh_self_check(client):
     assert "Self-Check" in r.get_json()["error"]
 
     client.post(f"/qms/documents/{did}/self-check")
+    _upload_final_version(client, did)
     r = client.post(f"/qms/documents/{did}/workflow/start")
     assert r.status_code == 201
 
@@ -189,6 +205,7 @@ def test_full_two_step_revision_flow_via_legacy_endpoint(client):
     r = client.post(f"/qms/documents/{did}/versions/start-revision")
     assert r.status_code == 201
     client.post(f"/qms/documents/{did}/self-check")
+    _upload_final_version(client, did)
     r = client.post(f"/qms/documents/{did}/approval", json={"action": "Submitted for Review"})
     assert r.status_code == 201
     # Pre-existing legacy-endpoint behavior (unrelated to this fix): when

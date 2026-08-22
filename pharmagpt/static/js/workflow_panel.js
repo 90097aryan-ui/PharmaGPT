@@ -164,6 +164,39 @@ function wfPanelActionHTML(containerId, recordType, routePrefix, recordId, step,
 
   const approvers = step.approvers || [];
   if (!approvers.length) {
+    // Document Control redesign (spec §3): this step's approvers must
+    // resolve BY ROLE from the configured Approver Pool (Department Head +
+    // Quality Head mandatory, Plant Head optional) — an Author must never
+    // be asked to type a raw Supabase user id. step.pool_summary is only
+    // ever attached by routes/qms_documents.py::get_workflow (never for
+    // CAPA/Deviation/Change Control), so this branch is Document-Control-
+    // specific; every other module keeps the manual-assignment form below.
+    if (step.pool_summary) {
+      const missingRoles = step.pool_summary.filter(p => !p.configured && !p.optional).map(p => wfPanelRoleLabel(p.pool_role));
+      const isAdmin = user.role === "company_admin";
+      return `
+        <div class="qms-panel-item-meta">
+          No approver is assigned yet — this step resolves automatically from the configured Approver Pool
+          once ${missingRoles.length ? `the missing mandatory role(s) (${missingRoles.join(", ")})` : "it"} are configured.
+        </div>
+        ${wfPanelPoolSummaryHTML(step)}
+        ${isAdmin ? `
+          <div class="qms-form-actions" style="margin-top:8px">
+            <button class="btn-primary" onclick="window.qmsDocOpenApproverPoolSettings && qmsDocOpenApproverPoolSettings()">Configure Approver Pool</button>
+          </div>
+          <details style="margin-top:6px">
+            <summary style="font-size:11.5px;color:var(--text-muted);cursor:pointer">Assign manually for this document only (admin override)</summary>
+            <div class="form-grid" style="margin-top:8px">
+              <div class="form-field"><label>Approver User ID</label><input type="text" id="${formId}-uid" placeholder="Supabase user id" /></div>
+              <div class="form-field"><label>Display Name</label><input type="text" id="${formId}-name" placeholder="Full name" /></div>
+            </div>
+            <div class="qms-form-actions">
+              <button class="btn-secondary" onclick="wfPanelAssign('${containerId}','${recordType}','${routePrefix}',${recordId},${step.step_order},'${formId}')">Assign Approver</button>
+            </div>
+          </details>
+        ` : `<p style="font-size:11.5px;color:var(--text-muted);margin-top:4px">A company_admin must configure the Approver Pool before this step can be decided.</p>`}
+      `;
+    }
     return `
       <div class="form-grid" style="margin-top:8px">
         <div class="form-field"><label>Approver User ID</label><input type="text" id="${formId}-uid" placeholder="Supabase user id" /></div>

@@ -651,6 +651,68 @@ def init_db() -> None:
         _add_column_if_missing(conn, "qms_audit_trail", _col, _ddl)
     conn.commit()
 
+    # ── Document Control redesign (Phase 7 gap closure) ──────────────────────
+    # Document Control Information header: Prepared By / Reviewed By /
+    # Approved By are system-derived (mirrors urs_projects' identical
+    # prepared_by/reviewed_by/approved_by pattern — pharmagpt/routes/urs.py)
+    # — never author-editable. See services/workflow_engine.py's
+    # _document_version_on_step_approved and routes/qms_documents.py's
+    # create_document()/release_document() for where these get stamped.
+    _add_column_if_missing(conn, "qms_documents", "prepared_by", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "qms_documents", "reviewed_by", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "qms_documents", "approved_by", "TEXT DEFAULT ''")
+    conn.commit()
+
+    # Business terminology fix: the final Approval step's business action is
+    # "Quality Release" (spec), not the generic "Made Effective" label the
+    # step was originally seeded with. QMS_SCHEMA's own INSERT OR IGNORE seed
+    # (qms_database.py) already uses the corrected name for a brand-new DB;
+    # this UPDATE additionally corrects a DB whose DOCUMENT_WORKFLOW_V1 rows
+    # were already seeded under the old name. Scoped to the exact old value
+    # so it never touches a company's own custom rename, and never touches
+    # already-created qms_workflow_instance_steps rows (those are historical/
+    # audit-adjacent snapshots — see the immutability rationale used
+    # throughout this schema — so an in-progress or completed document's step
+    # history keeps whatever label was actually shown at the time).
+    conn.execute("""
+        UPDATE qms_workflow_template_steps SET step_name = 'Quality Release'
+        WHERE step_key = 'effective' AND step_name = 'Made Effective'
+          AND template_id = (SELECT id FROM qms_workflow_templates WHERE workflow_key = 'DOCUMENT_WORKFLOW_V1')
+    """)
+    conn.commit()
+
+    # Controlled SOP template (spec §1): the actual template row the SOP
+    # create-document picker resolves — "populate the DB", not just describe
+    # headings in the AI prompt. Platform-wide default (company_id=''), so
+    # every company sees it via qms_document_database.list_templates()'s
+    # existing company-specific-first/platform-fallback resolution — no new
+    # resolution logic. Guarded by a SELECT (qms_document_templates has no
+    # natural unique key to INSERT OR IGNORE against), so this is safe to
+    # run on every startup and never creates a duplicate or touches a
+    # company's own template of the same name.
+    _existing_sop_template = conn.execute(
+        "SELECT 1 FROM qms_document_templates WHERE company_id = '' AND doc_type = 'SOP' "
+        "AND name = 'Standard Operating Procedure (Default)'"
+    ).fetchone()
+    if not _existing_sop_template:
+        import json as _json
+        _sop_structure = [
+            {"heading": "1. Purpose", "sub_headings": []},
+            {"heading": "2. Scope", "sub_headings": []},
+            {"heading": "3. Responsibilities", "sub_headings": []},
+            {"heading": "4. Definitions / Abbreviations", "sub_headings": []},
+            {"heading": "5. Procedure", "sub_headings": []},
+            {"heading": "6. References", "sub_headings": []},
+            {"heading": "7. Annexures", "sub_headings": []},
+            {"heading": "8. Revision History", "sub_headings": []},
+        ]
+        conn.execute(
+            "INSERT INTO qms_document_templates (doc_type, name, structure_json, company_id, created_by) "
+            "VALUES (?,?,?,?,?)",
+            ("SOP", "Standard Operating Procedure (Default)", _json.dumps(_sop_structure), "", "system"),
+        )
+        conn.commit()
+
     _migrate_val_projects(conn)
 
     conn.close()

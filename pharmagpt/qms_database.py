@@ -815,7 +815,7 @@ QMS_SCHEMA = """
     JOIN (
         SELECT 1 AS step_order, 'submitted'    AS step_key, 'Submitted for Review' AS step_name, 'activity' AS step_type, 'user,reviewer_qa,company_admin' AS eligible_roles, 'Under Review' AS gate_status
         UNION ALL SELECT 2, 'under_review', 'Under Review',   'approval', 'reviewer_qa,company_admin', 'Under Review'
-        UNION ALL SELECT 3, 'effective',    'Made Effective', 'approval', 'company_admin',             'Effective'
+        UNION ALL SELECT 3, 'effective',    'Quality Release', 'approval', 'company_admin',             'Effective'
     ) s
     WHERE t.workflow_key = 'DOCUMENT_WORKFLOW_V1';
 

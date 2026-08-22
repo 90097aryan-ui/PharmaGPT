@@ -42,6 +42,14 @@ def test_upload_blocked_once_not_draft(client):
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "content": "x"}).get_json()
     did = doc["id"]
     client.post(f"/qms/documents/{did}/self-check")
+    # Final Author Version is itself a hard gate on Submit for Review (spec
+    # §10/§11) — upload once so workflow/start can succeed at all, then
+    # verify a SECOND upload attempt is blocked once the version has left Draft.
+    client.post(
+        f"/qms/documents/{did}/versions/upload",
+        data={"file": (io.BytesIO(b"first upload"), "first.txt")},
+        content_type="multipart/form-data",
+    )
     client.post(f"/qms/documents/{did}/workflow/start")
 
     r = client.post(

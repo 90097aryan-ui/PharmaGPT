@@ -10,6 +10,7 @@ directly, same style as tests/test_quorum_approval.py. Route-level tests use
 the `client` fixture.
 """
 
+import io
 from unittest.mock import patch
 
 import pytest
@@ -18,6 +19,15 @@ from pharmagpt import qms_document_database as qdb
 from pharmagpt import qms_deviation_database as ddb
 from pharmagpt.services import workflow_engine as wfe
 from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID as COMPANY_ID
+
+
+def _upload_final_version(client, did, text=b"final content"):
+    r = client.post(
+        f"/qms/documents/{did}/versions/upload",
+        data={"file": (io.BytesIO(text), "final.txt")},
+        content_type="multipart/form-data",
+    )
+    assert r.status_code == 201, r.get_json()
 
 REAUTH_PATH = "pharmagpt.services.esignature_service.reauthenticate"
 SIGN = {"password": "correct-password", "meaning": "Approved", "reason": "Looks correct"}
@@ -163,6 +173,7 @@ def test_training_completion_after_approval_requires_explicit_release_via_route(
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "content": "x"}).get_json()
     did = doc["id"]
     client.post(f"/qms/documents/{did}/self-check")  # Phase 5 hard gate
+    _upload_final_version(client, did)
     client.post(f"/qms/documents/{did}/workflow/start")
     client.post(f"/qms/documents/{did}/workflow/steps/2/assign",
                 json={"approvers": [{"user_id": caller_user_id, "display_name": "Rita"}]})

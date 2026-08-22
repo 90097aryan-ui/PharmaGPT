@@ -111,11 +111,16 @@ def test_document_approval_transitions_status(client):
     # both starts the instance (auto-completing "Submitted for Review") and
     # decides the now-current "Under Review" step in the same request; since
     # "Under Review" is the second-to-last step, the display stays "Under
-    # Review" until the final "Made Effective" step is itself decided.
+    # Review" until the final "Quality Release" step is itself decided.
     doc = client.post("/qms/documents", json={"title": "Doc"}).get_json()
     did = doc["id"]
 
     client.post(f"/qms/documents/{did}/self-check")  # Phase 5 hard gate
+    client.post(
+        f"/qms/documents/{did}/versions/upload",
+        data={"file": (io.BytesIO(b"Final content"), "final.txt")},
+        content_type="multipart/form-data",
+    )  # spec §10/§11 hard gate
     r = client.post(f"/qms/documents/{did}/approval", json={"action": "Submitted for Review", "performed_by": "J Doe"})
     assert r.status_code == 201
     assert client.get(f"/qms/documents/{did}").get_json()["status"] == "Under Review"

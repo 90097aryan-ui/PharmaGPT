@@ -91,8 +91,8 @@ def create_document(data: dict, *, company_id: str, created_by_user_id: str = ""
         """INSERT INTO qms_documents
            (doc_number, doc_type, title, department, category, version, status,
             effective_date, review_date, expiry_date, owner, reviewer, approver,
-            content, form_data, project_id, company_id, template_id)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            prepared_by, content, form_data, project_id, company_id, template_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             doc_number,
             data.get("doc_type", "SOP"),
@@ -107,6 +107,11 @@ def create_document(data: dict, *, company_id: str, created_by_user_id: str = ""
             data.get("owner", ""),
             data.get("reviewer", ""),
             data.get("approver", ""),
+            # Document Control Information (spec §2): "Prepared By" is the
+            # authenticated creator, mirroring urs_database.create_urs()'s
+            # identical prepared_by pattern — routes/qms_documents.py stamps
+            # this from g.tenant, never accepts a client-supplied value.
+            data.get("prepared_by", ""),
             data.get("content", ""),
             json.dumps(data.get("form_data", {})),
             data.get("project_id") or None,
@@ -168,6 +173,7 @@ def update_document(document_id: int, data: dict) -> dict | None:
     fields = [
         "doc_type", "title", "department", "category", "version", "status",
         "effective_date", "review_date", "expiry_date", "superseded_date", "owner", "reviewer", "approver",
+        "prepared_by", "reviewed_by", "approved_by",
         "content", "project_id", "approval_quorum",
     ]
     updates, params = [], []
@@ -788,7 +794,7 @@ def advance_version_to_approved(document_id: int) -> dict:
     return transition_version_status(version["id"], "approved")
 
 
-def try_clear_training_gate(document_id: int) -> dict | None:
+def try_clear_training_gate(document_id: int, effective_date: str | None = None) -> dict | None:
     """If the document's current version is 'approved' and its training
     gate has cleared, transitions the version to 'effective' (stamping
     effective_date), updates qms_documents.status to 'Effective', and
@@ -796,7 +802,12 @@ def try_clear_training_gate(document_id: int) -> dict | None:
     _apply_document_status, or routes/qms_documents.py's update_training)
     is responsible for any KB-publish side effect. Returns None (no-op) if
     the version isn't 'approved' yet or the gate hasn't cleared — safe to
-    call speculatively any time a training record's status changes."""
+    call speculatively any time a training record's status changes.
+
+    `effective_date` (spec §4 gap closure: "Effective date is supplied/
+    confirmed at release"): the Quality Coordinator's confirmed release
+    date, from routes/qms_documents.py::release_document — defaults to
+    today when not supplied (every pre-existing caller, incl. tests)."""
     version = get_current_version(document_id)
     if not version or version["status"] != "approved":
         return None
@@ -804,7 +815,7 @@ def try_clear_training_gate(document_id: int) -> dict | None:
     if not gate["cleared"]:
         return None
     from datetime import date
-    effective_date = date.today().isoformat()
+    effective_date = effective_date or date.today().isoformat()
     # The version's number is finalized here — e.g. 0.3 -> 1.0, or 1.3 -> 2.0
     # — this is the one point in the whole lifecycle a version's number is
     # legitimately rewritten (see transition_version_status()'s guard and

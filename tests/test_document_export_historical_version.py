@@ -4,6 +4,8 @@ exporting a specific historical (immutable) version's frozen content,
 distinct from the document's live current state.
 """
 
+import io
+
 import pytest
 
 from pharmagpt import qms_document_database as qdb
@@ -31,6 +33,11 @@ def test_report_with_version_id_returns_historical_frozen_content(client):
 
     caller_user_id = "00000000-0000-0000-0000-000000000001"  # the `client` fixture's fixed tenant user_id
     client.post(f"/qms/documents/{did}/self-check")
+    client.post(
+        f"/qms/documents/{did}/versions/upload",
+        data={"file": (io.BytesIO(b"original v0.1 text (final)"), "final.txt")},
+        content_type="multipart/form-data",
+    )
     client.post(f"/qms/documents/{did}/workflow/start")
     client.post(f"/qms/documents/{did}/workflow/steps/2/assign",
                 json={"approvers": [{"user_id": caller_user_id, "display_name": "Rita"}]})
