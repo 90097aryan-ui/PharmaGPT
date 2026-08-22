@@ -21,6 +21,25 @@ def _upload_final_version(client, did, text=b"final content"):
     assert r.status_code == 201, r.get_json()
 
 
+_CALLER_USER_ID = "00000000-0000-0000-0000-000000000001"  # the `client` fixture's fixed tenant user_id
+
+
+def _assign_chain(client, did):
+    """SOP workflow correction: Submit for Review is now additionally gated
+    on the Author having assigned a complete Reviewer/Department Head/
+    Quality Head chain (Plant Head optional) — see
+    tests/test_document_author_assigned_chain.py for the dedicated suite.
+    Every caller here is the SAME `client` fixture user, so assigning that
+    one user_id to every required role lets subsequent decide calls in this
+    file (which all act as that same caller) succeed at every step."""
+    r = client.post(f"/qms/documents/{did}/assign-chain", json={
+        "reviewer_user_id": _CALLER_USER_ID, "reviewer_name": "Rita",
+        "department_head_user_id": _CALLER_USER_ID, "department_head_name": "Al",
+        "quality_head_user_id": _CALLER_USER_ID, "quality_head_name": "Quinn",
+    })
+    assert r.status_code == 200, r.get_json()
+
+
 @pytest.fixture(autouse=True)
 def _app_context():
     import pharmagpt.app as appmod
@@ -87,6 +106,7 @@ def test_workflow_start_allowed_after_self_check(client):
     r = client.post(f"/qms/documents/{doc['id']}/self-check")
     assert r.status_code == 200
     _upload_final_version(client, doc["id"])
+    _assign_chain(client, doc["id"])
     r = client.post(f"/qms/documents/{doc['id']}/workflow/start")
     assert r.status_code == 201
 
@@ -102,6 +122,7 @@ def test_legacy_approval_submit_for_review_allowed_after_self_check(client):
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "content": "x"}).get_json()
     client.post(f"/qms/documents/{doc['id']}/self-check")
     _upload_final_version(client, doc["id"])
+    _assign_chain(client, doc["id"])
     r = client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     assert r.status_code == 201
 
@@ -110,6 +131,7 @@ def test_self_check_route_blocked_once_under_review(client):
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "content": "x"}).get_json()
     client.post(f"/qms/documents/{doc['id']}/self-check")
     _upload_final_version(client, doc["id"])
+    _assign_chain(client, doc["id"])
     client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
     r = client.post(f"/qms/documents/{doc['id']}/self-check")
     assert r.status_code == 409
@@ -119,22 +141,23 @@ def test_self_check_route_blocked_once_under_review(client):
 # Self-Check from the outgoing version — see routes/qms_documents.py's
 # _submission_gate_error() and the new POST .../versions/start-revision.
 
-_CALLER_USER_ID = "00000000-0000-0000-0000-000000000001"  # the `client` fixture's fixed tenant user_id
-
 
 def _drive_document_to_effective(client):
+    """SOP workflow correction: Department Head/Quality Head are now
+    strictly sequential single-decider steps (3 and 4), not one shared
+    quorum step — decides both in order, then Plant Head (step 5) is
+    auto-skipped since _assign_chain never assigns one."""
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "content": "v1"}).get_json()
     did = doc["id"]
     client.post(f"/qms/documents/{did}/self-check")
     _upload_final_version(client, did)
+    _assign_chain(client, did)
     client.post(f"/qms/documents/{did}/workflow/start")
-    client.post(f"/qms/documents/{did}/workflow/steps/2/assign",
-                json={"approvers": [{"user_id": _CALLER_USER_ID, "display_name": "Rita"}]})
     client.post(f"/qms/documents/{did}/workflow/steps/2/decide",
                 json={"decision": "approve", "meaning": "Reviewed"})
-    client.post(f"/qms/documents/{did}/workflow/steps/3/assign",
-                json={"approvers": [{"user_id": _CALLER_USER_ID, "display_name": "Al"}]})
     client.post(f"/qms/documents/{did}/workflow/steps/3/decide",
+                json={"decision": "approve", "meaning": "Approved"})
+    client.post(f"/qms/documents/{did}/workflow/steps/4/decide",
                 json={"decision": "approve", "meaning": "Approved"})
     t = client.post(f"/qms/documents/{did}/training", json={"trainee_name": "T1"}).get_json()
     client.put(f"/qms/documents/training/{t['id']}", json={"training_status": "Completed", "training_date": "2026-01-01"})

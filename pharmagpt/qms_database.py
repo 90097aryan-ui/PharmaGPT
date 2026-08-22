@@ -808,28 +808,80 @@ QMS_SCHEMA = """
     INSERT OR IGNORE INTO qms_workflow_templates (workflow_key, name, module)
         VALUES ('DOCUMENT_WORKFLOW_V1', 'Document Control Workflow', 'document');
 
+    -- SOP workflow correction (Author-assigned chain + sequential approval):
+    -- 5 steps, not 3 — Department Head, Quality Head, and Plant Head are now
+    -- three distinct, strictly SEQUENTIAL single-decider approval steps
+    -- (Quality Head cannot act until Department Head has approved) instead
+    -- of one shared quorum step voted on in any order. 'effective' is kept
+    -- as the step_key for the LAST step specifically so every existing
+    -- Effective-transition mechanism (services/workflow_engine.py's
+    -- _document_version_on_step_approved, qms_document_database.py's
+    -- try_clear_training_gate/release_document — all keyed on step_key ==
+    -- 'effective') keeps working completely unchanged; it is now Plant
+    -- Head's decision when assigned, or auto-skipped straight through when
+    -- not (services/workflow_engine.py's auto-skip handling, driven by
+    -- qms_documents.plant_head_user_id being empty at Submit for Review).
     INSERT OR IGNORE INTO qms_workflow_template_steps
         (template_id, step_order, step_key, step_name, step_type, eligible_roles, gate_status)
     SELECT t.id, s.step_order, s.step_key, s.step_name, s.step_type, s.eligible_roles, s.gate_status
     FROM qms_workflow_templates t
     JOIN (
         SELECT 1 AS step_order, 'submitted'    AS step_key, 'Submitted for Review' AS step_name, 'activity' AS step_type, 'user,reviewer_qa,company_admin' AS eligible_roles, 'Under Review' AS gate_status
-        UNION ALL SELECT 2, 'under_review', 'Under Review',   'approval', 'reviewer_qa,company_admin', 'Under Review'
-        UNION ALL SELECT 3, 'effective',    'Quality Release', 'approval', 'company_admin',             'Effective'
+        UNION ALL SELECT 2, 'under_review',              'Under Review',              'approval', 'reviewer_qa,company_admin', 'Under Review'
+        UNION ALL SELECT 3, 'department_head_approval',  'Department Head Approval',  'approval', 'reviewer_qa,company_admin', 'Pending Approval'
+        UNION ALL SELECT 4, 'quality_head_approval',     'Quality Head Approval',     'approval', 'reviewer_qa,company_admin', 'Pending Approval'
+        UNION ALL SELECT 5, 'effective',                 'Quality Release',           'approval', 'company_admin',             'Effective'
     ) s
     WHERE t.workflow_key = 'DOCUMENT_WORKFLOW_V1';
 
-    -- Document Control redesign (Phase 3): Review stays single-reviewer —
-    -- only the final approval stage ('effective') is ever quorum-gated.
-    -- An UPDATE (not part of the step INSERT above) so it's idempotent
-    -- and self-correcting even for a DB whose DOCUMENT_WORKFLOW_V1 rows
-    -- were already seeded by an earlier boot before quorum_eligible existed
-    -- (INSERT OR IGNORE is a no-op once the UNIQUE constraint is already
-    -- satisfied, so the column would otherwise stay stuck at its 1 default
-    -- forever without this).
+    -- Forward-migrate a DB whose DOCUMENT_WORKFLOW_V1 was already seeded
+    -- under the old 3-step (submitted/under_review/effective) shape — the
+    -- INSERT OR IGNORE above is a no-op for it (UNIQUE(template_id,
+    -- step_order) already satisfied at order 3), so it needs its old step 3
+    -- explicitly repurposed into the new step 3 and steps 4/5 added.
+    -- Self-clearing guard: WHERE step_key = 'effective' is only ever true
+    -- for the OLD shape's step 3 — the moment this UPDATE fires once, that
+    -- row's step_key becomes 'department_head_approval' and the condition
+    -- can never match again, so this is safe to run on every startup
+    -- without a separate "already migrated" flag. Never touches an
+    -- in-progress workflow instance's own already-snapshotted
+    -- qms_workflow_instance_steps rows — those are historical/audit-
+    -- adjacent, same immutability rationale used throughout this schema
+    -- (see the 'Quality Release' rename above).
+    UPDATE qms_workflow_template_steps
+    SET step_key = 'department_head_approval', step_name = 'Department Head Approval',
+        eligible_roles = 'reviewer_qa,company_admin', gate_status = 'Pending Approval'
+    WHERE step_order = 3 AND step_key = 'effective'
+      AND template_id = (SELECT id FROM qms_workflow_templates WHERE workflow_key = 'DOCUMENT_WORKFLOW_V1');
+    INSERT INTO qms_workflow_template_steps
+        (template_id, step_order, step_key, step_name, step_type, eligible_roles, gate_status)
+    SELECT (SELECT id FROM qms_workflow_templates WHERE workflow_key = 'DOCUMENT_WORKFLOW_V1'), 4,
+           'quality_head_approval', 'Quality Head Approval', 'approval', 'reviewer_qa,company_admin', 'Pending Approval'
+    WHERE NOT EXISTS (
+        SELECT 1 FROM qms_workflow_template_steps
+        WHERE template_id = (SELECT id FROM qms_workflow_templates WHERE workflow_key = 'DOCUMENT_WORKFLOW_V1')
+          AND step_key = 'quality_head_approval'
+    );
+    INSERT INTO qms_workflow_template_steps
+        (template_id, step_order, step_key, step_name, step_type, eligible_roles, gate_status)
+    SELECT (SELECT id FROM qms_workflow_templates WHERE workflow_key = 'DOCUMENT_WORKFLOW_V1'), 5,
+           'effective', 'Quality Release', 'approval', 'company_admin', 'Effective'
+    WHERE NOT EXISTS (
+        SELECT 1 FROM qms_workflow_template_steps
+        WHERE template_id = (SELECT id FROM qms_workflow_templates WHERE workflow_key = 'DOCUMENT_WORKFLOW_V1')
+          AND step_order = 5
+    );
+
+    -- Document Control redesign (Phase 3, still true post-restructure):
+    -- Review stays single-reviewer — none of the four approval steps are
+    -- ever quorum-gated now that Department Head/Quality Head/Plant Head
+    -- are sequential single-decider steps, not a shared quorum step. An
+    -- UPDATE (not part of the step INSERT above) so it's idempotent and
+    -- self-correcting even for a DB whose rows were already seeded by an
+    -- earlier boot before quorum_eligible existed.
     UPDATE qms_workflow_template_steps
     SET quorum_eligible = 0
-    WHERE step_key = 'under_review'
+    WHERE step_key IN ('under_review', 'department_head_approval', 'quality_head_approval', 'effective')
       AND template_id = (SELECT id FROM qms_workflow_templates WHERE workflow_key = 'DOCUMENT_WORKFLOW_V1');
 
     -- ── Configurable approver pool (Document Control redesign, Phase 3) ──────

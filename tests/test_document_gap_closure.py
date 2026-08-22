@@ -48,19 +48,34 @@ def _upload_final_version(client, did, text=b"# Final content\n\nProcedure text.
     assert r.status_code == 201, r.get_json()
 
 
+def _assign_chain(client, did, caller_user_id=CALLER_USER_ID):
+    """SOP workflow correction: Submit for Review now requires the Author to
+    have assigned a complete Reviewer/Department Head/Quality Head chain
+    first (Plant Head optional — never assigned here, so its step
+    auto-skips)."""
+    r = client.post(f"/qms/documents/{did}/assign-chain", json={
+        "reviewer_user_id": caller_user_id, "reviewer_name": "Rita",
+        "department_head_user_id": caller_user_id, "department_head_name": "Al",
+        "quality_head_user_id": caller_user_id, "quality_head_name": "Quinn",
+    })
+    assert r.status_code == 200, r.get_json()
+
+
 def _reach_approved_via_route(client, did, caller_user_id=CALLER_USER_ID):
+    """Drives through the now-sequential Department Head (step 3) -> Quality
+    Head (step 4) approval — Plant Head (step 5) auto-skips."""
     client.post(f"/qms/documents/{did}/self-check")
     _upload_final_version(client, did)
+    _assign_chain(client, did, caller_user_id)
     client.post(f"/qms/documents/{did}/workflow/start")
-    client.post(f"/qms/documents/{did}/workflow/steps/2/assign",
-                json={"approvers": [{"user_id": caller_user_id, "display_name": "Rita"}]})
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/workflow/steps/2/decide", json={"decision": "approve", **SIGN})
     assert r.status_code == 200, r.get_json()
-    client.post(f"/qms/documents/{did}/workflow/steps/3/assign",
-                json={"approvers": [{"user_id": caller_user_id, "display_name": "Al"}]})
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/workflow/steps/3/decide", json={"decision": "approve", **SIGN})
+    assert r.status_code == 200, r.get_json()
+    with _reauth(True):
+        r = client.post(f"/qms/documents/{did}/workflow/steps/4/decide", json={"decision": "approve", **SIGN})
     assert r.status_code == 200, r.get_json()
 
 
@@ -157,15 +172,20 @@ def test_reviewed_by_approved_by_effective_date_cannot_be_set_via_put(client):
 # ── §4: "Quality Release" business terminology + Effective Date at release ──
 
 def test_final_approval_step_is_named_quality_release_not_made_effective(client):
+    """SOP workflow correction: the final approval step is now step 5
+    (Plant Head's step, step_key='effective') — steps 3/4 are Department
+    Head/Quality Head instead, a distinct sequential change from the old
+    3-step template this test originally exercised."""
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "content": "x"}).get_json()
     did = doc["id"]
     client.post(f"/qms/documents/{did}/self-check")
     _upload_final_version(client, did)
+    _assign_chain(client, did)
     client.post(f"/qms/documents/{did}/workflow/start")
     wf = client.get(f"/qms/documents/{did}/workflow").get_json()
-    step3 = next(s for s in wf["steps"] if s["step_order"] == 3)
-    assert step3["step_name"] == "Quality Release"
-    assert step3["step_name"] != "Made Effective"
+    step5 = next(s for s in wf["steps"] if s["step_order"] == 5)
+    assert step5["step_name"] == "Quality Release"
+    assert step5["step_name"] != "Made Effective"
 
 
 def test_effective_date_is_confirmed_at_release_not_defaulted_silently(client):
@@ -214,7 +234,9 @@ def test_release_blocked_when_document_has_no_content(client):
         wfe.assign_approvers("document", did, 2, [{"user_id": CALLER_USER_ID, "display_name": "Rita"}])
         wfe.decide_step("document", did, 2, "approve", user_id=CALLER_USER_ID, role="reviewer_qa", performed_by="Rita")
         wfe.assign_approvers("document", did, 3, [{"user_id": CALLER_USER_ID, "display_name": "Al"}])
-        wfe.decide_step("document", did, 3, "approve", user_id=CALLER_USER_ID, role="company_admin", performed_by="Al")
+        wfe.decide_step("document", did, 3, "approve", user_id=CALLER_USER_ID, role="reviewer_qa", performed_by="Al")
+        wfe.assign_approvers("document", did, 4, [{"user_id": CALLER_USER_ID, "display_name": "Quinn"}])
+        wfe.decide_step("document", did, 4, "approve", user_id=CALLER_USER_ID, role="reviewer_qa", performed_by="Quinn")
     assert qdb.get_document(did)["status"] == "Approved"
     assert not (qdb.get_document(did).get("content") or "").strip()
 
@@ -246,12 +268,13 @@ def test_existing_sop_full_revision_lifecycle_with_two_rejections(client):
     assert v1_1["status"] == "draft"
 
     # 1.1 -> Review Rejected -> 1.2 new immutable Draft
+    # (the chain assigned earlier by _reach_approved_via_route is stored on
+    # the document itself and persists across revision cycles — no need to
+    # reassign it here.)
     client.put(f"/qms/documents/{did}", json={"content": "v1.1 edits"})
     client.post(f"/qms/documents/{did}/self-check")
     _upload_final_version(client, did, b"v1.1 final upload")
     client.post(f"/qms/documents/{did}/workflow/start")
-    client.post(f"/qms/documents/{did}/workflow/steps/2/assign",
-                json={"approvers": [{"user_id": CALLER_USER_ID, "display_name": "Rita"}]})
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/workflow/steps/2/decide",
                          json={"decision": "reject", "comments": "Needs rework", **SIGN})
@@ -261,20 +284,21 @@ def test_existing_sop_full_revision_lifecycle_with_two_rejections(client):
     assert v1_2["status"] == "draft"
     assert v1_2["id"] != v1_1["id"]
 
-    # 1.2 -> Review Accepted -> Approval Rejected -> 1.3 new immutable Draft
+    # 1.2 -> Review Accepted -> Department Head Accepted -> Quality Head
+    # Rejected -> 1.3 new immutable Draft (SOP workflow correction:
+    # sequential steps 3/4, not one shared quorum step)
     client.put(f"/qms/documents/{did}", json={"content": "v1.2 edits"})
     client.post(f"/qms/documents/{did}/self-check")
     _upload_final_version(client, did, b"v1.2 final upload")
     client.post(f"/qms/documents/{did}/workflow/start")
-    client.post(f"/qms/documents/{did}/workflow/steps/2/assign",
-                json={"approvers": [{"user_id": CALLER_USER_ID, "display_name": "Rita"}]})
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/workflow/steps/2/decide", json={"decision": "approve", **SIGN})
     assert r.status_code == 200, r.get_json()
-    client.post(f"/qms/documents/{did}/workflow/steps/3/assign",
-                json={"approvers": [{"user_id": CALLER_USER_ID, "display_name": "Al"}]})
     with _reauth(True):
-        r = client.post(f"/qms/documents/{did}/workflow/steps/3/decide",
+        r = client.post(f"/qms/documents/{did}/workflow/steps/3/decide", json={"decision": "approve", **SIGN})
+    assert r.status_code == 200, r.get_json()
+    with _reauth(True):
+        r = client.post(f"/qms/documents/{did}/workflow/steps/4/decide",
                          json={"decision": "reject", "comments": "Not ready", **SIGN})
     assert r.status_code == 200, r.get_json()
     v1_3 = qdb.get_current_version(did)

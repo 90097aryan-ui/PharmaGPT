@@ -60,6 +60,43 @@ def _clear_training_gate(client, did):
     client.post(f"/qms/documents/{did}/release", json={"meaning": "Released"})
 
 
+_CALLER_USER_ID = "00000000-0000-0000-0000-000000000001"  # tests/conftest.py's fixed client-fixture tenant user_id
+
+
+def _assign_chain(client, did):
+    """SOP workflow correction: Submit for Review now additionally requires
+    the Author to have assigned a complete Reviewer/Department Head/Quality
+    Head chain first (Plant Head optional — never assigned here, so its
+    step auto-skips). Kept as its own helper, called right before the
+    existing "Submitted for Review"/"Approved" pair below, so every
+    pre-existing call site here only needs one extra line.
+
+    Every decision in this file is made by the SAME `client` fixture user
+    (tests/conftest.py's fixed tenant) — assigning that one user_id to
+    every required role (rather than distinct placeholder ids) is what lets
+    each subsequent "Approved" call in _submit_and_fully_approve actually
+    succeed: workflow_engine.decide_step()'s "only a named assignee may
+    decide" check would otherwise 403/409 once the chain (not the legacy
+    endpoint's now-inapplicable self-assign-if-empty fallback) has already
+    named someone else."""
+    r = client.post(f"/qms/documents/{did}/assign-chain", json={
+        "reviewer_user_id": _CALLER_USER_ID, "reviewer_name": "Rita",
+        "department_head_user_id": _CALLER_USER_ID, "department_head_name": "Dana",
+        "quality_head_user_id": _CALLER_USER_ID, "quality_head_name": "Quinn",
+    })
+    assert r.status_code == 200, r.get_json()
+
+
+def _submit_and_fully_approve(client, did):
+    """Replaces the old single "Approved" call: Department Head/Quality
+    Head are now sequential single-decider steps (3 and 4), not one shared
+    quorum step, so reaching 'Approved' takes two decisions instead of one.
+    Plant Head (step 5) auto-skips since _assign_chain never assigns one."""
+    client.post(f"/qms/documents/{did}/approval", json={"action": "Submitted for Review"})
+    client.post(f"/qms/documents/{did}/approval", json={"action": "Approved"})
+    return client.post(f"/qms/documents/{did}/approval", json={"action": "Approved"})
+
+
 # ── Document Control ─────────────────────────────────────────────────────────
 
 def test_effective_document_control_record_is_published_to_kb(client):
@@ -67,8 +104,8 @@ def test_effective_document_control_record_is_published_to_kb(client):
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP\n\nOperate the autoclave safely."})
 
     _self_check(client, doc["id"])
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
-    resp = client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _assign_chain(client, doc["id"])
+    resp = _submit_and_fully_approve(client, doc["id"])
     assert resp.status_code == 201
     assert client.get(f"/qms/documents/{doc['id']}").get_json()["status"] == "Approved"
     _clear_training_gate(client, doc["id"])
@@ -84,8 +121,8 @@ def test_document_control_republish_updates_the_same_kb_row(client):
     doc = client.post("/qms/documents", json={"title": "Recalibration SOP", "doc_type": "SOP"}).get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v1"})
     _self_check(client, doc["id"])
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _assign_chain(client, doc["id"])
+    _submit_and_fully_approve(client, doc["id"])
     _clear_training_gate(client, doc["id"])
     first_rows = _kb_rows_for("document", doc["id"])
     assert len(first_rows) == 1
@@ -98,13 +135,14 @@ def test_document_control_republish_updates_the_same_kb_row(client):
     # the old single-call "Rejected on Effective" shortcut is blocked
     # because a version it would fork can never already have a fresh
     # Self-Check recorded on it (see routes/qms_documents.py's
-    # _submission_gate_error()).
+    # _submission_gate_error()). The chain assigned on the first cycle is
+    # stored on the document itself and persists across revisions — no
+    # need to reassign it here.
     r = client.post(f"/qms/documents/{doc['id']}/versions/start-revision")
     assert r.status_code == 201, r.get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v2 — revised"})
     _self_check(client, doc["id"])
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _submit_and_fully_approve(client, doc["id"])
     _clear_training_gate(client, doc["id"])
 
     rows = _kb_rows_for("document", doc["id"])
@@ -218,8 +256,8 @@ def test_consolidated_dq_fat_sat_are_published_to_kb(client, doc_type, expected_
     doc = client.post("/qms/documents", json={"title": f"{doc_type} Protocol", "doc_type": doc_type}).get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": f"# {doc_type} Protocol\n\nTest content."})
     _self_check(client, doc["id"])
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
-    resp = client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _assign_chain(client, doc["id"])
+    resp = _submit_and_fully_approve(client, doc["id"])
     assert resp.status_code == 201
     _clear_training_gate(client, doc["id"])
 
@@ -234,16 +272,15 @@ def test_republish_snapshots_the_outgoing_version_instead_of_discarding_it(clien
     doc = client.post("/qms/documents", json={"title": "Versioned SOP", "doc_type": "SOP"}).get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v1"})
     _self_check(client, doc["id"])
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _assign_chain(client, doc["id"])
+    _submit_and_fully_approve(client, doc["id"])
     _clear_training_gate(client, doc["id"])
     kb_row = _kb_rows_for("document", doc["id"])[0]
 
     client.post(f"/qms/documents/{doc['id']}/versions/start-revision")
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v2 — revised"})
     _self_check(client, doc["id"])
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _submit_and_fully_approve(client, doc["id"])
     _clear_training_gate(client, doc["id"])
 
     versions = db.get_kb_versions(kb_row["id"])
@@ -257,8 +294,8 @@ def test_auto_published_kb_document_has_creator_attribution(client):
     doc = client.post("/qms/documents", json={"title": "Attributed SOP", "doc_type": "SOP"}).get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP"})
     _self_check(client, doc["id"])
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _assign_chain(client, doc["id"])
+    _submit_and_fully_approve(client, doc["id"])
     _clear_training_gate(client, doc["id"])
 
     kb_row = _kb_rows_for("document", doc["id"])[0]
@@ -270,8 +307,8 @@ def test_auto_publish_logs_uploaded_audit_entry(client):
     doc = client.post("/qms/documents", json={"title": "Audited SOP", "doc_type": "SOP"}).get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP"})
     _self_check(client, doc["id"])
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _assign_chain(client, doc["id"])
+    _submit_and_fully_approve(client, doc["id"])
     _clear_training_gate(client, doc["id"])
 
     kb_row = _kb_rows_for("document", doc["id"])[0]
@@ -284,16 +321,15 @@ def test_republish_logs_version_created_and_updated_audit_entries(client):
     doc = client.post("/qms/documents", json={"title": "Republished SOP", "doc_type": "SOP"}).get_json()
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v1"})
     _self_check(client, doc["id"])
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _assign_chain(client, doc["id"])
+    _submit_and_fully_approve(client, doc["id"])
     _clear_training_gate(client, doc["id"])
     kb_row = _kb_rows_for("document", doc["id"])[0]
 
     client.post(f"/qms/documents/{doc['id']}/versions/start-revision")
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v2 — revised"})
     _self_check(client, doc["id"])
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Submitted for Review"})
-    client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Approved"})
+    _submit_and_fully_approve(client, doc["id"])
     _clear_training_gate(client, doc["id"])
 
     entries = client.get(f"/qms/kb_document/{kb_row['id']}/audit-trail").get_json()

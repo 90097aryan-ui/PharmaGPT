@@ -106,13 +106,19 @@ def test_review_step_never_becomes_quorum_mode(db_path):
     assert step2["required_quorum"] is None
 
 
-def test_approval_step_becomes_quorum_mode(db_path):
+def test_approval_step_never_becomes_quorum_mode_now(db_path):
+    """SOP workflow correction: Department Head/Quality Head/Plant Head are
+    now strictly sequential single-decider steps — start_instance() must
+    never snapshot ANY Document Control approval step as quorum mode any
+    more, even with a quorum override, superseding the old
+    test_approval_step_becomes_quorum_mode (which asserted the opposite,
+    Phase-3 behaviour)."""
     doc = _make_document()
     state = wfe.start_instance("DOCUMENT_WORKFLOW_V1", "document", doc["id"], COMPANY_ID,
                                 "Ada Author", default_quorum=2)
     step3 = next(s for s in state["steps"] if s["step_order"] == 3)
-    assert step3["approval_mode"] == "quorum"
-    assert step3["required_quorum"] == 2
+    assert step3["approval_mode"] == "any"
+    assert step3["required_quorum"] is None
 
 
 def test_review_single_reviewer_approve_advances_even_with_quorum_override(db_path):
@@ -129,99 +135,51 @@ def test_review_single_reviewer_approve_advances_even_with_quorum_override(db_pa
     assert state["instance"]["current_step_order"] == 3
 
 
-# ── Route-level: pool auto-assignment on workflow start ──────────────────────
+# ── Route-level: the pool is no longer consulted at workflow start ──────────
+# SOP workflow correction: assignment authority belongs to the Author alone
+# (POST .../assign-chain — see tests/test_document_author_assigned_chain.py
+# for that full suite). The Approver Pool's CRUD/routes/resolve functions
+# above are untouched and still work for any other future use; these tests
+# confirm specifically that having a pool configured no longer auto-assigns
+# ANYTHING at Submit for Review — Submit for Review is blocked instead,
+# exactly as it would be for any document with no chain assigned.
 
-def test_start_workflow_auto_assigns_pool_approvers_with_quorum_2(client):
+def test_configured_pool_no_longer_auto_assigns_at_workflow_start(client):
     qdb.set_approver_pool_member(COMPANY_ID, "", "department_head", "dh-1", "Dana Head")
     qdb.set_approver_pool_member(COMPANY_ID, "", "quality_head", "qh-1", "Quinn Head")
 
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP"}).get_json()
-    client.post(f"/qms/documents/{doc['id']}/self-check")  # Phase 5 hard gate
+    client.post(f"/qms/documents/{doc['id']}/self-check")
     client.post(
         f"/qms/documents/{doc['id']}/versions/upload",
         data={"file": (io.BytesIO(b"final content"), "final.txt")},
         content_type="multipart/form-data",
     )
-    state = client.post(f"/qms/documents/{doc['id']}/workflow/start").get_json()
-
-    step3 = next(s for s in state["steps"] if s["step_order"] == 3)
-    assert step3["approval_mode"] == "quorum"
-    assert step3["required_quorum"] == 2
-    approver_ids = {a["user_id"] for a in step3["approvers"]}
-    assert approver_ids == {"dh-1", "qh-1"}
+    r = client.post(f"/qms/documents/{doc['id']}/workflow/start")
+    # blocked — no review/approval chain assigned, regardless of pool config
+    assert r.status_code == 409
+    assert "chain" in r.get_json()["error"].lower()
 
 
-def test_start_workflow_includes_plant_head_but_quorum_stays_2(client):
-    qdb.set_approver_pool_member(COMPANY_ID, "", "department_head", "dh-1", "Dana Head")
-    qdb.set_approver_pool_member(COMPANY_ID, "", "quality_head", "qh-1", "Quinn Head")
-    qdb.set_approver_pool_member(COMPANY_ID, "", "plant_head", "ph-1", "Pat Head")
-
-    doc = client.post("/qms/documents", json={"title": "Cleaning SOP"}).get_json()
-    client.post(f"/qms/documents/{doc['id']}/self-check")  # Phase 5 hard gate
-    client.post(
-        f"/qms/documents/{doc['id']}/versions/upload",
-        data={"file": (io.BytesIO(b"final content"), "final.txt")},
-        content_type="multipart/form-data",
-    )
-    state = client.post(f"/qms/documents/{doc['id']}/workflow/start").get_json()
-
-    step3 = next(s for s in state["steps"] if s["step_order"] == 3)
-    assert step3["required_quorum"] == 2
-    approver_ids = {a["user_id"] for a in step3["approvers"]}
-    assert approver_ids == {"dh-1", "qh-1", "ph-1"}
-
-
-def test_start_workflow_falls_back_to_manual_quorum_when_pool_unconfigured(client):
-    """No pool configured at all — falls back to the pre-Phase-3 behaviour
-    (approval_quorum field, or 'any' mode if that's also unset). Confirms
-    backward compatibility for a company that hasn't set up a pool yet."""
-    doc = client.post("/qms/documents", json={"title": "Cleaning SOP"}).get_json()
-    client.post(f"/qms/documents/{doc['id']}/self-check")  # Phase 5 hard gate
-    client.post(
-        f"/qms/documents/{doc['id']}/versions/upload",
-        data={"file": (io.BytesIO(b"final content"), "final.txt")},
-        content_type="multipart/form-data",
-    )
-    state = client.post(f"/qms/documents/{doc['id']}/workflow/start").get_json()
-
-    step3 = next(s for s in state["steps"] if s["step_order"] == 3)
-    assert step3["approval_mode"] == "any"
-    assert step3["approvers"] == []
-
-
-def test_legacy_approval_endpoint_does_not_overwrite_pool_approvers(client):
-    """Regression guard for a bug caught during implementation: the legacy
-    /approval wrapper used to unconditionally self-assign the calling user
-    as the sole approver whenever they weren't already one — which would
-    have silently wiped out the pool-derived mandatory approvers. Now it
-    only self-assigns when NO approver is set yet at all."""
+def test_legacy_approval_endpoint_also_requires_an_assigned_chain(client):
+    """The legacy /approval wrapper's auto-start branch goes through the
+    exact same _submission_gate_error()/_assign_review_chain_to_steps() path
+    as /workflow/start now — an unconfigured chain blocks it the same way,
+    regardless of whether an Approver Pool happens to be configured."""
     qdb.set_approver_pool_member(COMPANY_ID, "", "department_head", "dh-1", "Dana Head")
     qdb.set_approver_pool_member(COMPANY_ID, "", "quality_head", "qh-1", "Quinn Head")
 
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP"}).get_json()
     did = doc["id"]
-    client.post(f"/qms/documents/{did}/self-check")  # Phase 5 hard gate
+    client.post(f"/qms/documents/{did}/self-check")
     client.post(
         f"/qms/documents/{did}/versions/upload",
         data={"file": (io.BytesIO(b"final content"), "final.txt")},
         content_type="multipart/form-data",
     )
-    client.post(f"/qms/documents/{did}/workflow/start")
-    # advance past Review with a manually assigned reviewer so we reach the
-    # quorum-gated Approval step
-    client.post(f"/qms/documents/{did}/workflow/steps/2/assign",
-                json={"approvers": [{"user_id": "rev-1", "display_name": "Rita"}]})
-    client.post(f"/qms/documents/{did}/workflow/steps/2/decide",
-                json={"decision": "approve", "meaning": "Reviewed"})
-
-    # a bystander who is NOT in the pool calls the legacy endpoint
     r = client.post(f"/qms/documents/{did}/approval", json={"action": "Approved", "meaning": "Approved"})
-    assert r.status_code == 409  # WorkflowPermissionError -> 409 in this route's except clause
-
-    state = wfe.get_instance_state("document", did)
-    step3 = next(s for s in state["steps"] if s["step_order"] == 3)
-    approver_ids = {a["user_id"] for a in step3["approvers"]}
-    assert approver_ids == {"dh-1", "qh-1"}  # unchanged — never overwritten
+    assert r.status_code == 409
+    assert "chain" in r.get_json()["error"].lower()
 
 
 # ── pool CRUD route ────────────────────────────────────────────────────────

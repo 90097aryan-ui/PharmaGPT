@@ -48,20 +48,37 @@ def _upload_final_version(client, did, text=b"final content"):
     assert r.status_code == 201, r.get_json()
 
 
+def _assign_chain(client, did, caller_user_id="00000000-0000-0000-0000-000000000001"):
+    """SOP workflow correction: Submit for Review now requires the Author to
+    have assigned a complete Reviewer/Department Head/Quality Head chain
+    first (Plant Head optional — never assigned here, so its step
+    auto-skips). Every step below is decided by this SAME caller, so
+    assigning `caller_user_id` to every required role lets each sequential
+    decide call in this file succeed."""
+    r = client.post(f"/qms/documents/{did}/assign-chain", json={
+        "reviewer_user_id": caller_user_id, "reviewer_name": "Rita",
+        "department_head_user_id": caller_user_id, "department_head_name": "Al",
+        "quality_head_user_id": caller_user_id, "quality_head_name": "Quinn",
+    })
+    assert r.status_code == 200, r.get_json()
+
+
 def _reach_approved_via_route(client, caller_user_id="00000000-0000-0000-0000-000000000001"):
+    """Drives through the now-sequential Department Head (step 3) -> Quality
+    Head (step 4) approval — Plant Head (step 5) auto-skips since none is
+    assigned."""
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "content": "x"}).get_json()
     did = doc["id"]
     client.post(f"/qms/documents/{did}/self-check")
     _upload_final_version(client, did)
+    _assign_chain(client, did, caller_user_id)
     client.post(f"/qms/documents/{did}/workflow/start")
-    client.post(f"/qms/documents/{did}/workflow/steps/2/assign",
-                json={"approvers": [{"user_id": caller_user_id, "display_name": "Rita"}]})
     with _reauth(True):
         client.post(f"/qms/documents/{did}/workflow/steps/2/decide", json={"decision": "approve", **SIGN})
-    client.post(f"/qms/documents/{did}/workflow/steps/3/assign",
-                json={"approvers": [{"user_id": caller_user_id, "display_name": "Al"}]})
     with _reauth(True):
         client.post(f"/qms/documents/{did}/workflow/steps/3/decide", json={"decision": "approve", **SIGN})
+    with _reauth(True):
+        client.post(f"/qms/documents/{did}/workflow/steps/4/decide", json={"decision": "approve", **SIGN})
     return did
 
 
@@ -161,15 +178,15 @@ def test_existing_effective_sop_becomes_2_0_on_next_release(client):
     client.post(f"/qms/documents/{did}/versions/start-revision")
     client.post(f"/qms/documents/{did}/self-check")
     _upload_final_version(client, did, b"revised content")
+    # The chain assigned on the first cycle is stored on the document itself
+    # (not per-version) and still applies — no need to reassign.
     client.post(f"/qms/documents/{did}/workflow/start")
-    client.post(f"/qms/documents/{did}/workflow/steps/2/assign",
-                json={"approvers": [{"user_id": "00000000-0000-0000-0000-000000000001", "display_name": "Rita"}]})
     with _reauth(True):
         client.post(f"/qms/documents/{did}/workflow/steps/2/decide", json={"decision": "approve", **SIGN})
-    client.post(f"/qms/documents/{did}/workflow/steps/3/assign",
-                json={"approvers": [{"user_id": "00000000-0000-0000-0000-000000000001", "display_name": "Al"}]})
     with _reauth(True):
         client.post(f"/qms/documents/{did}/workflow/steps/3/decide", json={"decision": "approve", **SIGN})
+    with _reauth(True):
+        client.post(f"/qms/documents/{did}/workflow/steps/4/decide", json={"decision": "approve", **SIGN})
 
     t2 = client.post(f"/qms/documents/{did}/training", json={"trainee_name": "T2"}).get_json()
     with _reauth(True):
@@ -208,16 +225,14 @@ def test_manual_create_version_allowed_for_company_admin(client):
 # ── §8: Review Date is system-stamped, never author-supplied ─────────────────
 
 def test_review_date_is_auto_stamped_on_review_acceptance(client):
-    caller_user_id = "00000000-0000-0000-0000-000000000001"
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "content": "x"}).get_json()
     did = doc["id"]
     assert not doc.get("review_date")
 
     client.post(f"/qms/documents/{did}/self-check")
     _upload_final_version(client, did)
+    _assign_chain(client, did)
     client.post(f"/qms/documents/{did}/workflow/start")
-    client.post(f"/qms/documents/{did}/workflow/steps/2/assign",
-                json={"approvers": [{"user_id": caller_user_id, "display_name": "Rita"}]})
     with _reauth(True):
         client.post(f"/qms/documents/{did}/workflow/steps/2/decide", json={"decision": "approve", **SIGN})
 

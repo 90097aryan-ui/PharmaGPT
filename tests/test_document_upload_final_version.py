@@ -50,7 +50,18 @@ def test_upload_blocked_once_not_draft(client):
         data={"file": (io.BytesIO(b"first upload"), "first.txt")},
         content_type="multipart/form-data",
     )
-    client.post(f"/qms/documents/{did}/workflow/start")
+    # SOP workflow correction: Submit for Review also requires a complete
+    # Reviewer/Department Head/Quality Head chain — without this,
+    # workflow/start itself 409s and the version never actually leaves
+    # Draft, which would make the second upload below succeed instead of
+    # being blocked.
+    client.post(f"/qms/documents/{did}/assign-chain", json={
+        "reviewer_user_id": "rev-1", "reviewer_name": "Rita",
+        "department_head_user_id": "dh-1", "department_head_name": "Dana",
+        "quality_head_user_id": "qh-1", "quality_head_name": "Quinn",
+    })
+    r = client.post(f"/qms/documents/{did}/workflow/start")
+    assert r.status_code == 201, r.get_json()
 
     r = client.post(
         f"/qms/documents/{did}/versions/upload",

@@ -191,20 +191,39 @@ def test_full_new_sop_reject_resubmit_numbering_sequence(db_path):
 
 
 # ── Quorum reject path also requires a comment and forks ─────────────────────
+# SOP workflow correction: Document Control's steps are never actually
+# snapshotted as quorum mode any more (Department Head/Quality Head/Plant
+# Head are sequential single-decider steps — quorum_eligible=0 on all of
+# them). These tests still exercise the generic quorum-reject mechanism
+# itself, but must now force approval_mode='quorum' onto an instance step
+# directly (same technique as tests/test_quorum_approval.py) since
+# start_instance()'s own default_quorum can no longer produce one for this
+# workflow_key.
 
 def _clear_review_quorum(doc):
-    """Since Phase 3, step 2 (Review) is never quorum-eligible regardless of
-    a document-level quorum override (qms_database.py's DOCUMENT_WORKFLOW_V1
-    seed sets quorum_eligible=0 on it) — a single reviewer always suffices
-    to advance past it, even when default_quorum was passed to _start()."""
+    """Step 2 (Review) is never quorum-eligible regardless of a
+    document-level quorum override — a single reviewer always suffices to
+    advance past it, even when default_quorum was passed to _start()."""
     wfe.assign_approvers("document", doc["id"], 2, [{"user_id": "rev-1", "display_name": "Rita"}])
     return wfe.decide_step("document", doc["id"], 2, "approve", user_id="rev-1", role="reviewer_qa", performed_by="Rita")
 
 
+def _force_quorum_on_step(doc, step_order, required_quorum):
+    step = wfdb.get_instance_step(wfdb.get_active_instance("document", doc["id"])["id"], step_order)
+    conn = wfdb.get_connection()
+    conn.execute(
+        "UPDATE qms_workflow_instance_steps SET approval_mode = 'quorum', required_quorum = ? WHERE id = ?",
+        (required_quorum, step["id"]),
+    )
+    conn.commit()
+    conn.close()
+
+
 def test_quorum_approval_reject_without_comment_is_blocked(db_path):
     doc = _make_document()
-    _start(doc, quorum=2)
+    _start(doc)
     _clear_review_quorum(doc)
+    _force_quorum_on_step(doc, 3, required_quorum=2)
 
     wfe.assign_approvers("document", doc["id"], 3, [
         {"user_id": "appr-a", "display_name": "Al"}, {"user_id": "appr-b", "display_name": "Bea"},
@@ -217,8 +236,9 @@ def test_quorum_approval_reject_without_comment_is_blocked(db_path):
 def test_quorum_approval_reject_with_comment_forks_and_clears_votes(db_path):
     doc = _make_document()
     v0 = qdb.get_current_version(doc["id"])
-    _start(doc, quorum=2)
+    _start(doc)
     _clear_review_quorum(doc)
+    _force_quorum_on_step(doc, 3, required_quorum=2)
 
     wfe.assign_approvers("document", doc["id"], 3, [
         {"user_id": "appr-a", "display_name": "Al"}, {"user_id": "appr-b", "display_name": "Bea"},
@@ -237,16 +257,13 @@ def test_quorum_approval_reject_with_comment_forks_and_clears_votes(db_path):
 
 def test_old_votes_never_carry_forward_into_resubmitted_cycle(db_path):
     doc = _make_document()
-    _start(doc, quorum=2)
+    _start(doc)
     _assign(doc, 2, "rev-1")
-    _decide(doc, 2, "reject", user_id="rev-1", comments="rework")  # single-approver 'any' mode: quorum
-    # only ever activates once >=2 approvers are assigned, so a lone
-    # assigned approver's own reject still behaves as a normal single
-    # decider reject here — confirms rejecting doesn't require quorum to
-    # have been reached first.
+    _decide(doc, 2, "reject", user_id="rev-1", comments="rework")
 
-    _start(doc, quorum=2)
+    _start(doc)
     _clear_review_quorum(doc)
+    _force_quorum_on_step(doc, 3, required_quorum=2)
     wfe.assign_approvers("document", doc["id"], 3, [
         {"user_id": "appr-a", "display_name": "Al"}, {"user_id": "appr-b", "display_name": "Bea"},
     ])
@@ -293,13 +310,16 @@ def test_deviation_reject_with_empty_comment_still_allowed(db_path):
 # from reject_and_fork_version()'s mid-review/mid-approval forking.)
 
 def _drive_to_effective(doc):
-    """Full happy-path cycle: Draft -> ... -> Approved -> Effective (one
-    trainee completed to clear the Phase 4 training gate)."""
+    """Full happy-path cycle: Draft -> ... -> Department Head Approved ->
+    Quality Head Approved -> (Plant Head auto-skipped) -> Approved ->
+    Effective (one trainee completed to clear the Phase 4 training gate)."""
     _start(doc)
     _assign(doc, 2, "rev-1")
     _decide(doc, 2, "approve", user_id="rev-1")
-    _assign(doc, 3, "appr-1")
-    wfe.decide_step("document", doc["id"], 3, "approve", user_id="appr-1", role="company_admin", performed_by="Al")
+    _assign(doc, 3, "dh-1")
+    wfe.decide_step("document", doc["id"], 3, "approve", user_id="dh-1", role="reviewer_qa", performed_by="Dana")
+    _assign(doc, 4, "qh-1")
+    wfe.decide_step("document", doc["id"], 4, "approve", user_id="qh-1", role="reviewer_qa", performed_by="Quinn")
     tid = qdb.add_training(doc["id"], {"trainee_name": "T1"})["id"]
     qdb.update_training_status(tid, "Completed", "2026-01-01")
     return qdb.try_clear_training_gate(doc["id"])
@@ -330,13 +350,16 @@ def test_full_existing_sop_revision_cycle_matches_spec_worked_example(db_path):
     assert v_1_2["version_number"] == "1.2"
     assert v_1_2["parent_version_id"] == v_1_1["id"]
 
-    # 1.2 -> 1.3 (approval rejection)
+    # 1.2 -> 1.3 (Department Head approves, Quality Head rejects — SOP
+    # workflow correction: sequential steps 3/4, not one shared quorum step)
     _start(doc)
     _assign(doc, 2, "rev-1")
     _decide(doc, 2, "approve", user_id="rev-1")
-    _assign(doc, 3, "appr-1")
-    wfe.decide_step("document", doc["id"], 3, "reject", user_id="appr-1", role="company_admin",
-                     performed_by="Al", comments="Numbers don't reconcile")
+    _assign(doc, 3, "dh-1")
+    wfe.decide_step("document", doc["id"], 3, "approve", user_id="dh-1", role="reviewer_qa", performed_by="Dana")
+    _assign(doc, 4, "qh-1")
+    wfe.decide_step("document", doc["id"], 4, "reject", user_id="qh-1", role="reviewer_qa",
+                     performed_by="Quinn", comments="Numbers don't reconcile")
     v_1_3 = qdb.get_current_version(doc["id"])
     assert v_1_3["version_number"] == "1.3"
     assert v_1_3["parent_version_id"] == v_1_2["id"]
@@ -345,8 +368,10 @@ def test_full_existing_sop_revision_cycle_matches_spec_worked_example(db_path):
     _start(doc)
     _assign(doc, 2, "rev-1")
     _decide(doc, 2, "approve", user_id="rev-1")
-    _assign(doc, 3, "appr-1")
-    wfe.decide_step("document", doc["id"], 3, "approve", user_id="appr-1", role="company_admin", performed_by="Al")
+    _assign(doc, 3, "dh-1")
+    wfe.decide_step("document", doc["id"], 3, "approve", user_id="dh-1", role="reviewer_qa", performed_by="Dana")
+    _assign(doc, 4, "qh-1")
+    wfe.decide_step("document", doc["id"], 4, "approve", user_id="qh-1", role="reviewer_qa", performed_by="Quinn")
     assert qdb.get_document(doc["id"])["status"] == "Approved"
     tid = qdb.add_training(doc["id"], {"trainee_name": "T2"})["id"]
     qdb.update_training_status(tid, "Completed", "2026-01-01")

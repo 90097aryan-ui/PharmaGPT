@@ -1,13 +1,16 @@
 """
-tests/test_document_reviewer_and_docx_correction.py — Document Control final
+tests/test_document_reviewer_and_docx_correction.py — Document Control
 correction pass: (A) AI-Assisted SOP output must be a genuine DOCX, never
-Markdown; (B) the Reviewer/Department Head/Quality Head/Plant Head approval
-assignment must resolve by name to an internal user id, never a raw
-Supabase user id typed by hand — extending the existing Approver Pool
-mechanism (qms_document_database.py's ALL_POOL_ROLES/resolve_pool_approvers)
-with a fourth, single-decider "reviewer" role for the 'under_review' step,
-mirroring exactly how "department_head"/"quality_head"/"plant_head" already
-resolve for the 'effective' step.
+Markdown; (B) the ALL_POOL_ROLES/pool-CRUD coverage below.
+
+SOP workflow correction (superseding note): the company-wide Approver Pool
+(ALL_POOL_ROLES, resolve_pool_reviewer/resolve_pool_approvers) is no longer
+consulted at Submit for Review — assignment authority belongs to the Author
+alone via POST .../assign-chain (see tests/test_document_author_assigned_
+chain.py for that full suite). The pool CRUD/routes tested below are left
+fully intact for any other future use; only the "pool auto-assigns at
+workflow start" tests that used to live in this file were removed as no
+longer applicable, not because the pool CRUD broke.
 
 Deliberately no autouse app_context fixture (see test_document_quality_
 release.py's identical note) — every test drives the document exclusively
@@ -125,62 +128,21 @@ def test_resolve_pool_reviewer_returns_configured_entry(db_path):
     assert entry == {"user_id": "rev-9", "display_name": "Rita", "pool_role": "reviewer"}
 
 
-def test_start_workflow_auto_assigns_configured_reviewer(client):
-    client.post("/qms/documents/approver-pool",
-                json={"pool_role": "reviewer", "user_id": "rev-42", "display_name": "Rita Reviewer"})
-    did = _create_submittable(client)
-    r = client.post(f"/qms/documents/{did}/workflow/start")
-    assert r.status_code == 201, r.get_json()
-    wf = client.get(f"/qms/documents/{did}/workflow").get_json()
-    review_step = next(s for s in wf["steps"] if s["step_key"] == "under_review")
-    assert {a["user_id"] for a in review_step["approvers"]} == {"rev-42"}
-    assert review_step["approvers"][0]["pool_role"] == "reviewer"
-
-
-def test_start_workflow_leaves_review_step_unassigned_when_reviewer_not_configured(client):
-    """Backward compatibility: a company that hasn't configured a Reviewer
-    pool role is completely unaffected — same as before this change."""
-    did = _create_submittable(client)
-    r = client.post(f"/qms/documents/{did}/workflow/start")
-    assert r.status_code == 201, r.get_json()
-    wf = client.get(f"/qms/documents/{did}/workflow").get_json()
-    review_step = next(s for s in wf["steps"] if s["step_key"] == "under_review")
-    assert review_step["approvers"] == []
-
-
-def test_get_workflow_attaches_pool_summary_to_under_review_only_for_reviewer(client):
-    client.post("/qms/documents/approver-pool",
-                json={"pool_role": "reviewer", "user_id": "rev-1", "display_name": "Rita"})
-    did = _create_submittable(client)
-    client.post(f"/qms/documents/{did}/workflow/start")
-    wf = client.get(f"/qms/documents/{did}/workflow").get_json()
-    review_step = next(s for s in wf["steps"] if s["step_key"] == "under_review")
-    assert review_step["pool_summary"] == [{"pool_role": "reviewer", "configured": True, "optional": False}]
-
-
-def test_get_workflow_effective_step_pool_summary_unaffected_by_reviewer_addition(client):
-    """The 'effective' step's pool_summary must still be exactly Department
-    Head / Quality Head / Plant Head — adding 'reviewer' to ALL_POOL_ROLES
-    must not leak it into this step's summary."""
-    client.post("/qms/documents/approver-pool",
-                json={"pool_role": "department_head", "user_id": "dh-1", "display_name": "Dana"})
-    client.post("/qms/documents/approver-pool",
-                json={"pool_role": "quality_head", "user_id": "qh-1", "display_name": "Quinn"})
-    did = _create_submittable(client)
-    client.post(f"/qms/documents/{did}/workflow/start")
-    wf = client.get(f"/qms/documents/{did}/workflow").get_json()
-    approval_step = next(s for s in wf["steps"] if s["step_key"] == "effective")
-    roles = {p["pool_role"] for p in approval_step["pool_summary"]}
-    assert roles == {"department_head", "quality_head", "plant_head"}
-
-
 def test_reviewer_cannot_decide_step_they_are_not_assigned_to(client, monkeypatch):
+    """Superseded coverage: workflow start now assigns the Author's
+    assign-chain selections (not the legacy Approver Pool) — see
+    tests/test_document_author_assigned_chain.py for the full replacement
+    suite. This test only confirms the underlying named-approver permission
+    check is still enforced regardless of assignment source."""
     from pharmagpt.auth.context import TenantContext
     import tests.conftest as conftest_module
 
-    client.post("/qms/documents/approver-pool",
-                json={"pool_role": "reviewer", "user_id": "rev-assigned", "display_name": "Assigned Reviewer"})
     did = _create_submittable(client)
+    client.post(f"/qms/documents/{did}/assign-chain", json={
+        "reviewer_user_id": "rev-assigned", "reviewer_name": "Assigned Reviewer",
+        "department_head_user_id": "dh-1", "department_head_name": "Dana",
+        "quality_head_user_id": "qh-1", "quality_head_name": "Quinn",
+    })
     client.post(f"/qms/documents/{did}/workflow/start")
 
     someone_else = TenantContext(

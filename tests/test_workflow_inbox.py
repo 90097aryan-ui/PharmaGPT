@@ -174,6 +174,12 @@ def test_inbox_lists_pending_capa_and_change_control_immediately(client):
 
 def test_inbox_lists_pending_document_once_assigned(client):
     # DOCUMENT_WORKFLOW_V1's step 2 ("under_review") is an approval step.
+    # SOP workflow correction: the Author now assigns the complete Reviewer/
+    # Department Head/Quality Head chain via POST .../assign-chain BEFORE
+    # Submit for Review — Document Control's generic per-step /assign
+    # endpoint is disabled (see routes/qms_documents.py::assign_workflow_
+    # step), so this can no longer use the same _ASSIGN-after-start pattern
+    # CAPA/Change Control above still do.
     doc = client.post("/qms/documents", json={"title": "Doc one"}).get_json()
     did = doc["id"]
     client.post(f"/qms/documents/{did}/self-check")  # Phase 5 hard gate
@@ -182,10 +188,15 @@ def test_inbox_lists_pending_document_once_assigned(client):
         data={"file": (io.BytesIO(b"Final content"), "final.txt")},
         content_type="multipart/form-data",
     )  # spec §10/§11 hard gate
-    client.post(f"/qms/documents/{did}/workflow/start")
     assert client.get("/workflow/inbox").get_json() == []
 
-    client.post(f"/qms/documents/{did}/workflow/steps/2/assign", json=_ASSIGN)
+    client.post(f"/qms/documents/{did}/assign-chain", json={
+        "reviewer_user_id": _ASSIGN["approvers"][0]["user_id"],
+        "reviewer_name": _ASSIGN["approvers"][0]["display_name"],
+        "department_head_user_id": "dh-1", "department_head_name": "Dana",
+        "quality_head_user_id": "qh-1", "quality_head_name": "Quinn",
+    })
+    client.post(f"/qms/documents/{did}/workflow/start")
     items = client.get("/workflow/inbox").get_json()
     assert len(items) == 1
     assert items[0]["module"] == "document"

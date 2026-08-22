@@ -38,9 +38,14 @@ def test_report_with_version_id_returns_historical_frozen_content(client):
         data={"file": (io.BytesIO(b"original v0.1 text (final)"), "final.txt")},
         content_type="multipart/form-data",
     )
+    # SOP workflow correction: Submit for Review requires the Author to have
+    # assigned a complete Reviewer/Department Head/Quality Head chain first.
+    client.post(f"/qms/documents/{did}/assign-chain", json={
+        "reviewer_user_id": caller_user_id, "reviewer_name": "Rita",
+        "department_head_user_id": caller_user_id, "department_head_name": "Al",
+        "quality_head_user_id": caller_user_id, "quality_head_name": "Quinn",
+    })
     client.post(f"/qms/documents/{did}/workflow/start")
-    client.post(f"/qms/documents/{did}/workflow/steps/2/assign",
-                json={"approvers": [{"user_id": caller_user_id, "display_name": "Rita"}]})
     r = client.post(f"/qms/documents/{did}/workflow/steps/2/decide",
                      json={"decision": "reject", "meaning": "Rejected", "reason": "x", "comments": "Needs rework"})
     assert r.status_code == 200, r.get_json()

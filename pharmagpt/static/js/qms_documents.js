@@ -594,8 +594,19 @@ async function qmsDocRenderDraftStepper(id, doc, version) {
       finalFile = atts.find(a => a.id === version.source_attachment_id) || null;
     } catch (e) { /* non-fatal — upload confirmation still shown without file details */ }
   }
-  const readyToSubmit = selfCheckDone && finalUploaded;
-  const missing = [!selfCheckDone && "Author Self-Check", !finalUploaded && "Final Author Version upload"].filter(Boolean);
+  // SOP workflow correction (§2/§3): the Author assigns the COMPLETE
+  // review/approval chain before submission — fetched here (not just on
+  // demand) so "chainComplete" can gate Submit for Review alongside the
+  // pre-existing Self-Check/Final Version gates.
+  let chain = { reviewer: null, department_head: null, quality_head: null, plant_head: null };
+  try { chain = await qmsFetch(`/qms/documents/${id}/assign-chain`); } catch (e) { /* leave defaults — form still renders */ }
+  const chainComplete = !!(chain.reviewer && chain.department_head && chain.quality_head);
+  const readyToSubmit = selfCheckDone && finalUploaded && chainComplete;
+  const missing = [
+    !selfCheckDone && "Author Self-Check",
+    !finalUploaded && "Final Author Version upload",
+    !chainComplete && "Review & Approval Chain assignment",
+  ].filter(Boolean);
 
   el.innerHTML = `
     <div class="qms-section-card">
@@ -632,8 +643,13 @@ async function qmsDocRenderDraftStepper(id, doc, version) {
           <button class="btn-secondary" onclick="qmsDocUploadFinalVersion(${id})">${finalUploaded ? "Re-upload" : "Upload"} Final Author Version</button>
         </div>
       </div>
+      <div class="qms-stat-card ${chainComplete ? "success" : "info"}" id="qms-chain-card-${id}">
+        <strong>5. Assign Review &amp; Approval Chain${chainComplete ? " — Assigned" : ""}</strong>
+        <p style="font-size:11.5px;color:var(--text-muted);margin:4px 0">You assign the complete chain now — Reviewer, Department Head, and Quality Head are required; Plant Head is optional. Once submitted, this cannot be changed.</p>
+        <div id="qms-chain-form-${id}"><div class="qms-loading"><div class="qms-spinner"></div> Loading users…</div></div>
+      </div>
       <div class="qms-stat-card ${readyToSubmit ? "info" : ""}">
-        <strong>5. Submit for Review</strong>
+        <strong>6. Submit for Review</strong>
         <p style="font-size:11.5px;color:var(--text-muted);margin:4px 0">
           ${readyToSubmit ? "All gates complete." : `Blocked — needs: ${missing.join(", ")}.`}
         </p>
@@ -643,7 +659,70 @@ async function qmsDocRenderDraftStepper(id, doc, version) {
       </div>
     </div>
   `;
+  qmsDocRenderChainForm(id, chain);
 }
+
+// SOP workflow correction (§3): Reviewer/Department Head/Quality Head/Plant
+// Head selectors, populated from the tenant's existing user directory
+// (window.UserPicker, static/js/user_picker.js) — same designation-based
+// soft filter as the Workflow tab's own picker (workflow_panel.js's
+// WF_POOL_ROLE_DESIGNATION/wfPanelFilteredDirectory), reused here rather
+// than re-implemented. Prefilled with the current selection so the Author
+// can change it freely up until Submit for Review actually locks it
+// (POST .../assign-chain 409s server-side once the version leaves Draft —
+// see qms_document_database.set_review_chain).
+async function qmsDocRenderChainForm(id, chain) {
+  const el = document.getElementById(`qms-chain-form-${id}`);
+  if (!el) return;
+  const directory = (window.UserPicker && (await window.UserPicker.loadDirectory())) || [];
+  const roles = [
+    { role: "reviewer", label: "Reviewer", optional: false },
+    { role: "department_head", label: "Department Head", optional: false },
+    { role: "quality_head", label: "Quality Head", optional: false },
+    { role: "plant_head", label: "Plant Head", optional: true },
+  ];
+  el.innerHTML = roles.map(r => {
+    const current = chain[r.role];
+    const options = window.wfPanelFilteredDirectory ? window.wfPanelFilteredDirectory(directory, r.role) : directory;
+    return `
+      <div class="form-field" style="max-width:320px;margin-top:8px">
+        <label>${r.label}${r.optional ? " (Optional)" : ""}</label>
+        ${window.UserPicker
+          ? window.UserPicker.selectHTML(`qms-chain-select-${id}-${r.role}`, options, current ? current.user_id : "")
+          : `<input type="text" id="qms-chain-select-${id}-${r.role}" placeholder="Select…" />`}
+      </div>
+    `;
+  }).join("") + `
+    <div class="qms-form-actions" style="margin-top:8px">
+      <button class="btn-secondary" onclick="qmsDocSaveReviewChain(${id})">Save Assignment</button>
+    </div>
+  `;
+}
+window.qmsDocRenderChainForm = qmsDocRenderChainForm;
+
+async function qmsDocSaveReviewChain(id) {
+  const roles = ["reviewer", "department_head", "quality_head", "plant_head"];
+  const data = {};
+  const missing = [];
+  for (const role of roles) {
+    const sel = document.getElementById(`qms-chain-select-${id}-${role}`);
+    const userId = sel ? sel.value : "";
+    const opt = sel && sel.tagName === "SELECT" ? sel.options[sel.selectedIndex] : null;
+    const name = opt ? opt.textContent.split(" (")[0] : "";
+    data[`${role}_user_id`] = userId;
+    data[`${role}_name`] = userId ? name : "";
+    if (!userId && role !== "plant_head") missing.push(role);
+  }
+  if (missing.length) { qmsToast("Reviewer, Department Head, and Quality Head are required"); return; }
+  try {
+    await qmsPostJSON(`/qms/documents/${id}/assign-chain`, data);
+    qmsToast("Review & Approval Chain assigned");
+    qmsDocSwitchTab("workflow");
+  } catch (e) {
+    qmsToast("Failed: " + e.message);
+  }
+}
+window.qmsDocSaveReviewChain = qmsDocSaveReviewChain;
 
 async function qmsDocRecordSelfCheck(id) {
   const confirmed = confirm(
@@ -691,14 +770,27 @@ window.qmsDocSubmitForReview = qmsDocSubmitForReview;
 
 async function qmsDocRenderReviewApprovalPanel(id, doc, version) {
   const el = document.getElementById("qms-doc-tab-body");
+  // SOP workflow correction (§7/§8/§9/§11): the Reviewer/Department Head/
+  // Quality Head/Plant Head's PRIMARY surface is the controlled SOP itself —
+  // a read-only PDF (GET .../review-pdf, an <iframe> so it renders in-app,
+  // no external Word download needed) with an UNDER REVIEW/PENDING
+  // APPROVAL/APPROVED watermark on every page while not yet Effective (see
+  // services/qms_document_service.py::generate_review_pdf). The generic
+  // Workflow Panel below it (unchanged, shared with CAPA/Change Control)
+  // still owns Comments + Accept/Request Changes/Approve/Reject — this
+  // block only adds the document itself above those existing controls.
   el.innerHTML = `
     <div class="qms-section-card" style="margin-bottom:14px">
-      <h3>Version ${version.version_number} — ${QMS_VERSION_STATUS_LABEL[version.status] || version.status}</h3>
-      <div class="qms-panel-item-meta">
-        Author Self-Check completed ${version.self_check_completed_at || "—"} ·
-        Final Author Version uploaded: ${version.source_attachment_id ? "Yes" : "No"}
+      <h3>SOP Review — ${doc.doc_number || ""}</h3>
+      <div class="qms-detail-meta">
+        <span>Title: ${doc.title || ""}</span>
+        <span>Version: ${version.version_number}</span>
+        <span>${qmsBadge((QMS_VERSION_STATUS_LABEL[version.status] || version.status || "").toString().toUpperCase())}</span>
       </div>
-      <p style="font-size:11.5px;color:var(--text-muted);margin-top:4px">This version is frozen while under Review/Approval — no further author edits until it is Accepted, Rejected, or Approved.</p>
+    </div>
+    <div class="qms-section-card" style="margin-bottom:14px;padding:0;overflow:hidden">
+      <iframe src="/qms/documents/${id}/review-pdf" title="Controlled SOP review (read-only)"
+              style="width:100%;height:70vh;border:none;display:block"></iframe>
     </div>
     <div id="qms-workflow-document-${id}"></div>
   `;

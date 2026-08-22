@@ -49,16 +49,20 @@ def _make_document():
 
 
 def _reach_approved(doc, quorum=None):
-    """Drive a document through Submit -> Review approve -> final Approval
-    approve, landing the version at 'approved' and the document status at
-    'Approved' (training not yet cleared)."""
+    """Drive a document through Submit -> Review approve -> Department Head
+    approve -> Quality Head approve, landing the version at 'approved' and
+    the document status at 'Approved' (training not yet cleared). Plant
+    Head (step 5) auto-skips since no Plant Head is ever assigned here —
+    see services/workflow_engine.py's auto-skip mechanism."""
     wfe.start_instance("DOCUMENT_WORKFLOW_V1", "document", doc["id"], COMPANY_ID, "Ada Author",
                         default_quorum=quorum)
     wfe.assign_approvers("document", doc["id"], 2, [{"user_id": "rev-1", "display_name": "Rita"}])
     wfe.decide_step("document", doc["id"], 2, "approve", user_id="rev-1", role="reviewer_qa", performed_by="Rita")
-    wfe.assign_approvers("document", doc["id"], 3, [{"user_id": "appr-1", "display_name": "Al"}])
-    return wfe.decide_step("document", doc["id"], 3, "approve", user_id="appr-1", role="company_admin",
-                            performed_by="Al")
+    wfe.assign_approvers("document", doc["id"], 3, [{"user_id": "dh-1", "display_name": "Dana"}])
+    wfe.decide_step("document", doc["id"], 3, "approve", user_id="dh-1", role="reviewer_qa", performed_by="Dana")
+    wfe.assign_approvers("document", doc["id"], 4, [{"user_id": "qh-1", "display_name": "Quinn"}])
+    return wfe.decide_step("document", doc["id"], 4, "approve", user_id="qh-1", role="reviewer_qa",
+                            performed_by="Quinn")
 
 
 # ── training_completion_pct / training_gate_status ───────────────────────────
@@ -147,8 +151,10 @@ def test_approval_holds_at_approved_even_if_training_already_cleared_until_relea
     tid = qdb.add_training(doc["id"], {"trainee_name": "Complete Before Approval"})["id"]
     qdb.update_training_status(tid, "Completed", "2026-01-01")
 
-    wfe.assign_approvers("document", doc["id"], 3, [{"user_id": "appr-1", "display_name": "Al"}])
-    wfe.decide_step("document", doc["id"], 3, "approve", user_id="appr-1", role="company_admin", performed_by="Al")
+    wfe.assign_approvers("document", doc["id"], 3, [{"user_id": "dh-1", "display_name": "Dana"}])
+    wfe.decide_step("document", doc["id"], 3, "approve", user_id="dh-1", role="reviewer_qa", performed_by="Dana")
+    wfe.assign_approvers("document", doc["id"], 4, [{"user_id": "qh-1", "display_name": "Quinn"}])
+    wfe.decide_step("document", doc["id"], 4, "approve", user_id="qh-1", role="reviewer_qa", performed_by="Quinn")
 
     doc_after = qdb.get_document(doc["id"])
     assert doc_after["status"] == "Approved"
@@ -166,25 +172,31 @@ def test_approval_holds_at_approved_even_if_training_already_cleared_until_relea
 
 def test_training_completion_after_approval_requires_explicit_release_via_route(client):
     # The `client` fixture's fake tenant (tests/conftest.py) always acts as
-    # this fixed user_id — the approver assigned to each step must match it
-    # for decide_step()'s "only a named assignee may decide" check to pass.
+    # this fixed user_id — every role in the assigned chain must match it
+    # for decide_step()'s "only a named assignee may decide" check to pass
+    # at each of the (now sequential) steps.
     caller_user_id = "00000000-0000-0000-0000-000000000001"
 
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "content": "x"}).get_json()
     did = doc["id"]
     client.post(f"/qms/documents/{did}/self-check")  # Phase 5 hard gate
     _upload_final_version(client, did)
+    client.post(f"/qms/documents/{did}/assign-chain", json={
+        "reviewer_user_id": caller_user_id, "reviewer_name": "Rita",
+        "department_head_user_id": caller_user_id, "department_head_name": "Al",
+        "quality_head_user_id": caller_user_id, "quality_head_name": "Quinn",
+    })
     client.post(f"/qms/documents/{did}/workflow/start")
-    client.post(f"/qms/documents/{did}/workflow/steps/2/assign",
-                json={"approvers": [{"user_id": caller_user_id, "display_name": "Rita"}]})
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/workflow/steps/2/decide",
                          json={"decision": "approve", **SIGN})
     assert r.status_code == 200, r.get_json()
-    client.post(f"/qms/documents/{did}/workflow/steps/3/assign",
-                json={"approvers": [{"user_id": caller_user_id, "display_name": "Al"}]})
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/workflow/steps/3/decide",
+                         json={"decision": "approve", **SIGN})
+    assert r.status_code == 200, r.get_json()
+    with _reauth(True):
+        r = client.post(f"/qms/documents/{did}/workflow/steps/4/decide",
                          json={"decision": "approve", **SIGN})
     assert r.status_code == 200, r.get_json()
 

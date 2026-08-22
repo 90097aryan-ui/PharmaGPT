@@ -230,6 +230,72 @@ VERSION_ON_STEP_REJECTED: dict[str, Callable[[int, str], None]] = {
 }
 
 
+# ── Auto-skip: a step with no possible approver is skipped, not blocked ──────
+# SOP workflow correction: Plant Head is the one optional seat in the
+# Author-assigned review/approval chain — "If Plant Head is not assigned,
+# the workflow must automatically skip that step." Registry-dispatched like
+# STATUS_APPLIERS/VERSION_ON_STEP_APPROVED above: only "document" has an
+# entry, so CAPA/Deviation/Change Control (which never register one) are
+# completely unaffected — _maybe_auto_skip_step's lookup returns None and
+# nothing happens for them, exactly as before this change existed.
+
+def _document_step_should_auto_skip(record_id: int, step: dict) -> bool:
+    if step.get("step_key") != "effective":
+        return False
+    from pharmagpt import qms_document_database as qdb
+    document = qdb.get_document(record_id)
+    return not bool((document or {}).get("plant_head_user_id"))
+
+
+AUTO_SKIP_PREDICATE: dict[str, Callable[[int, dict], bool]] = {
+    "document": _document_step_should_auto_skip,
+}
+
+
+def _maybe_auto_skip_current_step(record_type: str, record_id: int, performed_by: str) -> None:
+    """Called after any step advance: if the record_type's registered
+    predicate says the record's now-current step has nobody who could ever
+    decide it (Plant Head not assigned), completes that step automatically
+    with status='skipped' — running the exact same version/gate-status
+    hooks a real approval would, so 'effective' being skipped still
+    advances the version to 'approved' and completes the instance exactly
+    as if Plant Head had approved. A while loop (not an if) in case a
+    future template ever has two consecutive auto-skippable steps; today
+    only ever runs once, for Document Control's final step."""
+    predicate = AUTO_SKIP_PREDICATE.get(record_type)
+    if not predicate:
+        return
+    while True:
+        instance = wfdb.get_active_instance(record_type, record_id)
+        if not instance:
+            return
+        step = wfdb.get_instance_step(instance["id"], instance["current_step_order"])
+        if not step or step["step_type"] != "approval" or step["status"] not in ("pending", "in_progress"):
+            return
+        if wfdb.get_step_approvers(step["id"]):
+            return  # someone IS assigned — a real decision is expected, not a skip
+        if not predicate(record_id, step):
+            return
+
+        now = _now()
+        template_steps = wfdb.get_template_steps(instance["template_id"])
+        last_order = max(s["step_order"] for s in template_steps)
+        step_order = step["step_order"]
+        wfdb.update_instance_step(step["id"], {
+            "status": "skipped", "decided_by": "System", "decided_at": now,
+            "comments": "Not assigned — automatically skipped",
+        })
+        if step_order >= last_order:
+            wfdb.update_instance(instance["id"], {"status": "completed", "completed_at": now})
+        else:
+            wfdb.update_instance(instance["id"], {"current_step_order": step_order + 1})
+        version_approved_hook = VERSION_ON_STEP_APPROVED.get(record_type)
+        if version_approved_hook:
+            version_approved_hook(record_id, step, performed_by)
+        _apply_gate_status(record_type, record_id, _status_after_completing(template_steps, step_order, last_order))
+        audit.log(record_type, record_id, f"{step['step_name']}: Skipped (not assigned)")
+
+
 def _require_comment_on_document_reject(record_type: str, comments: str) -> None:
     """Any Review or Approval rejection on a Document Control record must
     carry a non-empty comment (locked spec requirement) — scoped strictly to
@@ -439,6 +505,7 @@ def _decide_quorum_step(record_type: str, record_id: int, instance: dict, step: 
     _apply_gate_status(record_type, record_id, _status_after_completing(template_steps, step_order, last_order))
     audit.log(record_type, record_id, f"{step['step_name']}: Approved (quorum met {votes_cast}/{required})",
               reason=comments, detail=f"decided by {performed_by}")
+    _maybe_auto_skip_current_step(record_type, record_id, performed_by)
     return get_instance_state(record_type, record_id)
 
 
@@ -525,6 +592,7 @@ def decide_step(record_type: str, record_id: int, step_order: int, decision: str
         _apply_gate_status(record_type, record_id, _status_after_completing(template_steps, step_order, last_order))
         audit.log(record_type, record_id, f"{step['step_name']}: Approved",
                    reason=comments, detail=f"decided by {performed_by}")
+        _maybe_auto_skip_current_step(record_type, record_id, performed_by)
 
     elif decision == "reject":
         wfdb.update_instance_step(step["id"], {

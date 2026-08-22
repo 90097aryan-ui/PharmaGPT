@@ -105,13 +105,16 @@ def test_document_create_requires_title(client):
 
 def test_document_approval_transitions_status(client):
     # The /approval endpoint is now a compatibility wrapper over
-    # services/workflow_engine.py (DOCUMENT_WORKFLOW_V1, 3 steps): one call
+    # services/workflow_engine.py (DOCUMENT_WORKFLOW_V1, 5 steps — SOP
+    # workflow correction: Department Head/Quality Head/Plant Head are now
+    # sequential single-decider steps, not one shared quorum step): one call
     # decides exactly one real workflow step — see
     # routes/qms_documents.py::submit_approval docstring. The first call
     # both starts the instance (auto-completing "Submitted for Review") and
-    # decides the now-current "Under Review" step in the same request; since
-    # "Under Review" is the second-to-last step, the display stays "Under
-    # Review" until the final "Quality Release" step is itself decided.
+    # decides the now-current "Under Review" step in the same request. Two
+    # further "Approved" calls decide Department Head then Quality Head;
+    # Plant Head (step 5) then auto-skips since none was assigned in the
+    # chain below.
     doc = client.post("/qms/documents", json={"title": "Doc"}).get_json()
     did = doc["id"]
 
@@ -121,11 +124,29 @@ def test_document_approval_transitions_status(client):
         data={"file": (io.BytesIO(b"Final content"), "final.txt")},
         content_type="multipart/form-data",
     )  # spec §10/§11 hard gate
+    # SOP workflow correction: Submit for Review requires the Author to have
+    # assigned a complete Reviewer/Department Head/Quality Head chain first.
+    # The legacy /approval endpoint's own auto-self-assign fallback (for a
+    # step with literally no approver) still applies to whichever step
+    # actually has none — here that's every step, since this chain uses
+    # placeholder ids the calling test user doesn't match, so each
+    # subsequent "Approved" call self-assigns and immediately decides.
+    client.post(f"/qms/documents/{did}/assign-chain", json={
+        "reviewer_user_id": "00000000-0000-0000-0000-000000000001", "reviewer_name": "J Doe",
+        "department_head_user_id": "00000000-0000-0000-0000-000000000001", "department_head_name": "M Shah",
+        "quality_head_user_id": "00000000-0000-0000-0000-000000000001", "quality_head_name": "Q Head",
+    })
     r = client.post(f"/qms/documents/{did}/approval", json={"action": "Submitted for Review", "performed_by": "J Doe"})
     assert r.status_code == 201
-    assert client.get(f"/qms/documents/{did}").get_json()["status"] == "Under Review"
+    # SOP workflow correction: with 5 steps (not 3), step 2 ("Under Review")
+    # is no longer second-to-last — _status_after_completing() now shows the
+    # NEXT step's gate_status ("Pending Approval", step 3's Department Head
+    # Approval) once step 2 is decided, matching each intermediate step's
+    # own display label instead of staying on "Under Review" throughout.
+    assert client.get(f"/qms/documents/{did}").get_json()["status"] == "Pending Approval"
 
     client.post(f"/qms/documents/{did}/approval", json={"action": "Approved", "performed_by": "M Shah"})
+    client.post(f"/qms/documents/{did}/approval", json={"action": "Approved", "performed_by": "Q Head"})
     # Document Control redesign (Phase 4, corrected per spec §17/§20):
     # quorum/approval achieved holds at 'Approved' until the training gate
     # clears (>=90% completion, >=1 trainee) AND an explicit Quality

@@ -58,6 +58,14 @@ POST   /qms/documents/<id>/approval          status transition + e-signature ent
 
 GET    /qms/documents/<id>/report            markdown report (preview / print)
 POST   /qms/documents/<id>/export/docx       DOCX export
+GET    /qms/documents/<id>/review-pdf        read-only, watermarked controlled PDF for the
+                                              Reviewer/Department Head/Quality Head/Plant Head's
+                                              in-app review — served inline for an <iframe>
+
+GET    /qms/documents/<id>/assign-chain      the Author-assigned Reviewer/Department Head/
+                                              Quality Head/Plant Head (SOP workflow correction)
+POST   /qms/documents/<id>/assign-chain      Author sets/changes the chain — 409s once the
+                                              current version has left Draft (locked at submission)
 
 GET    /qms/documents/templates/<tid>/download   blank Controlled Template as DOCX (SOP
                                               creation workflow, Option 1 "Create from
@@ -134,6 +142,67 @@ def create_document():
         audit.log("document", document["id"], "Controlled SOP Template selected",
                   detail=template.get("name", "") if template else str(document["template_id"]))
     return jsonify(document), 201
+
+
+# ── Author-assigned review/approval chain ────────────────────────────────────
+# spec: "THE AUTHOR ASSIGNS THE COMPLETE CHAIN. THE ASSIGNMENT LOCKS WHEN
+# SUBMITTED." Reviewer/Department Head/Quality Head required, Plant Head
+# optional — resolved by name from the tenant's existing GET /users/directory
+# (routes/users.py), never a raw Supabase user id, and never gated behind
+# the separate Approver Pool config screen. Distinct from that pool (which
+# still exists, untouched, as a company-wide default some companies may
+# configure) — this is the specific chain THIS document's workflow will use.
+
+@bp.route("/<int:did>/assign-chain", methods=["GET"])
+def get_review_chain_route(did):
+    document = _record_scoped_or_404(did)
+    if not document:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(qdb.get_review_chain(document))
+
+
+@bp.route("/<int:did>/assign-chain", methods=["POST"])
+def set_review_chain_route(did):
+    """Locking is enforced HERE, not just hidden in the UI (spec §4/§14):
+    once the current version has left Draft (i.e. Submit for Review has
+    happened), this always 409s — a direct request cannot modify a locked
+    assignment. Reviewer/Department Head/Quality Head are required; Plant
+    Head is the one optional seat."""
+    document = _record_scoped_or_404(did)
+    if not document:
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json() or {}
+
+    def _person(prefix: str) -> dict:
+        return {"user_id": (data.get(f"{prefix}_user_id") or "").strip(),
+                "display_name": (data.get(f"{prefix}_name") or "").strip()}
+
+    reviewer, department_head, quality_head, plant_head = (
+        _person("reviewer"), _person("department_head"), _person("quality_head"), _person("plant_head"),
+    )
+    missing = [label for label, p in
+               (("Reviewer", reviewer), ("Department Head", department_head), ("Quality Head", quality_head))
+               if not p["user_id"]]
+    if missing:
+        return jsonify({"error": f"The following are required: {', '.join(missing)}"}), 400
+
+    chain = {
+        "reviewer_user_id": reviewer["user_id"], "reviewer_name": reviewer["display_name"],
+        "department_head_user_id": department_head["user_id"], "department_head_name": department_head["display_name"],
+        "quality_head_user_id": quality_head["user_id"], "quality_head_name": quality_head["display_name"],
+        "plant_head_user_id": plant_head["user_id"], "plant_head_name": plant_head["display_name"],
+    }
+    sig = tenancy.signing_identity(g.tenant)
+    try:
+        updated = qdb.set_review_chain(did, chain, assigned_by=sig["performed_by"])
+    except ValueError as e:
+        audit.log_failure("document", did, "Assign review/approval chain blocked", reason=str(e))
+        return jsonify({"error": str(e)}), 409
+    audit.log("document", did, "Review/approval chain assigned",
+              detail=f"Reviewer: {reviewer['display_name']}; Department Head: {department_head['display_name']}; "
+                     f"Quality Head: {quality_head['display_name']}; "
+                     f"Plant Head: {plant_head['display_name'] or 'Not Assigned (Optional)'}")
+    return jsonify(qdb.get_review_chain(updated)), 200
 
 
 # ── Templates (Document Control redesign, Phase 5) ───────────────────────────
@@ -620,75 +689,77 @@ def _record_scoped_or_404(did):
     return tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
 
 
+_STEP_KEY_ROLE_LABEL = {
+    "under_review": "Reviewer",
+    "department_head_approval": "Department Head",
+    "quality_head_approval": "Quality Head",
+    "effective": "Plant Head",
+}
+
+
 @bp.route("/<int:did>/workflow", methods=["GET"])
 def get_workflow(did):
     document = _record_scoped_or_404(did)
     if not document:
         return jsonify({"error": "Not found"}), 404
     state = wfe.get_instance_state(RECORD_TYPE, did)
-    # Document Control redesign (spec §13/§15/§20; final correction pass
-    # §2): attach approver-pool role labels ("Reviewer" / "Department Head" /
-    # "Quality Head" / "Plant Head") and a pool summary to BOTH named-decider
-    # approval steps so the UI can render "Reviewer Pending" /
-    # "Department Head Pending / Quality Head Pending / Plant Head Optional"
-    # without a second round trip or duplicating pool-resolution logic.
-    # Purely additive keys — every other record_type's workflow response
-    # (CAPA/Deviation/Change Control, which don't reach this route) and
-    # every pre-existing key here are unchanged. Each step only ever gets
-    # the pool roles that actually apply to it — 'under_review' is a single
-    # named Reviewer, never quorum; 'effective' is unchanged from before.
-    pool = qdb.get_approver_pool(document.get("company_id", ""), document.get("department", ""))
-    pool_by_user = {p["user_id"]: p["pool_role"] for p in pool if p.get("user_id")}
-    configured_roles = {p["pool_role"] for p in pool if p.get("user_id")}
-    step_pool_roles = {"under_review": ("reviewer",), "effective": ("department_head", "quality_head", "plant_head")}
+    # SOP workflow correction (§6/§16): each approval step now maps 1:1 to
+    # exactly one Author-assigned role — attach that role's label directly
+    # from step_key (role_label) so the UI can show "Department Head:
+    # Production Head" using the ACTUAL assigned person, never a
+    # company-wide pool's configured/not-configured state. No pool lookup
+    # here at all any more: by the time a workflow instance exists, Submit
+    # for Review has already locked in every required approver (see
+    # _submission_gate_error's chain check), so step.approvers is always
+    # the real answer — nothing left to summarize as "pending
+    # configuration". Purely additive keys — every other record_type's
+    # workflow response (CAPA/Deviation/Change Control, which don't reach
+    # this route) is unaffected.
     for step in state.get("steps", []):
         if step.get("step_type") != "approval":
             continue
+        step["role_label"] = _STEP_KEY_ROLE_LABEL.get(step.get("step_key"), "")
         for a in step.get("approvers", []):
-            a["pool_role"] = pool_by_user.get(a["user_id"], "")
-        roles_for_step = step_pool_roles.get(step.get("step_key"))
-        if roles_for_step:
-            step["pool_summary"] = [
-                {"pool_role": r, "configured": r in configured_roles, "optional": r == "plant_head"}
-                for r in roles_for_step
-            ]
+            a["role_label"] = step["role_label"]
     return jsonify(state)
 
 
-def _effective_quorum_and_pool_approvers(document: dict) -> tuple[int | None, list[dict] | None]:
-    """Document Control redesign (Phase 3): if this document's department
-    (or the company-wide default) has both mandatory approver-pool roles
-    configured, the final Approval stage always uses quorum=2 (2-of-2
-    without Plant Head, 2-of-3 with) — a fixed business rule, not the
-    manually-set `approval_quorum` field. Falls back to the pre-existing
-    `approval_quorum` behaviour (None = single-decider 'any' mode) when no
-    pool is configured yet, so a company that hasn't set one up is
-    completely unaffected — same as before this phase."""
-    try:
-        approvers = qdb.resolve_pool_approvers(document)
-        return qdb.APPROVAL_QUORUM_REQUIRED, approvers
-    except ValueError:
-        return document.get("approval_quorum"), None
-
-
-def _assign_pool_reviewer_if_configured(document: dict, state: dict) -> dict:
-    """Final correction pass (§2): mirrors the 'effective' step's existing
-    pool_approvers assignment, for the single-decider 'under_review' step's
-    Reviewer seat. A no-op (returns `state` unchanged) when no Reviewer is
-    configured for this department yet — the step is then left exactly as
-    it already was before this change (open to any eligible-role user via
-    the pre-existing manual-assign path), so a company with no pool set up
-    is completely unaffected."""
-    reviewer = qdb.resolve_pool_reviewer(document)
-    if not reviewer:
-        return state
-    review_step = next(s for s in state["steps"] if s["step_key"] == "under_review")
-    return wfe.assign_approvers(RECORD_TYPE, document["id"], review_step["step_order"], [reviewer])
+def _assign_review_chain_to_steps(document: dict, state: dict) -> dict:
+    """SOP workflow correction (§3/§4/§16): assigns the Author's
+    already-locked Reviewer/Department Head/Quality Head/Plant Head (see
+    qms_document_database.set_review_chain — assignment happens once,
+    before submission, never here) onto the freshly-started instance's four
+    approval steps — one named approver each, never a shared quorum step.
+    Plant Head's step is left with NO approver when plant_head_user_id is
+    empty; services/workflow_engine.py's auto-skip mechanism
+    (_maybe_auto_skip_current_step) is what actually skips it once the
+    instance reaches that step, not this function. The legacy company-wide
+    Approver Pool (qdb.resolve_pool_approvers/resolve_pool_reviewer) is
+    deliberately no longer consulted here — assignment authority belongs to
+    the Author alone (spec §2/§15/§16); that pool's CRUD/routes are left
+    fully intact for any other use, just disconnected from this path."""
+    chain = qdb.get_review_chain(document)
+    step_key_by_role = {
+        "reviewer": "under_review", "department_head": "department_head_approval",
+        "quality_head": "quality_head_approval", "plant_head": "effective",
+    }
+    for role, step_key in step_key_by_role.items():
+        person = chain.get(role)
+        if not person:
+            continue
+        step = next(s for s in state["steps"] if s["step_key"] == step_key)
+        state = wfe.assign_approvers(RECORD_TYPE, document["id"], step["step_order"], [person])
+    return state
 
 
 _SELF_CHECK_REQUIRED_ERROR = (
     "Author Self-Check must be completed for the current version before Submit for Review "
     "— see POST /qms/documents/<id>/self-check"
+)
+_REVIEW_CHAIN_REQUIRED_ERROR = (
+    "The complete review/approval chain must be assigned before Submit for Review — Reviewer, "
+    "Department Head, and Quality Head are required (Plant Head is optional). "
+    "See POST /qms/documents/<id>/assign-chain"
 )
 _FINAL_VERSION_REQUIRED_ERROR = (
     "The Final Author Version must be uploaded for the current version before Submit for Review "
@@ -703,12 +774,15 @@ _START_REVISION_REQUIRED_ERROR = (
 )
 
 
-def _submission_gate_error(did) -> str | None:
-    """Author Self-Check + Final Author Version hard gates, corrected: if the
-    CURRENT version is still 'draft', checks its own self-check and Final
-    Author Version upload (spec §10: "The workflow must require Final Author
-    Version before Review submission" — Attachments are supporting records
-    only and must never satisfy this). If it's 'effective' (Submit for
+def _submission_gate_error(did, document: dict | None = None) -> str | None:
+    """Author Self-Check + Final Author Version + review/approval chain hard
+    gates. If the CURRENT version is still 'draft', checks its own
+    self-check, Final Author Version upload (spec §10: "The workflow must
+    require Final Author Version before Review submission" — Attachments
+    are supporting records only and must never satisfy this), and — SOP
+    workflow correction — that the Author has assigned a complete chain
+    (Reviewer, Department Head, Quality Head; Plant Head optional) before
+    Submit for Review is allowed to lock it. If it's 'effective' (Submit for
     Review would otherwise trigger qms_document_database.start_new_revision()
     to fork a fresh Draft as a side effect of wfe.start_instance()'s own
     version lookup), submission is now always blocked here instead — a
@@ -719,7 +793,8 @@ def _submission_gate_error(did) -> str | None:
     gates on the resulting new Draft, then submit — matching the fact that a
     human must actually review the carried-over draft in between. Returns
     None when it's safe to proceed, else the error string to return as a
-    409."""
+    409. `document` is accepted to avoid a redundant fetch when the caller
+    already has it; fetched here otherwise."""
     version = qdb.get_current_version(did)
     if not version:
         return None
@@ -729,6 +804,10 @@ def _submission_gate_error(did) -> str | None:
         return _SELF_CHECK_REQUIRED_ERROR
     if not version.get("source_attachment_id"):
         return _FINAL_VERSION_REQUIRED_ERROR
+    document = document if document is not None else qdb.get_document(did)
+    chain = qdb.get_review_chain(document or {})
+    if not (chain["reviewer"] and chain["department_head"] and chain["quality_head"]):
+        return _REVIEW_CHAIN_REQUIRED_ERROR
     return None
 
 
@@ -757,24 +836,21 @@ def start_workflow(did):
     document = _record_scoped_or_404(did)
     if not document:
         return jsonify({"error": "Not found"}), 404
-    # Author Self-Check hard gate (Document Control redesign, Phase 5, fixed
-    # post-Phase-5a): blocks Submit for Review until recorded against the
+    # Author Self-Check + Final Author Version + review/approval chain hard
+    # gates (Document Control redesign, Phase 5; SOP workflow correction
+    # §3/§4): blocks Submit for Review until all are satisfied against the
     # CURRENT version — never carried forward from a prior version (see
     # qms_document_database.record_self_check's docstring and
     # _submission_gate_error() above for the Effective-document case).
-    gate_error = _submission_gate_error(did)
+    gate_error = _submission_gate_error(did, document)
     if gate_error:
         audit.log_failure("document", did, "Workflow start blocked", reason=gate_error)
         return jsonify({"error": gate_error}), 409
     sig = tenancy.signing_identity(g.tenant)
-    effective_quorum, pool_approvers = _effective_quorum_and_pool_approvers(document)
     try:
         state = wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, did, g.tenant.company_id, sig["performed_by"],
-                                    default_quorum=effective_quorum)
-        if pool_approvers:
-            approval_step = next(s for s in state["steps"] if s["step_key"] == "effective")
-            state = wfe.assign_approvers(RECORD_TYPE, did, approval_step["step_order"], pool_approvers)
-        state = _assign_pool_reviewer_if_configured(document, state)
+                                    default_quorum=document.get("approval_quorum"))
+        state = _assign_review_chain_to_steps(document, state)
     except wfe.WorkflowError as e:
         audit.log_failure("document", did, "Workflow start blocked", reason=str(e))
         return jsonify({"error": str(e)}), 409
@@ -783,17 +859,19 @@ def start_workflow(did):
 
 @bp.route("/<int:did>/workflow/steps/<int:step_order>/assign", methods=["POST"])
 def assign_workflow_step(did, step_order):
-    if not _record_scoped_or_404(did):
-        return jsonify({"error": "Not found"}), 404
-    data = request.get_json() or {}
-    approvers = data.get("approvers") or []
-    if not isinstance(approvers, list) or not all(a.get("user_id") for a in approvers):
-        return jsonify({"error": "approvers must be a non-empty list of {user_id, display_name}"}), 400
-    try:
-        state = wfe.assign_approvers(RECORD_TYPE, did, step_order, approvers)
-    except wfe.WorkflowError as e:
-        return jsonify({"error": str(e)}), 409
-    return jsonify(state)
+    """SOP workflow correction (§2/§16): "THE REVIEWER AND APPROVERS NEVER
+    ASSIGN OTHER PEOPLE." Every Document Control approval step is already
+    assigned its one named person at Submit for Review time
+    (_assign_review_chain_to_steps, from the Author-locked chain) — this
+    generic per-step reassignment endpoint (still used by CAPA/Change
+    Control, which have no equivalent upfront-chain concept) is deliberately
+    disabled here, always, regardless of role. Reassigning a Document
+    Control approver — e.g. because someone is unavailable — is a Draft-
+    stage chain edit via POST .../assign-chain followed by a fresh
+    Submission, not a mid-review reassignment."""
+    return jsonify({"error": "Document Control approvers are fixed by the Author's assigned review/approval "
+                              "chain and cannot be reassigned mid-workflow — see POST "
+                              f"/qms/documents/{did}/assign-chain"}), 403
 
 
 @bp.route("/<int:did>/workflow/steps/<int:step_order>/decide", methods=["POST"])
@@ -999,18 +1077,14 @@ def submit_approval(did):
                 # must call POST .../versions/start-revision explicitly,
                 # complete Self-Check on the resulting new Draft, then
                 # resubmit — the same gate /workflow/start applies.
-                gate_error = _submission_gate_error(did)
+                gate_error = _submission_gate_error(did, document)
                 if gate_error:
                     audit.log_failure("document", did, f"Approval action blocked ({action_name})",
                                        reason=gate_error)
                     return jsonify({"error": gate_error}), 409
-                effective_quorum, pool_approvers = _effective_quorum_and_pool_approvers(document)
                 start_state = wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, did, g.tenant.company_id,
-                                                  sig["performed_by"], default_quorum=effective_quorum)
-                if pool_approvers:
-                    approval_step = next(s for s in start_state["steps"] if s["step_key"] == "effective")
-                    wfe.assign_approvers(RECORD_TYPE, did, approval_step["step_order"], pool_approvers)
-                _assign_pool_reviewer_if_configured(document, start_state)
+                                                  sig["performed_by"], default_quorum=document.get("approval_quorum"))
+                _assign_review_chain_to_steps(document, start_state)
             state = wfe.get_instance_state(RECORD_TYPE, did)
             instance = state["instance"]
             if not instance or instance["status"] != "in_progress":
@@ -1105,6 +1179,27 @@ def get_report(did):
         return jsonify({"error": "Not found"}), 404
     md = svc.generate_report_markdown(did, _requested_version_id(did))
     return jsonify({"markdown": md, "title": document.get("title", "")})
+
+
+@bp.route("/<int:did>/review-pdf", methods=["GET"])
+def get_review_pdf(did):
+    """SOP workflow correction (§7/§8/§9): the Reviewer/Department Head/
+    Quality Head/Plant Head's in-app controlled review surface — a
+    read-only, watermarked PDF of the document's current content, served
+    `inline` (not as a download) so it renders directly in an <iframe>
+    without a "Save As" prompt. No role restriction beyond the module's own
+    tenant-workspace-access gate (bp.before_request) — anyone who can see
+    this document at all may view it; the actual approve/reject authority
+    is enforced separately, at decide time, by workflow_engine.decide_step's
+    named-approver check."""
+    document = tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
+    if not document:
+        return jsonify({"error": "Not found"}), 404
+    pdf_bytes = svc.generate_review_pdf(did)
+    return send_file(
+        io.BytesIO(pdf_bytes), mimetype="application/pdf", as_attachment=False,
+        download_name=f"{document.get('doc_number', 'DOC')}_review.pdf",
+    )
 
 
 @bp.route("/<int:did>/export/docx", methods=["POST"])

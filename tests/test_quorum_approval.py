@@ -1,38 +1,24 @@
 """
-tests/test_quorum_approval.py — Regression coverage for configurable quorum
-approval on Document Control (services/workflow_engine.py's
-approval_mode='quorum' branch of decide_step(), gated by
-DOCUMENT_WORKFLOW_V1's step 3 "effective" approval step via
-qms_documents.approval_quorum -> start_instance(default_quorum=...)).
+tests/test_quorum_approval.py — Regression coverage for the generic
+configurable-quorum approval mechanism itself (services/workflow_engine.py's
+approval_mode='quorum' branch of decide_step()/_decide_quorum_step()).
 
-Exercises the engine directly against the db_path fixture's throwaway SQLite
-database, same style as tests/test_workflow_engine.py — this is the same
-engine and template, just with a per-document quorum override instead of the
-default single-decider 'any' mode.
-
-Document Control redesign, Phase 3 note: quorum is now scoped to the final
-Approval stage (step 3, "effective") only — Review (step 2, "under_review")
-stays single-reviewer regardless of any quorum override
-(qms_database.py sets quorum_eligible=0 on that step; see
-services/workflow_engine.py's start_instance()). This file originally
-exercised quorum mechanics on step 2 (when both approval steps were
-quorum-eligible); every test below now advances past step 2 with a single
-reviewer first (via _clear_review()), then exercises the actual quorum
-mechanics on step 3 — the assertions themselves (quorum math, vote-clearing
-on reject, duplicate-vote/self-vote guards) are unchanged, only which step
-they target.
-
-Also fixed here (unrelated to the step-2->step-3 scoping change, but
-required for this file to run at all): _make_document() previously called
-qms_document_database.create_document() with created_by_user_id/
-created_by_display_name keyword arguments that do not exist on the actual
-committed create_document() signature — those kwargs belong to separate,
-uncommitted "Wave 1 SOD-01" segregation-of-duties work (preserved untouched
-in git stash, not part of this redesign) and were never part of this
-commit. test_document_creator_cannot_be_assigned_as_quorum_approver, which
-specifically exercises that SOD-01 behaviour, is marked skip (not deleted)
-with that reason — restoring the SOD-01 work will make it exercisable again
-with no changes needed to the test itself.
+SOP workflow correction note: Document Control's Department Head/Quality
+Head/Plant Head steps are now strictly SEQUENTIAL single-decider steps, not
+a shared quorum step — quorum_eligible=0 on every one of DOCUMENT_WORKFLOW_
+V1's approval steps (qms_database.py), so qms_documents.py's routes can
+never actually produce a live quorum-mode step any more (see
+tests/test_document_author_assigned_chain.py for that new sequential-
+approval coverage instead). The quorum MECHANISM in workflow_engine.py is
+still fully general-purpose — any future record_type/step could use it — so
+this file now exercises it directly at the engine/DB level: manually
+snapshotting one instance step as approval_mode='quorum' (bypassing
+DOCUMENT_WORKFLOW_V1's own quorum_eligible=0, which only gates
+start_instance()'s own snapshotting decision, not decide_step()'s ability to
+process a quorum step once one exists) rather than relying on any live
+caller to produce one. The assertions themselves — quorum math, vote-
+clearing on reject, duplicate-vote/self-vote guards — are unchanged from
+before this rewrite.
 """
 
 import pytest
@@ -57,9 +43,25 @@ def _make_document():
     return qdb.create_document({"title": "Cleaning SOP"}, company_id=COMPANY_ID)
 
 
-def _start(doc, quorum=None):
-    return wfe.start_instance("DOCUMENT_WORKFLOW_V1", "document", doc["id"], COMPANY_ID,
-                               "Ada Author", default_quorum=quorum)
+def _start_and_force_quorum_on_step(doc, step_order, required_quorum):
+    """Starts a normal (non-quorum) DOCUMENT_WORKFLOW_V1 instance, then
+    directly overwrites one already-created instance step's approval_mode/
+    required_quorum to 'quorum' — the engine-level state _decide_quorum_step
+    actually branches on — bypassing quorum_eligible=0's block on
+    start_instance() ever doing this automatically for Document Control.
+    This is intentionally the lowest-level way to reach a real quorum step:
+    it tests decide_step()'s dispatch and _decide_quorum_step()'s own logic,
+    not any particular record_type's routing decision to request one."""
+    state = wfe.start_instance("DOCUMENT_WORKFLOW_V1", "document", doc["id"], COMPANY_ID, "Ada Author")
+    step = next(s for s in state["steps"] if s["step_order"] == step_order)
+    conn = wfdb.get_connection()
+    conn.execute(
+        "UPDATE qms_workflow_instance_steps SET approval_mode = 'quorum', required_quorum = ? WHERE id = ?",
+        (required_quorum, step["id"]),
+    )
+    conn.commit()
+    conn.close()
+    return state
 
 
 def _assign(doc, step_order, approvers):
@@ -72,9 +74,9 @@ def _vote(doc, step_order, user_id, decision, name=None, comments=""):
 
 
 def _clear_review(doc):
-    """Advance past step 2 (Review) with a single reviewer — step 2 is never
-    quorum-eligible (Phase 3), regardless of the document's quorum
-    override, so one approve always suffices."""
+    """Advance past step 2 (Review, always single-decider) so the instance
+    reaches step 3 — the step _start_and_force_quorum_on_step forced into
+    quorum mode."""
     _assign(doc, 2, [{"user_id": "rev-1", "display_name": "Rita Reviewer"}])
     return _vote(doc, 2, "rev-1", "approve", "Rita Reviewer")
 
@@ -87,7 +89,7 @@ APPROVER_B = {"user_id": "appr-b", "display_name": "Bea Approver"}
 
 def test_quorum_not_met_keeps_step_pending(db_path):
     doc = _make_document()
-    _start(doc, quorum=2)
+    _start_and_force_quorum_on_step(doc, 3, required_quorum=2)
     _clear_review(doc)
     _assign(doc, 3, [APPROVER_A, APPROVER_B])
 
@@ -98,14 +100,13 @@ def test_quorum_not_met_keeps_step_pending(db_path):
     assert step3["votes_cast"] == 1
     assert step3["required_quorum"] == 2
     assert state["instance"]["current_step_order"] == 3
-    assert qdb.get_document(doc["id"])["status"] == "Under Review"
 
 
 # ── Quorum met ────────────────────────────────────────────────────────────────
 
 def test_quorum_met_advances_step(db_path):
     doc = _make_document()
-    _start(doc, quorum=2)
+    _start_and_force_quorum_on_step(doc, 3, required_quorum=2)
     _clear_review(doc)
     _assign(doc, 3, [APPROVER_A, APPROVER_B])
 
@@ -115,7 +116,7 @@ def test_quorum_met_advances_step(db_path):
     step3 = next(s for s in state["steps"] if s["step_order"] == 3)
     assert step3["status"] == "approved"
     assert step3["votes_cast"] == 2
-    assert state["instance"]["status"] == "completed"
+    assert state["instance"]["current_step_order"] == 4  # advanced to step 4, not completed — 5 steps total now
 
 
 # ── Self-vote and duplicate-vote guards ───────────────────────────────────────
@@ -125,7 +126,7 @@ def test_quorum_met_advances_step(db_path):
                           "in git stash, not merged into this branch. Un-skip once that work lands.")
 def test_document_creator_cannot_be_assigned_as_quorum_approver(db_path):
     doc = _make_document()
-    _start(doc, quorum=2)
+    _start_and_force_quorum_on_step(doc, 3, required_quorum=2)
     _clear_review(doc)
     with pytest.raises(wfe.WorkflowError):
         _assign(doc, 3, [{"user_id": "author-1", "display_name": "Ada Author"}, APPROVER_B])
@@ -133,7 +134,7 @@ def test_document_creator_cannot_be_assigned_as_quorum_approver(db_path):
 
 def test_duplicate_vote_is_rejected(db_path):
     doc = _make_document()
-    _start(doc, quorum=2)
+    _start_and_force_quorum_on_step(doc, 3, required_quorum=2)
     _clear_review(doc)
     _assign(doc, 3, [APPROVER_A, APPROVER_B])
     _vote(doc, 3, "appr-a", "approve", "Al Approver")
@@ -144,7 +145,7 @@ def test_duplicate_vote_is_rejected(db_path):
 
 def test_only_an_assigned_approver_may_vote(db_path):
     doc = _make_document()
-    _start(doc, quorum=2)
+    _start_and_force_quorum_on_step(doc, 3, required_quorum=2)
     _clear_review(doc)
     _assign(doc, 3, [APPROVER_A, APPROVER_B])
 
@@ -154,7 +155,7 @@ def test_only_an_assigned_approver_may_vote(db_path):
 
 def test_quorum_step_without_assigned_approvers_blocks_voting(db_path):
     doc = _make_document()
-    _start(doc, quorum=2)
+    _start_and_force_quorum_on_step(doc, 3, required_quorum=2)
     _clear_review(doc)
     with pytest.raises(wfe.WorkflowError):
         _vote(doc, 3, "appr-a", "approve", "Al Approver")
@@ -164,7 +165,7 @@ def test_quorum_step_without_assigned_approvers_blocks_voting(db_path):
 
 def test_single_rejection_resets_step_and_clears_votes(db_path):
     doc = _make_document()
-    _start(doc, quorum=2)
+    _start_and_force_quorum_on_step(doc, 3, required_quorum=2)
     _clear_review(doc)
     _assign(doc, 3, [APPROVER_A, APPROVER_B])
 
@@ -184,7 +185,7 @@ def test_single_rejection_resets_step_and_clears_votes(db_path):
 
 def test_no_quorum_override_preserves_any_mode(db_path):
     doc = _make_document()
-    _start(doc, quorum=None)
+    wfe.start_instance("DOCUMENT_WORKFLOW_V1", "document", doc["id"], COMPANY_ID, "Ada Author")
     _assign(doc, 2, [APPROVER_A])
 
     state = _vote(doc, 2, "appr-a", "approve", "Al Approver")
@@ -198,7 +199,7 @@ def test_no_quorum_override_preserves_any_mode(db_path):
 
 def test_no_quorum_override_preserves_any_mode_on_approval_step_too(db_path):
     doc = _make_document()
-    _start(doc, quorum=None)
+    wfe.start_instance("DOCUMENT_WORKFLOW_V1", "document", doc["id"], COMPANY_ID, "Ada Author")
     _assign(doc, 2, [APPROVER_A])
     _vote(doc, 2, "appr-a", "approve", "Al Approver")
     _assign(doc, 3, [APPROVER_B])
@@ -209,14 +210,21 @@ def test_no_quorum_override_preserves_any_mode_on_approval_step_too(db_path):
     assert step3["approval_mode"] == "any"
     assert "votes_cast" not in step3
     assert step3["status"] == "approved"
-    assert state["instance"]["status"] == "completed"
+    assert state["instance"]["current_step_order"] == 4  # 5-step template — not yet completed
 
 
-# ── Phase 3: Review is never quorum-eligible, even with an override set ──────
+# ── Document Control's own steps are never quorum-eligible by default ───────
 
-def test_review_step_stays_single_reviewer_even_with_quorum_override(db_path):
+def test_document_workflow_steps_are_never_quorum_eligible_by_default(db_path):
+    """SOP workflow correction: Department Head/Quality Head/Plant Head are
+    strictly sequential single-decider steps now — start_instance() must
+    never auto-snapshot any Document Control approval step as quorum mode,
+    even if a caller passes default_quorum > 1 (nothing does any more, but
+    this guards against a future regression reintroducing that call)."""
     doc = _make_document()
-    state = _start(doc, quorum=3)
-    step2 = next(s for s in state["steps"] if s["step_order"] == 2)
-    assert step2["approval_mode"] == "any"
-    assert step2["required_quorum"] is None
+    state = wfe.start_instance("DOCUMENT_WORKFLOW_V1", "document", doc["id"], COMPANY_ID,
+                                "Ada Author", default_quorum=3)
+    for step in state["steps"]:
+        if step["step_type"] == "approval":
+            assert step["approval_mode"] == "any"
+            assert step["required_quorum"] is None

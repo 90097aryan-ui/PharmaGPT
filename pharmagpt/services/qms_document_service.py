@@ -100,6 +100,83 @@ def render_template_skeleton_markdown(template: dict) -> str:
     return "\n".join(lines)
 
 
+def generate_review_pdf(document_id: int) -> bytes:
+    """SOP workflow correction (§7/§8/§9): the Reviewer/Department Head/
+    Quality Head/Plant Head's primary review surface — a read-only,
+    watermarked PDF of the EXACT version currently under review/approval,
+    rendered in-app so nobody has to download Word and open it externally.
+
+    Reuses the existing DOCX pipeline end to end (generate_report_markdown
+    -> doc_exporter.markdown_to_docx -> services/docx_generator.py, the same
+    path POST .../export/docx already uses) rather than building a second
+    document-generation architecture, then converts that DOCX to PDF with
+    PyMuPDF (already a hard dependency — services/extraction/pdf_engines.py)
+    and stamps an explicit watermark on every page.
+
+    The DOCX generator's own watermark (_add_watermark, a native Word VML
+    shape keyed off document_status) is INTENTIONALLY not relied on for the
+    PDF: verified empirically that Word's header-anchored VML watermark
+    does not carry through PyMuPDF's DOCX->PDF conversion reliably (renders
+    on early pages only, depends on section/header structure) — page-level
+    PyMuPDF text stamping, applied per rendered PDF page, is what actually
+    guarantees "every page of the review PDF" per spec §9."""
+    import math
+    import fitz
+    from pharmagpt.services.doc_exporter import markdown_to_docx
+
+    document = qdb.get_document(document_id)
+    if not document:
+        raise ValueError("Document not found")
+
+    md = generate_report_markdown(document_id)
+    docx_bytes = markdown_to_docx(md, document.get("doc_type", "SOP"), {
+        "title": document.get("title", ""),
+        "department": document.get("department", ""),
+        "document_status": document.get("status", ""),
+    })
+
+    pdf_doc = fitz.open(stream=docx_bytes, filetype="docx")
+    pdf_bytes = pdf_doc.convert_to_pdf()
+    pdf_doc.close()
+
+    watermark_text = _review_watermark_text(document.get("status", ""))
+    if not watermark_text:
+        return pdf_bytes
+
+    stamped = fitz.open(stream=pdf_bytes, filetype="pdf")
+    for page in stamped:
+        rect = page.rect
+        fontsize = 40
+        text_len = fitz.get_text_length(watermark_text, fontname="helv", fontsize=fontsize)
+        center = fitz.Point(rect.width / 2, rect.height / 2)
+        origin = fitz.Point(center.x - text_len / 2, center.y)
+        page.insert_text(
+            origin, watermark_text, fontsize=fontsize, fontname="helv",
+            color=(0.55, 0.55, 0.55), fill_opacity=0.4,
+            morph=(center, fitz.Matrix(math.radians(45))),
+        )
+    out = stamped.tobytes()
+    stamped.close()
+    return out
+
+
+def _review_watermark_text(status: str) -> str | None:
+    """Deliberately its own small mapping, not docx_generator._WATERMARK_BY_
+    STATUS: that one's is keyed on version-lifecycle strings ('under_review'),
+    this one on the document's own status vocabulary ('Under Review') —
+    reusing it would need a translation layer for no benefit. 'Effective'
+    intentionally gets no watermark: spec §9 requires the review copy to be
+    visibly distinct from Effective/Released, i.e. Effective must NOT carry
+    a review-in-progress watermark."""
+    return {
+        "Draft": "DRAFT",
+        "Under Review": "UNDER REVIEW",
+        "Pending Approval": "PENDING APPROVAL",
+        "Approved": "APPROVED — PENDING RELEASE",
+        "Obsolete": "OBSOLETE",
+    }.get(status)
+
+
 def generate_report_markdown(document_id: int, version_id: int | None = None) -> str:
     """Generate a markdown report for a document — used by both in-app
     preview/print and DOCX export.

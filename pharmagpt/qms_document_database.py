@@ -414,6 +414,69 @@ def is_self_check_cleared(document_id: int) -> bool:
     return bool(version and version.get("self_check_completed_at"))
 
 
+# ── Author-assigned review/approval chain ────────────────────────────────────
+# spec: "THE AUTHOR ASSIGNS THE COMPLETE CHAIN. THE ASSIGNMENT LOCKS WHEN
+# SUBMITTED." Reviewer/Department Head/Quality Head are mandatory,
+# Plant Head optional — resolved by name from the tenant's existing
+# GET /users/directory (routes/users.py), never a raw Supabase user id typed
+# by hand, and never gated behind the separate Approver Pool config screen.
+
+def set_review_chain(document_id: int, chain: dict, *, assigned_by: str) -> dict:
+    """Store the Author's chosen Reviewer/Department Head/Quality Head/
+    Plant Head for this document. Only legal while the current version is
+    still 'draft' — routes/qms_documents.py additionally enforces this at
+    the route layer (the actual lock point spec §4 requires) so a direct
+    request against an already-submitted document is rejected before this
+    function is ever called, not silently no-op'd here."""
+    version = get_current_version(document_id)
+    if not version or version["status"] != "draft":
+        raise ValueError("The review/approval chain can only be assigned or changed while the "
+                          "current version is Draft — it locks once Submitted for Review")
+    from datetime import datetime, timezone
+    conn = get_connection()
+    conn.execute(
+        """UPDATE qms_documents
+           SET reviewer_user_id = ?, reviewer_name = ?,
+               department_head_user_id = ?, department_head_name = ?,
+               quality_head_user_id = ?, quality_head_name = ?,
+               plant_head_user_id = ?, plant_head_name = ?,
+               chain_assigned_by = ?, chain_assigned_at = ?
+           WHERE id = ?""",
+        (
+            chain.get("reviewer_user_id", ""), chain.get("reviewer_name", ""),
+            chain.get("department_head_user_id", ""), chain.get("department_head_name", ""),
+            chain.get("quality_head_user_id", ""), chain.get("quality_head_name", ""),
+            chain.get("plant_head_user_id", ""), chain.get("plant_head_name", ""),
+            assigned_by, datetime.now(timezone.utc).isoformat(),
+            document_id,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return get_document(document_id)
+
+
+def get_review_chain(document: dict) -> dict:
+    """{'reviewer': {...}|None, 'department_head': ..., 'quality_head': ...,
+    'plant_head': ...} — the actual assigned people, read straight off the
+    document row `get_document()` already returned (no extra query). Each
+    non-empty entry is {'user_id', 'display_name'}; plant_head is None when
+    not assigned. Used both to render the Author's pre-submission form
+    (prefilled with the current selection) and to resolve real approvers at
+    Submit for Review (routes/qms_documents.py::start_workflow)."""
+    def _entry(uid_key: str, name_key: str) -> dict | None:
+        uid = document.get(uid_key) or ""
+        if not uid:
+            return None
+        return {"user_id": uid, "display_name": document.get(name_key) or ""}
+    return {
+        "reviewer": _entry("reviewer_user_id", "reviewer_name"),
+        "department_head": _entry("department_head_user_id", "department_head_name"),
+        "quality_head": _entry("quality_head_user_id", "quality_head_name"),
+        "plant_head": _entry("plant_head_user_id", "plant_head_name"),
+    }
+
+
 _TRANSITION_EXTRA_FIELDS = {"rejection_reason", "effective_date", "workflow_instance_id",
                             "self_check_completed_at", "source_attachment_id",
                             "version", "version_number"}

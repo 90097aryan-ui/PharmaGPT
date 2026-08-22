@@ -663,6 +663,35 @@ def init_db() -> None:
     _add_column_if_missing(conn, "qms_documents", "approved_by", "TEXT DEFAULT ''")
     conn.commit()
 
+    # ── Document Control: Author-assigned review/approval chain ─────────────
+    # spec: "THE AUTHOR ASSIGNS THE COMPLETE CHAIN. THE ASSIGNMENT LOCKS WHEN
+    # SUBMITTED." Stored directly on qms_documents (one chain per document,
+    # editable only pre-submission — see routes/qms_documents.py::
+    # assign_review_chain) rather than a new pool/config table: these are
+    # the four specific people THIS document's workflow will actually use,
+    # not a reusable configuration. *_user_id resolves to a real Supabase
+    # user id from the existing tenant directory (GET /users/directory);
+    # *_name is denormalized alongside it purely for display (mirrors the
+    # qms_workflow_step_approvers.display_name pattern) so the UI never
+    # needs a second round trip to show "Department Head: Production Head"
+    # after submission. plant_head is the only optional pair — an empty
+    # plant_head_user_id means that step is auto-skipped (see
+    # services/workflow_engine.py's auto-skip handling).
+    for _col, _ddl in (
+        ("reviewer_user_id",       "TEXT DEFAULT ''"),
+        ("reviewer_name",          "TEXT DEFAULT ''"),
+        ("department_head_user_id","TEXT DEFAULT ''"),
+        ("department_head_name",  "TEXT DEFAULT ''"),
+        ("quality_head_user_id",  "TEXT DEFAULT ''"),
+        ("quality_head_name",     "TEXT DEFAULT ''"),
+        ("plant_head_user_id",    "TEXT DEFAULT ''"),
+        ("plant_head_name",       "TEXT DEFAULT ''"),
+        ("chain_assigned_by",     "TEXT DEFAULT ''"),
+        ("chain_assigned_at",     "TEXT DEFAULT ''"),
+    ):
+        _add_column_if_missing(conn, "qms_documents", _col, _ddl)
+    conn.commit()
+
     # Business terminology fix: the final Approval step's business action is
     # "Quality Release" (spec), not the generic "Made Effective" label the
     # step was originally seeded with. QMS_SCHEMA's own INSERT OR IGNORE seed
