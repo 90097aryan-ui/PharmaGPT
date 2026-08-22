@@ -423,10 +423,11 @@ async function qmsDocSwitchTab(tab) {
 }
 window.qmsDocSwitchTab = qmsDocSwitchTab;
 
-// Approver Pool name-search picker (static/js/user_picker.js) — used by the
-// Configure Approver Pool modal's User ID fields (see
-// qmsDocOpenApproverPoolSettings below) so a company_admin can search by
-// name instead of typing a raw Supabase user id.
+// Approver Pool name selector (static/js/user_picker.js's selectHTML) — used
+// by the Configure Approver Pool modal (see qmsDocOpenApproverPoolSettings
+// below) so a company_admin picks Reviewer/Department Head/Quality Head/
+// Plant Head by name; the Supabase user id is resolved and stored
+// internally, never shown or typed.
 let qmsDocApproverDirectory = null;
 
 function qmsDocRenderTab(doc) {
@@ -603,9 +604,10 @@ async function qmsDocRenderDraftStepper(id, doc, version) {
     </div>
     <div class="qms-workflow-stepper">
       <div class="qms-stat-card">
-        <strong>1. Download Draft Template</strong>
+        <strong>1. Download Draft (DOCX)</strong>
+        <p style="font-size:11.5px;color:var(--text-muted);margin:4px 0">Downloads the current draft — including AI-generated content and the controlled template structure — as a Word document.</p>
         <div class="qms-form-actions" style="margin-top:6px">
-          <button class="btn-secondary" onclick="qmsDocDownloadDraftTemplate(${id})">Download</button>
+          <button class="btn-secondary" onclick="qmsDocExportDocx(${id})">Download</button>
         </div>
       </div>
       <div class="qms-stat-card">
@@ -641,26 +643,6 @@ async function qmsDocRenderDraftStepper(id, doc, version) {
       </div>
     </div>
   `;
-}
-
-function qmsDocDownloadDraftTemplate(id) {
-  qmsDocDownloadReportAsFile(id, `Document_${id}_draft.md`);
-}
-window.qmsDocDownloadDraftTemplate = qmsDocDownloadDraftTemplate;
-
-async function qmsDocDownloadReportAsFile(id, filename) {
-  try {
-    const { markdown } = await qmsFetch(`/qms/documents/${id}/report`);
-    const blob = new Blob([markdown], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  } catch (e) {
-    qmsToast("Download failed: " + e.message);
-  }
 }
 
 async function qmsDocRecordSelfCheck(id) {
@@ -1125,6 +1107,7 @@ window.qmsDocAcknowledgeDistribution = qmsDocAcknowledgeDistribution;
 // scoped by department with a company-wide default (department="").
 
 const QMS_APPROVER_POOL_ROLES = [
+  { role: "reviewer", label: "Reviewer" },
   { role: "department_head", label: "Department Head" },
   { role: "quality_head", label: "Quality Head / Designee" },
   { role: "plant_head", label: "Plant Head (Optional)" },
@@ -1146,7 +1129,6 @@ async function qmsDocOpenApproverPoolSettings() {
           <input type="text" id="qms-pool-dept" placeholder="e.g. Quality Assurance" oninput="qmsDocLoadApproverPool()" />
         </div>
         <div id="qms-pool-rows"></div>
-        <datalist id="qms-pool-directory"></datalist>
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" onclick="document.getElementById('qms-approver-pool-modal').remove()">Close</button>
@@ -1168,16 +1150,18 @@ async function qmsDocLoadApproverPool() {
   ]);
   const byRole = {};
   pool.forEach(p => { byRole[p.pool_role] = p; });
+  // Name-only selector (final correction pass §2): a real <select> of the
+  // tenant's users, resolving to user_id internally — the author never
+  // sees or enters a Supabase user id or a separate free-text display name.
   rowsEl.innerHTML = QMS_APPROVER_POOL_ROLES.map(r => {
     const current = byRole[r.role];
     return `
       <div class="qms-section-card" style="margin-top:10px">
         <h3 style="margin-top:0">${r.label}</h3>
         ${current ? `<div class="qms-panel-item-meta">Currently: ${current.display_name || current.user_id}</div>` : `<div class="qms-panel-item-meta">Not configured</div>`}
-        <div class="form-grid cols-3">
-          <div class="form-field"><label>Search by Name</label><input type="text" id="qms-pool-search-${r.role}" list="qms-pool-directory" placeholder="Type a name…" oninput="qmsDocPoolPickerInput('${r.role}')" /></div>
-          <div class="form-field"><label>User ID</label><input type="text" id="qms-pool-uid-${r.role}" placeholder="Supabase user id" /></div>
-          <div class="form-field"><label>Display Name</label><input type="text" id="qms-pool-name-${r.role}" placeholder="Full name" /></div>
+        <div class="form-field" style="max-width:320px">
+          <label>Select ${r.label}</label>
+          ${window.UserPicker.selectHTML(`qms-pool-select-${r.role}`, qmsDocApproverDirectory || [], current ? current.user_id : "")}
         </div>
         <div class="qms-form-actions">
           <button class="btn-primary" onclick="qmsDocSaveApproverPoolRole('${r.role}')">Save</button>
@@ -1185,25 +1169,16 @@ async function qmsDocLoadApproverPool() {
       </div>
     `;
   }).join("");
-  const datalist = document.getElementById("qms-pool-directory");
-  if (datalist) datalist.outerHTML = window.UserPicker.datalistHTML("qms-pool-directory", qmsDocApproverDirectory);
 }
 window.qmsDocLoadApproverPool = qmsDocLoadApproverPool;
 
-function qmsDocPoolPickerInput(pool_role) {
-  const searchEl = document.getElementById(`qms-pool-search-${pool_role}`);
-  const entry = window.UserPicker.findByLabel(searchEl.value, qmsDocApproverDirectory || []);
-  if (!entry) return;
-  document.getElementById(`qms-pool-uid-${pool_role}`).value = entry.user_id;
-  document.getElementById(`qms-pool-name-${pool_role}`).value = entry.display_name;
-}
-window.qmsDocPoolPickerInput = qmsDocPoolPickerInput;
-
 async function qmsDocSaveApproverPoolRole(pool_role) {
   const dept = document.getElementById("qms-pool-dept").value.trim();
-  const user_id = document.getElementById(`qms-pool-uid-${pool_role}`).value.trim();
-  const display_name = document.getElementById(`qms-pool-name-${pool_role}`).value.trim();
-  if (!user_id) { qmsToast("User ID is required"); return; }
+  const sel = document.getElementById(`qms-pool-select-${pool_role}`);
+  const user_id = sel.value;
+  if (!user_id) { qmsToast("Please select a person"); return; }
+  const entry = (qmsDocApproverDirectory || []).find(e => e.user_id === user_id);
+  const display_name = entry ? entry.display_name : "";
   try {
     await qmsPostJSON(`/qms/documents/approver-pool`, { department: dept, pool_role, user_id, display_name });
     qmsToast("Approver pool updated");
@@ -1234,10 +1209,17 @@ async function qmsDocExportDocx(id) {
   try {
     const res = await fetch(`/qms/documents/${id}/export/docx`, { method: "POST" });
     if (!res.ok) { qmsToast("Export failed"); return; }
+    // Use the server's Content-Disposition filename (doc number + title,
+    // always ends in .docx — routes/qms_documents.py::export_docx) rather
+    // than a generic hardcoded name; a blob: URL carries no header info of
+    // its own, so this must be parsed out before the blob is created.
+    const cd = res.headers.get("content-disposition") || "";
+    const match = cd.match(/filename="?([^";]+)"?/);
+    const filename = match ? match[1] : `Document_${id}.docx`;
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = `Document_${id}.docx`;
+    a.href = url; a.download = filename;
     document.body.appendChild(a); a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);

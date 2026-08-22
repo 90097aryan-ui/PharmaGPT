@@ -626,26 +626,31 @@ def get_workflow(did):
     if not document:
         return jsonify({"error": "Not found"}), 404
     state = wfe.get_instance_state(RECORD_TYPE, did)
-    # Document Control redesign (spec §13/§15/§20): attach approver-pool role
-    # labels ("Department Head" / "Quality Head" / "Plant Head") and a
-    # quorum summary to the final Approval step so the UI can render
+    # Document Control redesign (spec §13/§15/§20; final correction pass
+    # §2): attach approver-pool role labels ("Reviewer" / "Department Head" /
+    # "Quality Head" / "Plant Head") and a pool summary to BOTH named-decider
+    # approval steps so the UI can render "Reviewer Pending" /
     # "Department Head Pending / Quality Head Pending / Plant Head Optional"
-    # and "Required approvals: X of Y" without a second round trip or
-    # duplicating pool-resolution logic. Purely additive keys — every other
-    # record_type's workflow response (CAPA/Deviation/Change Control, which
-    # don't reach this route) and every pre-existing key here are unchanged.
+    # without a second round trip or duplicating pool-resolution logic.
+    # Purely additive keys — every other record_type's workflow response
+    # (CAPA/Deviation/Change Control, which don't reach this route) and
+    # every pre-existing key here are unchanged. Each step only ever gets
+    # the pool roles that actually apply to it — 'under_review' is a single
+    # named Reviewer, never quorum; 'effective' is unchanged from before.
     pool = qdb.get_approver_pool(document.get("company_id", ""), document.get("department", ""))
     pool_by_user = {p["user_id"]: p["pool_role"] for p in pool if p.get("user_id")}
     configured_roles = {p["pool_role"] for p in pool if p.get("user_id")}
+    step_pool_roles = {"under_review": ("reviewer",), "effective": ("department_head", "quality_head", "plant_head")}
     for step in state.get("steps", []):
         if step.get("step_type") != "approval":
             continue
         for a in step.get("approvers", []):
             a["pool_role"] = pool_by_user.get(a["user_id"], "")
-        if step.get("step_key") == "effective":
+        roles_for_step = step_pool_roles.get(step.get("step_key"))
+        if roles_for_step:
             step["pool_summary"] = [
                 {"pool_role": r, "configured": r in configured_roles, "optional": r == "plant_head"}
-                for r in qdb.ALL_POOL_ROLES
+                for r in roles_for_step
             ]
     return jsonify(state)
 
@@ -664,6 +669,21 @@ def _effective_quorum_and_pool_approvers(document: dict) -> tuple[int | None, li
         return qdb.APPROVAL_QUORUM_REQUIRED, approvers
     except ValueError:
         return document.get("approval_quorum"), None
+
+
+def _assign_pool_reviewer_if_configured(document: dict, state: dict) -> dict:
+    """Final correction pass (§2): mirrors the 'effective' step's existing
+    pool_approvers assignment, for the single-decider 'under_review' step's
+    Reviewer seat. A no-op (returns `state` unchanged) when no Reviewer is
+    configured for this department yet — the step is then left exactly as
+    it already was before this change (open to any eligible-role user via
+    the pre-existing manual-assign path), so a company with no pool set up
+    is completely unaffected."""
+    reviewer = qdb.resolve_pool_reviewer(document)
+    if not reviewer:
+        return state
+    review_step = next(s for s in state["steps"] if s["step_key"] == "under_review")
+    return wfe.assign_approvers(RECORD_TYPE, document["id"], review_step["step_order"], [reviewer])
 
 
 _SELF_CHECK_REQUIRED_ERROR = (
@@ -754,6 +774,7 @@ def start_workflow(did):
         if pool_approvers:
             approval_step = next(s for s in state["steps"] if s["step_key"] == "effective")
             state = wfe.assign_approvers(RECORD_TYPE, did, approval_step["step_order"], pool_approvers)
+        state = _assign_pool_reviewer_if_configured(document, state)
     except wfe.WorkflowError as e:
         audit.log_failure("document", did, "Workflow start blocked", reason=str(e))
         return jsonify({"error": str(e)}), 409
@@ -989,6 +1010,7 @@ def submit_approval(did):
                 if pool_approvers:
                     approval_step = next(s for s in start_state["steps"] if s["step_key"] == "effective")
                     wfe.assign_approvers(RECORD_TYPE, did, approval_step["step_order"], pool_approvers)
+                _assign_pool_reviewer_if_configured(document, start_state)
             state = wfe.get_instance_state(RECORD_TYPE, did)
             instance = state["instance"]
             if not instance or instance["status"] != "in_progress":

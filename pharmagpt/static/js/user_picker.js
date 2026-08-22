@@ -61,5 +61,17 @@
     });
   }
 
-  window.UserPicker = { label, loadDirectory, datalistHTML, findByLabel, attachNamePicker };
+  // selectHTML: a genuine <select> of names resolving to user_id — for
+  // fields that must store a specific person's id (Reviewer/Approver role
+  // assignment), where a free-text/datalist combo still lets someone type
+  // an unresolved value. Additive only; datalistHTML/attachNamePicker are
+  // unchanged for existing callers (qms_deviations.js's Workflow Builder).
+  function selectHTML(id, directory, selectedUserId) {
+    const opts = directory.map(e =>
+      `<option value="${e.user_id}" ${e.user_id === selectedUserId ? "selected" : ""}>${label(e).replace(/"/g, "&quot;")}</option>`
+    ).join("");
+    return `<select id="${id}"><option value="">Select…</option>${opts}</select>`;
+  }
+
+  window.UserPicker = { label, loadDirectory, datalistHTML, findByLabel, attachNamePicker, selectHTML };
 })();

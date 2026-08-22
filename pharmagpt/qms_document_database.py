@@ -549,9 +549,15 @@ def reject_and_fork_version(document_id: int, rejection_reason: str) -> dict:
 # is optional. Required quorum for the final Approval stage is always 2
 # regardless of pool size (2-of-2 without Plant Head, 2-of-3 with) — a fixed
 # business rule, not a per-document setting; see resolve_pool_approvers().
+#
+# "reviewer" (final correction pass): the single named decider for the
+# 'under_review' step — mandatory, but single-decider, not quorum, so it is
+# resolved separately by resolve_pool_reviewer() below rather than folded
+# into MANDATORY_POOL_ROLES/resolve_pool_approvers() (which stay scoped to
+# the 'effective' step's quorum exactly as before this change).
 
 MANDATORY_POOL_ROLES = ("department_head", "quality_head")
-ALL_POOL_ROLES = ("department_head", "quality_head", "plant_head")
+ALL_POOL_ROLES = ("reviewer", "department_head", "quality_head", "plant_head")
 APPROVAL_QUORUM_REQUIRED = 2
 
 
@@ -629,6 +635,24 @@ def resolve_pool_approvers(document: dict) -> list[dict]:
         approvers.append({"user_id": by_role["plant_head"]["user_id"],
                            "display_name": by_role["plant_head"].get("display_name", ""), "pool_role": "plant_head"})
     return approvers
+
+
+def resolve_pool_reviewer(document: dict) -> dict | None:
+    """{'user_id', 'display_name', 'pool_role'} for the document's
+    department (falling back to the company-wide pool) 'reviewer' seat, for
+    the 'under_review' step — single named decider, not quorum, so unlike
+    resolve_pool_approvers() this never raises: returns None when not
+    configured, and the caller (routes/qms_documents.py) leaves the step
+    without a pre-assigned approver in that case, exactly as it already does
+    today. Once assigned, workflow_engine.decide_step()'s existing "no
+    assigned approver yet" check is what actually prevents the step from
+    being decided by anyone else."""
+    pool = get_approver_pool(document.get("company_id", ""), document.get("department", ""))
+    by_role = {p["pool_role"]: p for p in pool if p.get("user_id")}
+    entry = by_role.get("reviewer")
+    if not entry:
+        return None
+    return {"user_id": entry["user_id"], "display_name": entry.get("display_name", ""), "pool_role": "reviewer"}
 
 
 # ── Distribution ───────────────────────────────────────────────────────────────
