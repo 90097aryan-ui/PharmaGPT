@@ -47,6 +47,17 @@ async function renderWorkflowPanel(containerId, recordType, routePrefix, recordI
   const instance = wf.instance;
   const steps = wf.steps || [];
 
+  // Document Control redesign (final correction pass): the current step's
+  // Reviewer/Department Head/Quality Head/Plant Head picker is populated
+  // straight from the tenant's existing user directory (no Approver Pool
+  // prerequisite) — fetched only when actually needed (a pool_summary step
+  // with nothing assigned yet is current), so CAPA/Deviation/Change
+  // Control — which never set pool_summary — never make this call.
+  const currentStep = steps.find(s => s.step_order === instance.current_step_order);
+  const needsDirectory = instance.status === "in_progress" && currentStep
+    && currentStep.step_type === "approval" && !(currentStep.approvers || []).length && currentStep.pool_summary;
+  const directory = (needsDirectory && window.UserPicker) ? await window.UserPicker.loadDirectory() : [];
+
   el.innerHTML = `
     <div class="qms-section-card">
       <h3>Workflow Status</h3>
@@ -56,13 +67,13 @@ async function renderWorkflowPanel(containerId, recordType, routePrefix, recordI
       </div>
     </div>
     <div class="qms-workflow-stepper">
-      ${steps.map(s => wfPanelStepHTML(containerId, recordType, routePrefix, recordId, s, instance, user)).join("")}
+      ${steps.map(s => wfPanelStepHTML(containerId, recordType, routePrefix, recordId, s, instance, user, directory)).join("")}
     </div>
   `;
 }
 window.renderWorkflowPanel = renderWorkflowPanel;
 
-function wfPanelStepHTML(containerId, recordType, routePrefix, recordId, step, instance, user) {
+function wfPanelStepHTML(containerId, recordType, routePrefix, recordId, step, instance, user, directory) {
   const isCurrent = instance.status === "in_progress" && step.step_order === instance.current_step_order;
   const stateClass = step.status === "approved" ? "success" : step.status === "rejected" ? "critical"
     : isCurrent ? "info" : "";
@@ -71,7 +82,7 @@ function wfPanelStepHTML(containerId, recordType, routePrefix, recordId, step, i
   if (step.status !== "pending") {
     body = `<div class="qms-panel-item-meta">${qmsBadge(step.status)} by ${step.decided_by || "—"} on ${step.decided_at || "—"}${step.comments ? ` — "${step.comments}"` : ""}</div>`;
   } else if (isCurrent) {
-    body = wfPanelActionHTML(containerId, recordType, routePrefix, recordId, step, user);
+    body = wfPanelActionHTML(containerId, recordType, routePrefix, recordId, step, user, directory);
   } else {
     body = `<div class="qms-panel-item-meta">Not yet reached</div>`;
   }
@@ -98,6 +109,32 @@ function wfPanelApproversBadge(approvers) {
 
 function wfPanelRoleLabel(pool_role) {
   return String(pool_role || "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// Document Control final correction pass: "preferably filter/display
+// appropriate users" — the tenant's existing workflow_role designation
+// (Initiator/Coordinator/Reviewer/Approver/Plant Head, already returned by
+// GET /users/directory) is reused as a soft filter per pool role, so the
+// picker isn't just every active user in the company. No new table: this
+// is a fixed, client-side mapping from a Document Control pool_role to the
+// designation string a company's existing workflow roles already use.
+// department_head/quality_head share "Approver" — the two aren't otherwise
+// distinguished in workflow_roles, so both surface the same designation-
+// filtered list. Falls back to the full directory if nothing matches
+// (a company using different designation names is never left with an
+// empty, unusable dropdown).
+const WF_POOL_ROLE_DESIGNATION = {
+  reviewer: "Reviewer",
+  department_head: "Approver",
+  quality_head: "Approver",
+  plant_head: "Plant Head",
+};
+
+function wfPanelFilteredDirectory(directory, pool_role) {
+  const wanted = WF_POOL_ROLE_DESIGNATION[pool_role];
+  if (!wanted) return directory;
+  const filtered = directory.filter(e => e.designation === wanted);
+  return filtered.length ? filtered : directory;
 }
 
 // Document Control redesign (spec §13/§15/§20): routes/qms_documents.py's
@@ -131,7 +168,7 @@ function wfPanelPoolSummaryHTML(step) {
   `;
 }
 
-function wfPanelActionHTML(containerId, recordType, routePrefix, recordId, step, user) {
+function wfPanelActionHTML(containerId, recordType, routePrefix, recordId, step, user, directory) {
   const formId = `wf-panel-${recordType}-${recordId}-${step.step_order}`;
 
   // CAPA's Effectiveness Verification step (routes/qms_capa.py
@@ -164,37 +201,38 @@ function wfPanelActionHTML(containerId, recordType, routePrefix, recordId, step,
 
   const approvers = step.approvers || [];
   if (!approvers.length) {
-    // Document Control redesign (spec §3): this step's approvers must
-    // resolve BY ROLE from the configured Approver Pool (Department Head +
-    // Quality Head mandatory, Plant Head optional) — an Author must never
-    // be asked to type a raw Supabase user id. step.pool_summary is only
-    // ever attached by routes/qms_documents.py::get_workflow (never for
-    // CAPA/Deviation/Change Control), so this branch is Document-Control-
-    // specific; every other module keeps the manual-assignment form below.
+    // Document Control final correction pass: this step's Reviewer/
+    // Department Head/Quality Head/Plant Head is picked directly from the
+    // tenant's existing user directory (GET /users/directory via
+    // UserPicker.loadDirectory/selectHTML) — no Approver Pool
+    // pre-configuration required, no raw Supabase user id ever typed. The
+    // (optional, still-supported) Approver Pool auto-assignment — see
+    // routes/qms_documents.py::_assign_pool_reviewer_if_configured /
+    // _effective_quorum_and_pool_approvers — still pre-fills this step when
+    // a company HAS configured one; this picker is what's shown the rest of
+    // the time, instead of a dead-end "not configured" block. step.pool_summary
+    // is only ever attached by routes/qms_documents.py::get_workflow (never
+    // for CAPA/Deviation/Change Control), so this branch is Document-
+    // Control-specific; every other module keeps the manual-assignment form
+    // below, completely unchanged.
     if (step.pool_summary) {
-      const missingRoles = step.pool_summary.filter(p => !p.configured && !p.optional).map(p => wfPanelRoleLabel(p.pool_role));
-      const isAdmin = user.role === "company_admin";
-      return `
-        <div class="qms-panel-item-meta">
-          No approver is assigned yet — this step resolves automatically from the configured Approver Pool
-          once ${missingRoles.length ? `the missing mandatory role(s) (${missingRoles.join(", ")})` : "it"} are configured.
-        </div>
-        ${wfPanelPoolSummaryHTML(step)}
-        ${isAdmin ? `
-          <div class="qms-form-actions" style="margin-top:8px">
-            <button class="btn-primary" onclick="window.qmsDocOpenApproverPoolSettings && qmsDocOpenApproverPoolSettings()">Configure Approver Pool</button>
+      const rowsId = `${formId}-pool-rows`;
+      const rows = step.pool_summary.map(p => {
+        const options = wfPanelFilteredDirectory(directory, p.pool_role);
+        return `
+          <div class="form-field" style="max-width:320px;margin-top:6px" data-pool-role="${p.pool_role}" data-optional="${p.optional ? "1" : "0"}">
+            <label>${wfPanelRoleLabel(p.pool_role)}${p.optional ? " (Optional)" : ""}</label>
+            ${window.UserPicker ? window.UserPicker.selectHTML(`${rowsId}-${p.pool_role}`, options, "")
+                                 : `<input type="text" id="${rowsId}-${p.pool_role}" placeholder="Select…" />`}
           </div>
-          <details style="margin-top:6px">
-            <summary style="font-size:11.5px;color:var(--text-muted);cursor:pointer">Assign manually for this document only (admin override)</summary>
-            <div class="form-grid" style="margin-top:8px">
-              <div class="form-field"><label>Approver User ID</label><input type="text" id="${formId}-uid" placeholder="Supabase user id" /></div>
-              <div class="form-field"><label>Display Name</label><input type="text" id="${formId}-name" placeholder="Full name" /></div>
-            </div>
-            <div class="qms-form-actions">
-              <button class="btn-secondary" onclick="wfPanelAssign('${containerId}','${recordType}','${routePrefix}',${recordId},${step.step_order},'${formId}')">Assign Approver</button>
-            </div>
-          </details>
-        ` : `<p style="font-size:11.5px;color:var(--text-muted);margin-top:4px">A company_admin must configure the Approver Pool before this step can be decided.</p>`}
+        `;
+      }).join("");
+      return `
+        <div class="qms-panel-item-meta">Select ${step.pool_summary.length > 1 ? "the people" : "the person"} for this step from your company's existing users.</div>
+        <div id="${rowsId}">${rows}</div>
+        <div class="qms-form-actions" style="margin-top:8px">
+          <button class="btn-primary" onclick="wfPanelAssignFromPool('${containerId}','${recordType}','${routePrefix}',${recordId},${step.step_order},'${rowsId}')">Assign</button>
+        </div>
       `;
     }
     return `
@@ -251,6 +289,41 @@ async function wfPanelAssign(containerId, recordType, routePrefix, recordId, ste
   }
 }
 window.wfPanelAssign = wfPanelAssign;
+
+// Document Control final correction pass: submits every picked role
+// (Reviewer alone for 'under_review'; Department Head/Quality Head/
+// Plant Head for 'effective') in ONE call — assign_approvers() REPLACES a
+// step's approver list rather than appending, so one call per role would
+// silently drop whichever was assigned first.
+async function wfPanelAssignFromPool(containerId, recordType, routePrefix, recordId, stepOrder, rowsId) {
+  const fields = Array.from(document.querySelectorAll(`#${rowsId} [data-pool-role]`));
+  const approvers = [];
+  for (const field of fields) {
+    const poolRole = field.dataset.poolRole;
+    const optional = field.dataset.optional === "1";
+    const sel = field.querySelector("select");
+    const userId = sel ? sel.value : "";
+    if (!userId) {
+      if (optional) continue;
+      qmsToast(`Please select a ${wfPanelRoleLabel(poolRole)}`);
+      return;
+    }
+    // UserPicker.selectHTML's option text is "display_name (dept / designation)"
+    // or bare "display_name" with neither — strip the "(...)" suffix either way.
+    const opt = sel.options[sel.selectedIndex];
+    const displayName = opt ? opt.textContent.split(" (")[0] : "";
+    approvers.push({ user_id: userId, display_name: displayName, pool_role: poolRole });
+  }
+  if (!approvers.length) { qmsToast("Please select at least one person"); return; }
+  try {
+    await qmsPostJSON(`${routePrefix}/${recordId}/workflow/steps/${stepOrder}/assign`, { approvers });
+    qmsToast("Assigned");
+    renderWorkflowPanel(containerId, recordType, routePrefix, recordId);
+  } catch (e) {
+    qmsToast("Failed to assign: " + e.message);
+  }
+}
+window.wfPanelAssignFromPool = wfPanelAssignFromPool;
 
 async function wfPanelDelegate(containerId, recordType, routePrefix, recordId, stepOrder, formId) {
   const user_id = prompt("Delegate to — Supabase user id:");
