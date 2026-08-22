@@ -664,11 +664,16 @@ async function qmsDocRenderDraftStepper(id, doc, version) {
 
 // SOP workflow correction (§3): Reviewer/Department Head/Quality Head/Plant
 // Head selectors, populated from the tenant's existing user directory
-// (window.UserPicker, static/js/user_picker.js) — same designation-based
-// soft filter as the Workflow tab's own picker (workflow_panel.js's
-// WF_POOL_ROLE_DESIGNATION/wfPanelFilteredDirectory), reused here rather
-// than re-implemented. Prefilled with the current selection so the Author
-// can change it freely up until Submit for Review actually locks it
+// (window.UserPicker, static/js/user_picker.js). GET /users/directory is
+// the single source of truth for selectable people — every active user is
+// shown for every role, no designation-based filtering (Nutra's real
+// designations are department-qualified, e.g. "Quality Reviewer"/
+// "Production Head", not the generic "Reviewer"/"Approver"/"Plant Head"
+// strings workflow_panel.js's pool-approver picker filters on, so reusing
+// that filter here silently hid every department-qualified user instead of
+// degrading to the full list). The Author is responsible for picking the
+// right person for each role. Prefilled with the current selection so the
+// Author can change it freely up until Submit for Review actually locks it
 // (POST .../assign-chain 409s server-side once the version leaves Draft —
 // see qms_document_database.set_review_chain).
 async function qmsDocRenderChainForm(id, chain) {
@@ -683,12 +688,11 @@ async function qmsDocRenderChainForm(id, chain) {
   ];
   el.innerHTML = roles.map(r => {
     const current = chain[r.role];
-    const options = window.wfPanelFilteredDirectory ? window.wfPanelFilteredDirectory(directory, r.role) : directory;
     return `
       <div class="form-field" style="max-width:320px;margin-top:8px">
         <label>${r.label}${r.optional ? " (Optional)" : ""}</label>
         ${window.UserPicker
-          ? window.UserPicker.selectHTML(`qms-chain-select-${id}-${r.role}`, options, current ? current.user_id : "")
+          ? window.UserPicker.selectHTML(`qms-chain-select-${id}-${r.role}`, directory, current ? current.user_id : "")
           : `<input type="text" id="qms-chain-select-${id}-${r.role}" placeholder="Select…" />`}
       </div>
     `;
