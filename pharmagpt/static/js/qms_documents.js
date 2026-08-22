@@ -29,7 +29,7 @@ async function qmsDocShowList(filters = {}) {
       <div class="qms-header-actions">
         ${((window.PharmaAuth && window.PharmaAuth.getUser()) || {}).role === "company_admin"
           ? `<button class="btn-secondary" onclick="qmsDocOpenApproverPoolSettings()">Configure Approver Pool</button>` : ""}
-        <button class="btn-primary" onclick="qmsDocOpenNew()">+ New Document</button>
+        <button class="btn-primary" onclick="qmsDocOpenNewSOP()">+ New SOP</button>
       </div>
     </div>
     <div class="qms-body">
@@ -236,6 +236,129 @@ async function qmsDocCreate() {
   }
 }
 window.qmsDocCreate = qmsDocCreate;
+
+// ── New SOP wizard (scope-locked: SOP only, two creation methods) ───────────
+// Document Control redesign, SOP workflow correction: the general-purpose
+// qmsDocOpenNew() above still exists for Project Workspace's DQ/FAT/SAT tab
+// (prefilled, non-SOP doc_type — that Validation Suite integration is out of
+// scope for this change and must keep working exactly as before). Every
+// no-prefill "create a document" entry point in the product, however, only
+// ever produced an SOP with an unrelated 12-option type dropdown attached —
+// this replaces those entry points with a minimal, SOP-only flow: Title +
+// Creation Method (Create from Controlled Template | AI-Assisted SOP
+// Creation), with an Equipment/Knowledge Base picker only when AI-Assisted
+// is selected. Both methods create the SOP through the existing
+// create_document()/template_id path — no new lifecycle, no new numbering.
+async function qmsDocOpenNewSOP() {
+  if (window.PharmaAuth && !window.PharmaAuth.requireCompanyContext()) return;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay open";
+  overlay.id = "qms-doc-new-sop-modal";
+  overlay.innerHTML = `
+    <div class="modal open">
+      <div class="modal-header">
+        <h2>Create New SOP</h2>
+        <button class="modal-close" onclick="document.getElementById('qms-doc-new-sop-modal').remove()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-field">
+          <label>Title</label>
+          <input type="text" id="qms-new-sop-title" placeholder="e.g. Cleaning of Tablet Compression Machine" />
+        </div>
+        <div class="form-field" style="margin-top:14px">
+          <label>Creation Method</label>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px">
+            <label style="display:flex;align-items:flex-start;gap:8px;font-weight:400;cursor:pointer">
+              <input type="radio" name="qms-sop-method" value="template" checked onchange="qmsDocSopMethodChanged()" style="margin-top:3px" />
+              <span><strong>Create from Controlled Template</strong><br/>
+                <span style="font-size:11.5px;color:var(--text-muted)">Download the approved SOP template (.docx) and prepare it manually.</span></span>
+            </label>
+            <label style="display:flex;align-items:flex-start;gap:8px;font-weight:400;cursor:pointer">
+              <input type="radio" name="qms-sop-method" value="ai" onchange="qmsDocSopMethodChanged()" style="margin-top:3px" />
+              <span><strong>AI-Assisted SOP Creation</strong><br/>
+                <span style="font-size:11.5px;color:var(--text-muted)">PharmaGPT drafts an initial SOP using controlled Knowledge Base references for the equipment you select. You review and edit before submitting for review — nothing is auto-approved.</span></span>
+            </label>
+          </div>
+        </div>
+        <div class="form-field" id="qms-sop-equipment-field" style="margin-top:14px;display:none">
+          <label>Equipment / Knowledge Base</label>
+          <select id="qms-new-sop-equipment"><option value="">Loading equipment…</option></select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="document.getElementById('qms-doc-new-sop-modal').remove()">Cancel</button>
+        <button class="btn-primary" id="qms-doc-create-sop-btn" onclick="qmsDocCreateSOP()">Create SOP</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  qmsDocLoadEquipmentOptions();
+}
+window.qmsDocOpenNewSOP = qmsDocOpenNewSOP;
+
+function qmsDocSopMethodChanged() {
+  const checked = document.querySelector('input[name="qms-sop-method"]:checked');
+  const field = document.getElementById("qms-sop-equipment-field");
+  if (checked && field) field.style.display = checked.value === "ai" ? "" : "none";
+}
+window.qmsDocSopMethodChanged = qmsDocSopMethodChanged;
+
+async function qmsDocLoadEquipmentOptions() {
+  const sel = document.getElementById("qms-new-sop-equipment");
+  if (!sel) return;
+  try {
+    const equipment = await qmsFetch("/equipment");
+    sel.innerHTML = equipment.length
+      ? `<option value="">Select equipment…</option>` +
+        equipment.map(e => `<option value="${e.id}">${e.name}${e.equipment_code ? " (" + e.equipment_code + ")" : ""}</option>`).join("")
+      : `<option value="">No equipment records found</option>`;
+  } catch (e) {
+    sel.innerHTML = `<option value="">Failed to load equipment</option>`;
+  }
+}
+
+async function qmsDocCreateSOP() {
+  const title = document.getElementById("qms-new-sop-title").value.trim();
+  if (!title) { qmsToast("Title is required"); return; }
+  const methodEl = document.querySelector('input[name="qms-sop-method"]:checked');
+  const method = methodEl ? methodEl.value : "template";
+  const equipmentSel = document.getElementById("qms-new-sop-equipment");
+  const equipmentId = equipmentSel ? equipmentSel.value : "";
+  const btn = document.getElementById("qms-doc-create-sop-btn");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  try {
+    const templates = await qmsFetch(`/qms/documents/templates?doc_type=SOP`);
+    const templateId = templates.length ? templates[0].id : null;
+    const data = { title, doc_type: "SOP" };
+    if (templateId) data.template_id = templateId;
+    const doc = await qmsPostJSON("/qms/documents", data);
+    document.getElementById("qms-doc-new-sop-modal").remove();
+    qmsToast(`Created ${doc.doc_number}`);
+    if (method === "template") {
+      if (templateId) qmsDocDownloadTemplateDocx(templateId);
+      else qmsToast("No controlled SOP template is defined yet — the document was created without one.");
+    }
+    await qmsDocOpenDetail(doc.id);
+    if (method === "ai" && equipmentId) {
+      await qmsDocSwitchTab("content");
+      qmsDocGenerateDraft(doc.id, { equipment_id: Number(equipmentId) });
+    }
+  } catch (e) {
+    qmsToast("Failed to create SOP: " + e.message);
+    btn.disabled = false;
+  }
+}
+window.qmsDocCreateSOP = qmsDocCreateSOP;
+
+function qmsDocDownloadTemplateDocx(templateId) {
+  const a = document.createElement("a");
+  a.href = `/qms/documents/templates/${templateId}/download`;
+  a.download = "";
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+}
+window.qmsDocDownloadTemplateDocx = qmsDocDownloadTemplateDocx;
 
 // ── Detail view ─────────────────────────────────────────────────────────────
 
@@ -726,7 +849,7 @@ async function qmsDocSaveContent(id) {
 }
 window.qmsDocSaveContent = qmsDocSaveContent;
 
-function qmsDocGenerateDraft(id) {
+function qmsDocGenerateDraft(id, extraBody) {
   const editor = document.getElementById("qms-doc-content-editor");
   const reviewBtn = document.getElementById("qms-doc-review-btn");
   const genBtn = document.getElementById("qms-doc-generate-btn");
@@ -737,7 +860,7 @@ function qmsDocGenerateDraft(id) {
   if (reviewBtn) reviewBtn.disabled = true;
   if (genBtn) genBtn.disabled = true;
   qmsToast("Generating draft…");
-  qmsStream(`/qms/documents/${id}/generate`, {}, {
+  qmsStream(`/qms/documents/${id}/generate`, extraBody || {}, {
     onChunk: chunk => { editor.value += chunk; editor.scrollTop = editor.scrollHeight; },
     onDone: (event) => {
       editor.disabled = false;

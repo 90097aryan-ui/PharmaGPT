@@ -121,7 +121,20 @@ def build_draft_prompt(info: dict, knowledge_base: str = "", template: dict | No
     template."""
     ctx = _doc_context(info)
     doc_type = info.get("doc_type", "SOP")
-    kb_section = f"\nRELEVANT KNOWLEDGE BASE CONTEXT:\n{knowledge_base}\n" if knowledge_base else ""
+    # AI-Assisted SOP Creation (spec §4): equipment-derived Knowledge Base
+    # context is retrieved and passed in verbatim — this instruction is what
+    # stops the model from inventing equipment-specific technical detail the
+    # retrieved context doesn't actually contain.
+    kb_section = (
+        f"\nRELEVANT KNOWLEDGE BASE CONTEXT (retrieved equipment/manufacturer documentation):\n"
+        f"{knowledge_base}\n\n"
+        "Use ONLY the information above for equipment-specific technical detail (operating "
+        "parameters, settings, cleaning agents, safety precautions, maintenance intervals, etc.). "
+        "Do NOT invent or assume any such detail that is not present above — where the Knowledge "
+        "Base context does not cover something the controlled structure requires, write "
+        "\"[INFORMATION GAP — not found in Knowledge Base; confirm with equipment owner/manual]\" "
+        "at that point instead of fabricating a value.\n"
+    ) if knowledge_base else ""
 
     if template and template.get("structure"):
         structure_block = _format_template_structure_block(template["structure"])

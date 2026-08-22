@@ -18,7 +18,11 @@ PUT    /qms/documents/<id>                   update document fields (effective_d
                                               see _AUTHOR_READONLY_FIELDS)
 DELETE /qms/documents/<id>                   delete document
 
-POST   /qms/documents/<id>/generate          AI draft generation (SSE stream)
+POST   /qms/documents/<id>/generate          AI draft generation (SSE stream). Body may carry
+                                              `equipment_id` (AI-Assisted SOP Creation, spec §4) to
+                                              retrieve that equipment's linked Knowledge Base
+                                              documents as generation context, instead of/in
+                                              addition to a raw `knowledge_base` string.
 POST   /qms/documents/<id>/review            AI regulatory compliance review
 
 POST   /qms/documents/<id>/self-check        Author Self-Check hard gate
@@ -54,6 +58,10 @@ POST   /qms/documents/<id>/approval          status transition + e-signature ent
 
 GET    /qms/documents/<id>/report            markdown report (preview / print)
 POST   /qms/documents/<id>/export/docx       DOCX export
+
+GET    /qms/documents/templates/<tid>/download   blank Controlled Template as DOCX (SOP
+                                              creation workflow, Option 1 "Create from
+                                              Controlled Template") — no document required
 """
 
 import io
@@ -171,6 +179,31 @@ def get_template_route(tid):
     return jsonify(template)
 
 
+@bp.route("/templates/<int:tid>/download", methods=["GET"])
+def download_template_docx(tid):
+    """Manual SOP path (spec §2/§9, Option 1 "Create from Controlled
+    Template"): the blank controlled template as a real DOCX — headings/
+    sub-headings only, no procedure content — for the author to prepare
+    offline in Word. Reuses the same DOCX pipeline as document export
+    (doc_exporter.markdown_to_docx / services/docx_generator.py) so the file
+    is a genuine .docx package, never a renamed .md."""
+    if not g.tenant.company_id:
+        return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
+    template = qdb.get_template(tid)
+    if not template or (template["company_id"] not in ("", g.tenant.company_id)):
+        return jsonify({"error": "Not found"}), 404
+    from pharmagpt.services.doc_exporter import markdown_to_docx
+    md = svc.render_template_skeleton_markdown(template)
+    docx_bytes = markdown_to_docx(md, template.get("doc_type", "SOP"), {"title": template.get("name", "")})
+    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", template.get("name", "Controlled_Template"))[:60]
+    return send_file(
+        io.BytesIO(docx_bytes),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        as_attachment=True,
+        download_name=f"{safe_name}.docx",
+    )
+
+
 # ── Approver pool (Document Control redesign, Phase 3) ───────────────────────
 # Department Head + Quality Head/Designee mandatory, Plant Head optional.
 # Company-admin only — this configures who the final Approval stage's
@@ -279,7 +312,17 @@ def generate_draft(did):
 
     info = {**document, **body}
     template = qdb.get_template(document["template_id"]) if document.get("template_id") else None
-    prompt = qp.build_draft_prompt(info, body.get("knowledge_base", ""), template=template)
+    # AI-Assisted SOP Creation (spec §4): equipment_id resolves to that
+    # equipment's linked Knowledge Base documents (manuals, vendor docs,
+    # existing controlled references) — retrieved server-side so the
+    # frontend never has to assemble or transmit KB content itself. Falls
+    # back to a raw `knowledge_base` string for backward compatibility with
+    # any existing caller that doesn't pass equipment_id.
+    knowledge_base = body.get("knowledge_base", "")
+    equipment_id = body.get("equipment_id")
+    if equipment_id:
+        knowledge_base = svc.build_equipment_knowledge_base_context(int(equipment_id), g.tenant.company_id)
+    prompt = qp.build_draft_prompt(info, knowledge_base, template=template)
 
     def stream():
         full = ""

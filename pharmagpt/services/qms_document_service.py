@@ -8,10 +8,17 @@ non-streamed AI review and the markdown report builder used for DOCX export.
 
 from __future__ import annotations
 
+from pharmagpt import database as db
+from pharmagpt import equipment_database as equipdb
 from pharmagpt import qms_document_database as qdb
 from pharmagpt import qms_database as qmsdb
 from pharmagpt.prompts import qms_document_prompt as qp
 from pharmagpt.services.qms_shared import call_gemini, parse_json_response
+
+# Cap per-document text pulled into the AI prompt so one huge manual can't
+# blow the model's context window; still large enough to carry a full
+# equipment manual's relevant sections.
+_KB_CONTEXT_CHAR_LIMIT = 8000
 
 
 def ai_review_document(document_id: int) -> dict:
@@ -36,6 +43,61 @@ def ai_review_document(document_id: int) -> dict:
 
     qdb.update_document(document_id, {"ai_review_data": review_data})
     return review_data
+
+
+def build_equipment_knowledge_base_context(equipment_id: int, company_id: str) -> str:
+    """AI-Assisted SOP Creation (spec §4): assemble equipment basics + the
+    extracted text of every Knowledge Base document linked to this
+    Equipment, for use as build_draft_prompt()'s `knowledge_base` context.
+
+    Tenant-scoped via equipment_database.get_equipment_scoped — never
+    resolves an equipment record belonging to another company. Returns ""
+    (no context) if the equipment doesn't exist/isn't in this tenant, which
+    build_draft_prompt() treats the same as no Knowledge Base reference at
+    all — never invents a fallback."""
+    equipment = equipdb.get_equipment_scoped(equipment_id, company_id)
+    if not equipment:
+        return ""
+
+    lines = [f"Equipment: {equipment.get('name', '')} ({equipment.get('equipment_code', '')})"]
+    for field, label in (
+        ("equipment_type", "Type"), ("model", "Model"), ("manufacturer", "Manufacturer"),
+        ("tag_number", "Tag Number"), ("plant", "Plant"), ("department", "Department"), ("area", "Area"),
+    ):
+        val = equipment.get(field)
+        if val:
+            lines.append(f"  {label}: {val}")
+
+    links = [l for l in equipdb.list_equipment_documents(equipment_id) if l.get("resolved")]
+    if not links:
+        lines.append("\nNo controlled reference documents are linked to this equipment in the "
+                      "Knowledge Base — no equipment-specific source material is available.")
+        return "\n".join(lines)
+
+    lines.append("\nLinked controlled reference documents:")
+    for link in links:
+        lines.append(f"\n--- {link.get('document_role', 'Reference')}: {link.get('display_title', '')} ---")
+        if link.get("source_type") != "kb":
+            continue
+        kb_doc = db.get_kb_document(link["source_id"])
+        text = (kb_doc or {}).get("text_content") or ""
+        lines.append(text[:_KB_CONTEXT_CHAR_LIMIT] if text else "(no extracted text available for this document)")
+
+    return "\n".join(lines)
+
+
+def render_template_skeleton_markdown(template: dict) -> str:
+    """Manual SOP path (spec §2, Option 1): the blank, fillable structure of
+    a Controlled SOP Template — headings/sub-headings only, no procedure
+    content — for the "Create from Controlled Template" download. Feeds
+    doc_exporter.markdown_to_docx the same way an authored document's report
+    does, so the download is a real, correctly-formatted DOCX."""
+    lines = [f"# {template.get('name', 'Controlled Template')}"]
+    for heading in template.get("structure") or []:
+        lines.append(f"\n## {heading.get('heading', '')}\n")
+        for sub in heading.get("sub_headings") or []:
+            lines.append(f"### {sub}\n")
+    return "\n".join(lines)
 
 
 def generate_report_markdown(document_id: int, version_id: int | None = None) -> str:
