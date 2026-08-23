@@ -39,6 +39,33 @@ def _reauth(ok=True):
 # never actually be re-read by conftest.py's before_request shim.
 
 
+CALLER_USER_ID = "00000000-0000-0000-0000-000000000001"  # tests/conftest.py's fixed client-fixture tenant (Author)
+
+# P0 stabilization: segregation of duties forbids the Author from also being
+# an approver, so Reviewer/Department Head/Quality Head are distinct
+# identities here — _as() switches the active identity mid-test so a decide
+# call is made AS that role's actual assigned user_id.
+REVIEWER_USER_ID = "00000000-0000-0000-0000-000000000002"
+DEPT_HEAD_USER_ID = "00000000-0000-0000-0000-000000000003"
+QUALITY_HEAD_USER_ID = "00000000-0000-0000-0000-000000000004"
+
+
+def _as(monkeypatch, user_id, display_name, role="user"):
+    from pharmagpt.auth.context import TenantContext
+    import tests.conftest as conftest_module
+    ctx = TenantContext(user_id=user_id, email=f"{user_id}@example.com", display_name=display_name,
+                         role=role, company_id=conftest_module._TEST_TENANT.company_id)
+    monkeypatch.setattr(conftest_module, "_TEST_TENANT", ctx)
+
+
+def _as_author(monkeypatch):
+    """Restore the active identity to the Author (tests/conftest.py's
+    default client-fixture tenant, role=company_admin) — every test in this
+    file expects the DEFAULT identity to be able to add training/release
+    unless it explicitly switches roles itself afterward."""
+    _as(monkeypatch, CALLER_USER_ID, "Test User", role="company_admin")
+
+
 def _upload_final_version(client, did, text=b"final content"):
     r = client.post(
         f"/qms/documents/{did}/versions/upload",
@@ -48,37 +75,43 @@ def _upload_final_version(client, did, text=b"final content"):
     assert r.status_code == 201, r.get_json()
 
 
-def _assign_chain(client, did, caller_user_id="00000000-0000-0000-0000-000000000001"):
+def _assign_chain(client, did):
     """SOP workflow correction: Submit for Review now requires the Author to
     have assigned a complete Reviewer/Department Head/Quality Head chain
     first (Plant Head optional — never assigned here, so its step
-    auto-skips). Every step below is decided by this SAME caller, so
-    assigning `caller_user_id` to every required role lets each sequential
-    decide call in this file succeed."""
+    auto-skips)."""
     r = client.post(f"/qms/documents/{did}/assign-chain", json={
-        "reviewer_user_id": caller_user_id, "reviewer_name": "Rita",
-        "department_head_user_id": caller_user_id, "department_head_name": "Al",
-        "quality_head_user_id": caller_user_id, "quality_head_name": "Quinn",
+        "reviewer_user_id": REVIEWER_USER_ID, "reviewer_name": "Rita",
+        "department_head_user_id": DEPT_HEAD_USER_ID, "department_head_name": "Al",
+        "quality_head_user_id": QUALITY_HEAD_USER_ID, "quality_head_name": "Quinn",
     })
     assert r.status_code == 200, r.get_json()
 
 
-def _reach_approved_via_route(client, caller_user_id="00000000-0000-0000-0000-000000000001"):
+def _reach_approved_via_route(client, monkeypatch):
     """Drives through the now-sequential Department Head (step 3) -> Quality
     Head (step 4) approval — Plant Head (step 5) auto-skips since none is
-    assigned."""
+    assigned. Restores the active identity to the Author/company_admin
+    before returning, since every caller of this helper goes on to add
+    training and/or call /release next (unless it explicitly switches
+    identity itself afterward, as test_author_role_cannot_release and
+    test_reviewer_qa_role_can_release do)."""
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "content": "x"}).get_json()
     did = doc["id"]
     client.post(f"/qms/documents/{did}/self-check")
     _upload_final_version(client, did)
-    _assign_chain(client, did, caller_user_id)
+    _assign_chain(client, did)
     client.post(f"/qms/documents/{did}/workflow/start")
+    _as(monkeypatch, REVIEWER_USER_ID, "Rita")
     with _reauth(True):
         client.post(f"/qms/documents/{did}/workflow/steps/2/decide", json={"decision": "approve", **SIGN})
+    _as(monkeypatch, DEPT_HEAD_USER_ID, "Al")
     with _reauth(True):
         client.post(f"/qms/documents/{did}/workflow/steps/3/decide", json={"decision": "approve", **SIGN})
+    _as(monkeypatch, QUALITY_HEAD_USER_ID, "Quinn")
     with _reauth(True):
         client.post(f"/qms/documents/{did}/workflow/steps/4/decide", json={"decision": "approve", **SIGN})
+    _as_author(monkeypatch)
     return did
 
 
@@ -90,8 +123,8 @@ def test_release_blocked_before_approval_reached(client):
     assert "not awaiting release" in r.get_json()["error"] or "approval" in r.get_json()["error"].lower()
 
 
-def test_release_blocked_when_training_not_cleared(client):
-    did = _reach_approved_via_route(client)
+def test_release_blocked_when_training_not_cleared(client, monkeypatch):
+    did = _reach_approved_via_route(client, monkeypatch)
     assert client.get(f"/qms/documents/{did}").get_json()["status"] == "Approved"
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/release", json=SIGN)
@@ -100,8 +133,8 @@ def test_release_blocked_when_training_not_cleared(client):
     assert client.get(f"/qms/documents/{did}").get_json()["status"] == "Approved"
 
 
-def test_release_succeeds_once_approved_and_training_cleared(client):
-    did = _reach_approved_via_route(client)
+def test_release_succeeds_once_approved_and_training_cleared(client, monkeypatch):
+    did = _reach_approved_via_route(client, monkeypatch)
     t = client.post(f"/qms/documents/{did}/training", json={"trainee_name": "Trainee One"}).get_json()
     with _reauth(True):
         client.put(f"/qms/documents/training/{t['id']}",
@@ -124,7 +157,7 @@ def test_author_role_cannot_release(client, monkeypatch):
     from pharmagpt.auth.context import TenantContext
     import tests.conftest as conftest_module
 
-    did = _reach_approved_via_route(client)
+    did = _reach_approved_via_route(client, monkeypatch)
     t = client.post(f"/qms/documents/{did}/training", json={"trainee_name": "Trainee One"}).get_json()
     with _reauth(True):
         client.put(f"/qms/documents/training/{t['id']}",
@@ -146,7 +179,7 @@ def test_reviewer_qa_role_can_release(client, monkeypatch):
     from pharmagpt.auth.context import TenantContext
     import tests.conftest as conftest_module
 
-    did = _reach_approved_via_route(client)
+    did = _reach_approved_via_route(client, monkeypatch)
     t = client.post(f"/qms/documents/{did}/training", json={"trainee_name": "Trainee One"}).get_json()
     with _reauth(True):
         client.put(f"/qms/documents/training/{t['id']}",
@@ -164,9 +197,9 @@ def test_reviewer_qa_role_can_release(client, monkeypatch):
     assert r.get_json()["status"] == "Effective"
 
 
-def test_existing_effective_sop_becomes_2_0_on_next_release(client):
+def test_existing_effective_sop_becomes_2_0_on_next_release(client, monkeypatch):
     """1.x -> 2.0 on release, matching the new-SOP 0.x -> 1.0 case."""
-    did = _reach_approved_via_route(client)
+    did = _reach_approved_via_route(client, monkeypatch)
     t = client.post(f"/qms/documents/{did}/training", json={"trainee_name": "T1"}).get_json()
     with _reauth(True):
         client.put(f"/qms/documents/training/{t['id']}",
@@ -181,12 +214,16 @@ def test_existing_effective_sop_becomes_2_0_on_next_release(client):
     # The chain assigned on the first cycle is stored on the document itself
     # (not per-version) and still applies — no need to reassign.
     client.post(f"/qms/documents/{did}/workflow/start")
+    _as(monkeypatch, REVIEWER_USER_ID, "Rita")
     with _reauth(True):
         client.post(f"/qms/documents/{did}/workflow/steps/2/decide", json={"decision": "approve", **SIGN})
+    _as(monkeypatch, DEPT_HEAD_USER_ID, "Al")
     with _reauth(True):
         client.post(f"/qms/documents/{did}/workflow/steps/3/decide", json={"decision": "approve", **SIGN})
+    _as(monkeypatch, QUALITY_HEAD_USER_ID, "Quinn")
     with _reauth(True):
         client.post(f"/qms/documents/{did}/workflow/steps/4/decide", json={"decision": "approve", **SIGN})
+    _as_author(monkeypatch)
 
     t2 = client.post(f"/qms/documents/{did}/training", json={"trainee_name": "T2"}).get_json()
     with _reauth(True):
@@ -224,7 +261,7 @@ def test_manual_create_version_allowed_for_company_admin(client):
 
 # ── §8: Review Date is system-stamped, never author-supplied ─────────────────
 
-def test_review_date_is_auto_stamped_on_review_acceptance(client):
+def test_review_date_is_auto_stamped_on_review_acceptance(client, monkeypatch):
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "content": "x"}).get_json()
     did = doc["id"]
     assert not doc.get("review_date")
@@ -233,6 +270,7 @@ def test_review_date_is_auto_stamped_on_review_acceptance(client):
     _upload_final_version(client, did)
     _assign_chain(client, did)
     client.post(f"/qms/documents/{did}/workflow/start")
+    _as(monkeypatch, REVIEWER_USER_ID, "Rita")
     with _reauth(True):
         client.post(f"/qms/documents/{did}/workflow/steps/2/decide", json={"decision": "approve", **SIGN})
 
@@ -254,8 +292,8 @@ def test_review_date_and_effective_date_ignored_from_author_put(client):
 
 # ── §18: Distribution never blocks effectiveness ──────────────────────────────
 
-def test_distribution_never_blocks_release(client):
-    did = _reach_approved_via_route(client)
+def test_distribution_never_blocks_release(client, monkeypatch):
+    did = _reach_approved_via_route(client, monkeypatch)
     # No distribution entries added at all, and no acknowledgement either.
     t = client.post(f"/qms/documents/{did}/training", json={"trainee_name": "Trainee One"}).get_json()
     with _reauth(True):

@@ -170,35 +170,56 @@ def test_approval_holds_at_approved_even_if_training_already_cleared_until_relea
     assert version["effective_date"]
 
 
-def test_training_completion_after_approval_requires_explicit_release_via_route(client):
-    # The `client` fixture's fake tenant (tests/conftest.py) always acts as
-    # this fixed user_id — every role in the assigned chain must match it
-    # for decide_step()'s "only a named assignee may decide" check to pass
-    # at each of the (now sequential) steps.
-    caller_user_id = "00000000-0000-0000-0000-000000000001"
+def _as(monkeypatch, user_id, display_name, role="user"):
+    """Switch the client fixture's active identity mid-test. This file's
+    autouse _app_context fixture holds one Flask app context open for the
+    whole test (needed by the many bare wfe.*/qdb.* calls above), so the
+    SAME `g` is reused across every client.post() call — clearing g.tenant
+    forces the before_request shim to re-populate it from the (now updated)
+    _TEST_TENANT on the next request."""
+    from flask import g as flask_g
+    from pharmagpt.auth.context import TenantContext
+    import tests.conftest as conftest_module
+    ctx = TenantContext(user_id=user_id, email=f"{user_id}@example.com", display_name=display_name,
+                         role=role, company_id=conftest_module._TEST_TENANT.company_id)
+    monkeypatch.setattr(conftest_module, "_TEST_TENANT", ctx)
+    flask_g.pop("tenant", None)
+
+
+def test_training_completion_after_approval_requires_explicit_release_via_route(client, monkeypatch):
+    # P0 stabilization: segregation of duties forbids the Author (the
+    # `client` fixture's fixed tenant user_id) from also being an approver,
+    # so Reviewer/Department Head/Quality Head are distinct identities here.
+    reviewer_user_id = "00000000-0000-0000-0000-000000000002"
+    dept_head_user_id = "00000000-0000-0000-0000-000000000003"
+    quality_head_user_id = "00000000-0000-0000-0000-000000000004"
 
     doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "content": "x"}).get_json()
     did = doc["id"]
     client.post(f"/qms/documents/{did}/self-check")  # Phase 5 hard gate
     _upload_final_version(client, did)
     client.post(f"/qms/documents/{did}/assign-chain", json={
-        "reviewer_user_id": caller_user_id, "reviewer_name": "Rita",
-        "department_head_user_id": caller_user_id, "department_head_name": "Al",
-        "quality_head_user_id": caller_user_id, "quality_head_name": "Quinn",
+        "reviewer_user_id": reviewer_user_id, "reviewer_name": "Rita",
+        "department_head_user_id": dept_head_user_id, "department_head_name": "Al",
+        "quality_head_user_id": quality_head_user_id, "quality_head_name": "Quinn",
     })
     client.post(f"/qms/documents/{did}/workflow/start")
+    _as(monkeypatch, reviewer_user_id, "Rita")
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/workflow/steps/2/decide",
                          json={"decision": "approve", **SIGN})
     assert r.status_code == 200, r.get_json()
+    _as(monkeypatch, dept_head_user_id, "Al")
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/workflow/steps/3/decide",
                          json={"decision": "approve", **SIGN})
     assert r.status_code == 200, r.get_json()
+    _as(monkeypatch, quality_head_user_id, "Quinn")
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/workflow/steps/4/decide",
                          json={"decision": "approve", **SIGN})
     assert r.status_code == 200, r.get_json()
+    _as(monkeypatch, "00000000-0000-0000-0000-000000000001", "Test User", role="company_admin")
 
     assert client.get(f"/qms/documents/{did}").get_json()["status"] == "Approved"
 

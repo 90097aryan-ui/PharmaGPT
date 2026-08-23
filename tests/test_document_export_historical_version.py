@@ -2,22 +2,22 @@
 tests/test_document_export_historical_version.py — Phase 5 coverage:
 exporting a specific historical (immutable) version's frozen content,
 distinct from the document's live current state.
+
+Deliberately no autouse app_context fixture (see test_document_quality_
+release.py's identical note / feedback_flask_test_app_context_gotcha) —
+holding one open across every client.post() call in a test makes Flask
+reuse that single `g` for every request instead of pushing a fresh one per
+call, so a mid-test TenantContext monkeypatch would never actually be
+re-read by conftest.py's before_request shim. The bare qdb.get_current_
+version() calls below don't need an app context at all — database.py's
+DB_PATH is a plain module attribute, not Flask-app-bound.
 """
 
 import io
 
-import pytest
-
 from pharmagpt import qms_document_database as qdb
 from pharmagpt.services import workflow_engine as wfe
 from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID as COMPANY_ID
-
-
-@pytest.fixture(autouse=True)
-def _app_context():
-    import pharmagpt.app as appmod
-    with appmod.app.app_context():
-        yield
 
 
 def test_report_defaults_to_current_content(client):
@@ -26,12 +26,15 @@ def test_report_defaults_to_current_content(client):
     assert "current text" in r.get_json()["markdown"]
 
 
-def test_report_with_version_id_returns_historical_frozen_content(client):
+def test_report_with_version_id_returns_historical_frozen_content(client, monkeypatch):
     doc = client.post("/qms/documents", json={"title": "Doc", "content": "original v0.1 text"}).get_json()
     did = doc["id"]
     v0 = qdb.get_current_version(did)
 
-    caller_user_id = "00000000-0000-0000-0000-000000000001"  # the `client` fixture's fixed tenant user_id
+    # P0 stabilization: segregation of duties forbids the Author (the
+    # `client` fixture's fixed tenant user_id) from also being an approver,
+    # so Reviewer/Department Head/Quality Head are distinct identities here.
+    reviewer_user_id = "00000000-0000-0000-0000-000000000002"
     client.post(f"/qms/documents/{did}/self-check")
     client.post(
         f"/qms/documents/{did}/versions/upload",
@@ -41,11 +44,16 @@ def test_report_with_version_id_returns_historical_frozen_content(client):
     # SOP workflow correction: Submit for Review requires the Author to have
     # assigned a complete Reviewer/Department Head/Quality Head chain first.
     client.post(f"/qms/documents/{did}/assign-chain", json={
-        "reviewer_user_id": caller_user_id, "reviewer_name": "Rita",
-        "department_head_user_id": caller_user_id, "department_head_name": "Al",
-        "quality_head_user_id": caller_user_id, "quality_head_name": "Quinn",
+        "reviewer_user_id": reviewer_user_id, "reviewer_name": "Rita",
+        "department_head_user_id": "00000000-0000-0000-0000-000000000003", "department_head_name": "Al",
+        "quality_head_user_id": "00000000-0000-0000-0000-000000000004", "quality_head_name": "Quinn",
     })
     client.post(f"/qms/documents/{did}/workflow/start")
+    from pharmagpt.auth.context import TenantContext
+    import tests.conftest as conftest_module
+    monkeypatch.setattr(conftest_module, "_TEST_TENANT", TenantContext(
+        user_id=reviewer_user_id, email="reviewer@example.com", display_name="Rita",
+        role="user", company_id=conftest_module._TEST_TENANT.company_id))
     r = client.post(f"/qms/documents/{did}/workflow/steps/2/decide",
                      json={"decision": "reject", "meaning": "Rejected", "reason": "x", "comments": "Needs rework"})
     assert r.status_code == 200, r.get_json()

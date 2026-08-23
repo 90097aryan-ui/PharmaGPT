@@ -172,7 +172,7 @@ def test_inbox_lists_pending_capa_and_change_control_immediately(client):
     assert all(i["step_type"] == "activity" for i in items)
 
 
-def test_inbox_lists_pending_document_once_assigned(client):
+def test_inbox_lists_pending_document_once_assigned(client, monkeypatch):
     # DOCUMENT_WORKFLOW_V1's step 2 ("under_review") is an approval step.
     # SOP workflow correction: the Author now assigns the complete Reviewer/
     # Department Head/Quality Head chain via POST .../assign-chain BEFORE
@@ -190,13 +190,23 @@ def test_inbox_lists_pending_document_once_assigned(client):
     )  # spec §10/§11 hard gate
     assert client.get("/workflow/inbox").get_json() == []
 
+    # P0 stabilization: segregation of duties forbids the Author
+    # (_FIXED_USER_ID) from also being the Reviewer, so a distinct identity
+    # is assigned here — and the active identity switches to it before
+    # checking the inbox, since the inbox is scoped to "my" pending items.
+    reviewer_user_id = "00000000-0000-0000-0000-000000000002"
     client.post(f"/qms/documents/{did}/assign-chain", json={
-        "reviewer_user_id": _ASSIGN["approvers"][0]["user_id"],
-        "reviewer_name": _ASSIGN["approvers"][0]["display_name"],
+        "reviewer_user_id": reviewer_user_id,
+        "reviewer_name": "Rita",
         "department_head_user_id": "dh-1", "department_head_name": "Dana",
         "quality_head_user_id": "qh-1", "quality_head_name": "Quinn",
     })
     client.post(f"/qms/documents/{did}/workflow/start")
+    from pharmagpt.auth.context import TenantContext
+    import tests.conftest as conftest_module
+    monkeypatch.setattr(conftest_module, "_TEST_TENANT", TenantContext(
+        user_id=reviewer_user_id, email="reviewer@example.com", display_name="Rita",
+        role="user", company_id=conftest_module._TEST_TENANT.company_id))
     items = client.get("/workflow/inbox").get_json()
     assert len(items) == 1
     assert items[0]["module"] == "document"

@@ -33,10 +33,32 @@ SIGN = {"password": "correct-password", "meaning": "Approved", "reason": "Looks 
 # _NAME constants keep each role's assigned display_name distinguishable in
 # assertions even though the underlying user_id is shared.
 CALLER_USER_ID = "00000000-0000-0000-0000-000000000001"
-REVIEWER = {"reviewer_user_id": CALLER_USER_ID, "reviewer_name": "Rita Reviewer"}
-DEPT_HEAD = {"department_head_user_id": CALLER_USER_ID, "department_head_name": "Dana Head"}
-QUALITY_HEAD = {"quality_head_user_id": CALLER_USER_ID, "quality_head_name": "Quinn Head"}
-PLANT_HEAD = {"plant_head_user_id": CALLER_USER_ID, "plant_head_name": "Pat Head"}
+
+# P0 stabilization: CALLER_USER_ID is the Author (the fixed client-fixture
+# identity that creates every document in this file). Segregation of duties
+# now forbids the Author from also being any approver, so each role below is
+# a distinct identity — _as() switches the active identity mid-test so a
+# decide call is made AS that role's actual assigned user_id.
+REVIEWER_USER_ID = "00000000-0000-0000-0000-000000000002"
+DEPT_HEAD_USER_ID = "00000000-0000-0000-0000-000000000003"
+QUALITY_HEAD_USER_ID = "00000000-0000-0000-0000-000000000004"
+PLANT_HEAD_USER_ID = "00000000-0000-0000-0000-000000000005"
+REVIEWER = {"reviewer_user_id": REVIEWER_USER_ID, "reviewer_name": "Rita Reviewer"}
+DEPT_HEAD = {"department_head_user_id": DEPT_HEAD_USER_ID, "department_head_name": "Dana Head"}
+QUALITY_HEAD = {"quality_head_user_id": QUALITY_HEAD_USER_ID, "quality_head_name": "Quinn Head"}
+PLANT_HEAD = {"plant_head_user_id": PLANT_HEAD_USER_ID, "plant_head_name": "Pat Head"}
+
+
+def _as(monkeypatch, user_id, display_name, role="user"):
+    """Switch the client fixture's active identity mid-test (see
+    conftest.py's before_request shim) so a workflow decision is made AS
+    the role's actual assigned user_id, now that segregation of duties
+    forbids the Author identity from holding any approver role."""
+    from pharmagpt.auth.context import TenantContext
+    import tests.conftest as conftest_module
+    ctx = TenantContext(user_id=user_id, email=f"{user_id}@example.com", display_name=display_name,
+                         role=role, company_id=conftest_module._TEST_TENANT.company_id)
+    monkeypatch.setattr(conftest_module, "_TEST_TENANT", ctx)
 
 
 def _reauth(ok=True):
@@ -74,10 +96,10 @@ def test_author_sees_chain_as_unassigned_on_a_new_document(client):
 def test_author_can_assign_full_chain(client):
     did = _create_submittable(client)
     chain = _assign_full_chain(client, did)
-    assert chain["reviewer"] == {"user_id": CALLER_USER_ID, "display_name": "Rita Reviewer"}
-    assert chain["department_head"] == {"user_id": CALLER_USER_ID, "display_name": "Dana Head"}
-    assert chain["quality_head"] == {"user_id": CALLER_USER_ID, "display_name": "Quinn Head"}
-    assert chain["plant_head"] == {"user_id": CALLER_USER_ID, "display_name": "Pat Head"}
+    assert chain["reviewer"] == {"user_id": REVIEWER_USER_ID, "display_name": "Rita Reviewer"}
+    assert chain["department_head"] == {"user_id": DEPT_HEAD_USER_ID, "display_name": "Dana Head"}
+    assert chain["quality_head"] == {"user_id": QUALITY_HEAD_USER_ID, "display_name": "Quinn Head"}
+    assert chain["plant_head"] == {"user_id": PLANT_HEAD_USER_ID, "display_name": "Pat Head"}
 
 
 def test_plant_head_is_optional(client):
@@ -108,11 +130,11 @@ def test_author_can_change_selections_before_submission_not_locked_out(client):
     # ...but a document with no chain assigned yet is never "locked" —
     # the Author can simply submit a fresh complete call afterward.
     chain = _assign_full_chain(client, did)
-    assert chain["reviewer"]["user_id"] == CALLER_USER_ID
+    assert chain["reviewer"]["user_id"] == REVIEWER_USER_ID
 
     # And can change it again — still Draft, still unlocked.
     r2 = client.post(f"/qms/documents/{did}/assign-chain", json={
-        **DEPT_HEAD, **QUALITY_HEAD, "reviewer_user_id": CALLER_USER_ID, "reviewer_name": "Rachel Reviewer",
+        **DEPT_HEAD, **QUALITY_HEAD, "reviewer_user_id": REVIEWER_USER_ID, "reviewer_name": "Rachel Reviewer",
     })
     assert r2.status_code == 200
     assert r2.get_json()["reviewer"]["display_name"] == "Rachel Reviewer"
@@ -182,45 +204,52 @@ def test_generic_workflow_assign_endpoint_is_disabled_for_documents(client):
 
 # ── C. Strictly sequential Department Head -> Quality Head -> Plant Head ────
 
-def _advance_review(client, did):
+def _advance_review(client, did, monkeypatch):
+    _as(monkeypatch, REVIEWER_USER_ID, "Rita Reviewer")
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/workflow/steps/2/decide", json={"decision": "approve", **SIGN})
     assert r.status_code == 200, r.get_json()
     return r.get_json()
 
 
-def test_department_head_cannot_act_before_review_is_accepted(client):
+def test_department_head_cannot_act_before_review_is_accepted(client, monkeypatch):
     did = _create_submittable(client)
     _assign_full_chain(client, did)
     client.post(f"/qms/documents/{did}/workflow/start")
-    # step 3 (department_head_approval) is NOT current yet — step 2 is
+    # step 3 (department_head_approval) is NOT current yet — step 2 is.
+    # Acting AS the rightful Department Head isolates the order violation
+    # from an identity mismatch.
+    _as(monkeypatch, DEPT_HEAD_USER_ID, "Dana Head")
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/workflow/steps/3/decide", json={"decision": "approve", **SIGN})
     assert r.status_code == 409
 
 
-def test_quality_head_cannot_act_before_department_head_approves(client):
+def test_quality_head_cannot_act_before_department_head_approves(client, monkeypatch):
     did = _create_submittable(client)
     _assign_full_chain(client, did)
     client.post(f"/qms/documents/{did}/workflow/start")
-    _advance_review(client, did)
+    _advance_review(client, did, monkeypatch)
     # step 4 (quality_head_approval) is NOT current yet — step 3 is
+    _as(monkeypatch, QUALITY_HEAD_USER_ID, "Quinn Head")
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/workflow/steps/4/decide", json={"decision": "approve", **SIGN})
     assert r.status_code == 409
 
 
-def test_full_sequential_chain_with_plant_head_assigned(client):
+def test_full_sequential_chain_with_plant_head_assigned(client, monkeypatch):
     did = _create_submittable(client)
     _assign_full_chain(client, did, include_plant_head=True)
     client.post(f"/qms/documents/{did}/workflow/start")
 
-    _advance_review(client, did)
+    _advance_review(client, did, monkeypatch)
+    _as(monkeypatch, DEPT_HEAD_USER_ID, "Dana Head")
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/workflow/steps/3/decide", json={"decision": "approve", **SIGN})
     assert r.status_code == 200, r.get_json()
     assert next(s for s in r.get_json()["steps"] if s["step_order"] == 3)["status"] == "approved"
 
+    _as(monkeypatch, QUALITY_HEAD_USER_ID, "Quinn Head")
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/workflow/steps/4/decide", json={"decision": "approve", **SIGN})
     assert r.status_code == 200, r.get_json()
@@ -228,8 +257,9 @@ def test_full_sequential_chain_with_plant_head_assigned(client):
     assert next(s for s in state["steps"] if s["step_order"] == 4)["status"] == "approved"
     step5 = next(s for s in state["steps"] if s["step_order"] == 5)
     assert step5["status"] == "pending"
-    assert {a["user_id"] for a in step5["approvers"]} == {CALLER_USER_ID}
+    assert {a["user_id"] for a in step5["approvers"]} == {PLANT_HEAD_USER_ID}
 
+    _as(monkeypatch, PLANT_HEAD_USER_ID, "Pat Head")
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/workflow/steps/5/decide", json={"decision": "approve", **SIGN})
     assert r.status_code == 200, r.get_json()
@@ -239,14 +269,16 @@ def test_full_sequential_chain_with_plant_head_assigned(client):
     assert qdb.get_current_version(did)["status"] == "approved"
 
 
-def test_plant_head_step_auto_skipped_when_not_assigned(client):
+def test_plant_head_step_auto_skipped_when_not_assigned(client, monkeypatch):
     did = _create_submittable(client)
     _assign_full_chain(client, did, include_plant_head=False)
     client.post(f"/qms/documents/{did}/workflow/start")
 
-    _advance_review(client, did)
+    _advance_review(client, did, monkeypatch)
+    _as(monkeypatch, DEPT_HEAD_USER_ID, "Dana Head")
     with _reauth(True):
         client.post(f"/qms/documents/{did}/workflow/steps/3/decide", json={"decision": "approve", **SIGN})
+    _as(monkeypatch, QUALITY_HEAD_USER_ID, "Quinn Head")
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/workflow/steps/4/decide", json={"decision": "approve", **SIGN})
     assert r.status_code == 200, r.get_json()
@@ -261,13 +293,15 @@ def test_plant_head_step_auto_skipped_when_not_assigned(client):
     assert qdb.get_current_version(did)["status"] == "approved"
 
 
-def test_plant_head_actually_decides_when_assigned_not_auto_skipped(client):
+def test_plant_head_actually_decides_when_assigned_not_auto_skipped(client, monkeypatch):
     did = _create_submittable(client)
     _assign_full_chain(client, did, include_plant_head=True)
     client.post(f"/qms/documents/{did}/workflow/start")
-    _advance_review(client, did)
+    _advance_review(client, did, monkeypatch)
+    _as(monkeypatch, DEPT_HEAD_USER_ID, "Dana Head")
     with _reauth(True):
         client.post(f"/qms/documents/{did}/workflow/steps/3/decide", json={"decision": "approve", **SIGN})
+    _as(monkeypatch, QUALITY_HEAD_USER_ID, "Quinn Head")
     with _reauth(True):
         r = client.post(f"/qms/documents/{did}/workflow/steps/4/decide", json={"decision": "approve", **SIGN})
     state = r.get_json()

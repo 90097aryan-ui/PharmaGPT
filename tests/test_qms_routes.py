@@ -103,7 +103,7 @@ def test_document_create_requires_title(client):
     assert r.status_code == 400
 
 
-def test_document_approval_transitions_status(client):
+def test_document_approval_transitions_status(client, monkeypatch):
     # The /approval endpoint is now a compatibility wrapper over
     # services/workflow_engine.py (DOCUMENT_WORKFLOW_V1, 5 steps — SOP
     # workflow correction: Department Head/Quality Head/Plant Head are now
@@ -126,16 +126,26 @@ def test_document_approval_transitions_status(client):
     )  # spec §10/§11 hard gate
     # SOP workflow correction: Submit for Review requires the Author to have
     # assigned a complete Reviewer/Department Head/Quality Head chain first.
-    # The legacy /approval endpoint's own auto-self-assign fallback (for a
-    # step with literally no approver) still applies to whichever step
-    # actually has none — here that's every step, since this chain uses
-    # placeholder ids the calling test user doesn't match, so each
-    # subsequent "Approved" call self-assigns and immediately decides.
+    # P0 stabilization: segregation of duties forbids the Author (the
+    # `client` fixture's fixed tenant user_id, "...0001") from also being an
+    # approver, so each role below is a distinct identity — the legacy
+    # /approval endpoint requires company_admin/reviewer_qa AND decides the
+    # now-current step as whoever calls it, so each call switches to that
+    # step's actual assigned approver.
+    from pharmagpt.auth.context import TenantContext
+    import tests.conftest as conftest_module
+
+    def _as(user_id, display_name):
+        monkeypatch.setattr(conftest_module, "_TEST_TENANT", TenantContext(
+            user_id=user_id, email=f"{user_id}@example.com", display_name=display_name,
+            role="reviewer_qa", company_id=conftest_module._TEST_TENANT.company_id))
+
     client.post(f"/qms/documents/{did}/assign-chain", json={
-        "reviewer_user_id": "00000000-0000-0000-0000-000000000001", "reviewer_name": "J Doe",
-        "department_head_user_id": "00000000-0000-0000-0000-000000000001", "department_head_name": "M Shah",
-        "quality_head_user_id": "00000000-0000-0000-0000-000000000001", "quality_head_name": "Q Head",
+        "reviewer_user_id": "00000000-0000-0000-0000-000000000002", "reviewer_name": "J Doe",
+        "department_head_user_id": "00000000-0000-0000-0000-000000000003", "department_head_name": "M Shah",
+        "quality_head_user_id": "00000000-0000-0000-0000-000000000004", "quality_head_name": "Q Head",
     })
+    _as("00000000-0000-0000-0000-000000000002", "J Doe")
     r = client.post(f"/qms/documents/{did}/approval", json={"action": "Submitted for Review", "performed_by": "J Doe"})
     assert r.status_code == 201
     # SOP workflow correction: with 5 steps (not 3), step 2 ("Under Review")
@@ -145,8 +155,13 @@ def test_document_approval_transitions_status(client):
     # own display label instead of staying on "Under Review" throughout.
     assert client.get(f"/qms/documents/{did}").get_json()["status"] == "Pending Approval"
 
+    _as("00000000-0000-0000-0000-000000000003", "M Shah")
     client.post(f"/qms/documents/{did}/approval", json={"action": "Approved", "performed_by": "M Shah"})
+    _as("00000000-0000-0000-0000-000000000004", "Q Head")
     client.post(f"/qms/documents/{did}/approval", json={"action": "Approved", "performed_by": "Q Head"})
+    monkeypatch.setattr(conftest_module, "_TEST_TENANT", TenantContext(
+        user_id="00000000-0000-0000-0000-000000000001", email="test@example.com", display_name="Test User",
+        role="company_admin", company_id=conftest_module._TEST_TENANT.company_id))
     # Document Control redesign (Phase 4, corrected per spec §17/§20):
     # quorum/approval achieved holds at 'Approved' until the training gate
     # clears (>=90% completion, >=1 trainee) AND an explicit Quality

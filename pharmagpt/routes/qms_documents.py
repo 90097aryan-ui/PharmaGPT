@@ -135,7 +135,14 @@ def create_document():
     # authenticated creator, mirroring routes/urs.py's identical
     # _current_display_name() pattern — never a client-supplied value.
     data["prepared_by"] = g.tenant.display_name or g.tenant.email
-    document = qdb.create_document(data, company_id=g.tenant.company_id)
+    # P0 stabilization: stamp the authenticated creator's user_id onto the
+    # initial version row (qms_document_versions.created_by_user_id) so
+    # set_review_chain_route can later enforce "only the Author may assign
+    # the chain" by identity, not just by document state. Never client-
+    # supplied — see tenancy.signing_identity's identical non-spoofable
+    # pattern used elsewhere in this file.
+    document = qdb.create_document(data, company_id=g.tenant.company_id,
+                                    created_by_user_id=g.tenant.user_id)
     audit.log("document", document["id"], "Document created", new=document)
     if document.get("template_id"):
         template = qdb.get_template(document["template_id"])
@@ -167,10 +174,34 @@ def set_review_chain_route(did):
     once the current version has left Draft (i.e. Submit for Review has
     happened), this always 409s — a direct request cannot modify a locked
     assignment. Reviewer/Department Head/Quality Head are required; Plant
-    Head is the one optional seat."""
+    Head is the one optional seat.
+
+    P0 stabilization (two additional server-side controls, neither of which
+    may be satisfied by frontend hiding alone):
+
+    1. Author-only: only the identity that authored the current version
+       (qms_document_versions.created_by_user_id, stamped at creation —
+       see create_document()) may call this endpoint. Any other
+       authenticated tenant user — regardless of role, including
+       company_admin — gets 403. A version with no captured author
+       (created before this fix, or via a path predating it) is a no-op
+       for this check, matching the codebase's existing precedent of never
+       retroactively restricting legacy records with no captured identity.
+    2. Segregation of duties: the Author may not assign themselves as
+       Reviewer, Department Head, Quality Head, or Plant Head on their own
+       document — 409 if any submitted role's user_id equals the Author's.
+    """
     document = _record_scoped_or_404(did)
     if not document:
         return jsonify({"error": "Not found"}), 404
+
+    version = qdb.get_current_version(did)
+    author_user_id = (version or {}).get("created_by_user_id") or ""
+    if author_user_id and g.tenant.user_id != author_user_id:
+        audit.log_failure("document", did, "Assign review/approval chain blocked",
+                           reason="Caller is not this document's Author")
+        return jsonify({"error": "Only this document's Author may assign the review/approval chain."}), 403
+
     data = request.get_json() or {}
 
     def _person(prefix: str) -> dict:
@@ -185,6 +216,16 @@ def set_review_chain_route(did):
                if not p["user_id"]]
     if missing:
         return jsonify({"error": f"The following are required: {', '.join(missing)}"}), 400
+
+    if author_user_id:
+        conflicts = [label for label, p in
+                     (("Reviewer", reviewer), ("Department Head", department_head),
+                      ("Quality Head", quality_head), ("Plant Head", plant_head))
+                     if p["user_id"] and p["user_id"] == author_user_id]
+        if conflicts:
+            reason = f"Author cannot also be assigned as: {', '.join(conflicts)}"
+            audit.log_failure("document", did, "Assign review/approval chain blocked", reason=reason)
+            return jsonify({"error": f"Segregation of duties: {reason}."}), 409
 
     chain = {
         "reviewer_user_id": reviewer["user_id"], "reviewer_name": reviewer["display_name"],
