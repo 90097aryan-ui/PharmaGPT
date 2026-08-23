@@ -232,3 +232,69 @@ def test_generate_draft_without_template_has_no_structure_check(client, mock_str
     events = _sse_events(r)
     done_event = next(e for e in events if "done" in e)
     assert done_event["structure_check"] is None
+
+
+# ── Zero usable Gemini chunks: generation failure, not an empty draft ───────
+# stream_gemini() (services/qms_shared.py) silently skips any chunk whose
+# .text is falsy, so the route can see zero usable text with no exception
+# raised. That must be reported as a failed generation (SSE 'error', no
+# 'done', no structure_check, document content untouched) rather than a
+# successful-but-incomplete draft.
+
+@pytest.fixture()
+def mock_stream_gemini_empty(monkeypatch):
+    """Zero usable chunks — mirrors stream_gemini() skipping every chunk
+    whose .text is falsy (e.g. a filtered/empty Gemini response)."""
+    import pharmagpt.routes.qms_documents as doc_routes
+
+    def _fake(prompt, temperature=0.3):
+        return iter(())
+
+    monkeypatch.setattr(doc_routes, "stream_gemini", _fake)
+
+
+def test_generate_draft_with_zero_usable_chunks_reports_error_not_done(client, mock_stream_gemini_empty):
+    from pharmagpt import qms_document_database as qdb
+    from pharmagpt import qms_database as qmsdb
+    t = client.post("/qms/documents/templates",
+                     json={"doc_type": "SOP", "name": "Cleaning SOP Template", "structure": STRUCTURE}).get_json()
+    doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "template_id": t["id"]}).get_json()
+
+    r = client.post(f"/qms/documents/{doc['id']}/generate", json={})
+    events = _sse_events(r)
+
+    assert not any("done" in e for e in events)
+    error_event = next(e for e in events if "error" in e)
+    assert error_event["error"] == (
+        "AI draft generation produced no usable content. No document content was changed. Please try again."
+    )
+
+    # an initially empty document stays empty — never explicitly set to ""
+    # by this call, and no structure_check ever ran against it
+    assert qdb.get_document(doc["id"])["content"] == ""
+
+    audit_trail = qmsdb.get_audit_trail("document", doc["id"])
+    failures = [a for a in audit_trail
+                if a["action"] == "AI draft generation violated controlled template structure"]
+    assert len(failures) == 1
+    assert "no usable content" in failures[0]["reason"]
+    assert "not changed" in failures[0]["reason"]
+
+
+def test_generate_draft_with_zero_usable_chunks_preserves_existing_content(client, mock_stream_gemini_empty):
+    from pharmagpt import qms_document_database as qdb
+    t = client.post("/qms/documents/templates",
+                     json={"doc_type": "SOP", "name": "Cleaning SOP Template", "structure": STRUCTURE}).get_json()
+    doc = client.post("/qms/documents", json={"title": "Cleaning SOP", "template_id": t["id"]}).get_json()
+    client.put(f"/qms/documents/{doc['id']}", json={"content": COMPLIANT_CONTENT})
+    before = qdb.get_document(doc["id"])["content"]
+    assert before == COMPLIANT_CONTENT
+
+    r = client.post(f"/qms/documents/{doc['id']}/generate", json={})
+    events = _sse_events(r)
+    assert any("error" in e for e in events)
+    assert not any("done" in e for e in events)
+
+    # a retry that produced no usable output must never overwrite content
+    # the Author had already entered or previously generated
+    assert qdb.get_document(doc["id"])["content"] == before

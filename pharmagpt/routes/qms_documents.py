@@ -440,6 +440,19 @@ def generate_draft(did):
             for chunk in stream_gemini(prompt, temperature=0.3):
                 full += chunk
                 yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+            # stream_gemini() silently skips any chunk with falsy chunk.text,
+            # so the loop above can complete with full == "" and no
+            # exception raised. Treat that as a generation failure, not a
+            # successful-but-incomplete draft: never persist/validate an
+            # empty result, and never overwrite whatever content (if any)
+            # the document already had.
+            if not full.strip():
+                audit.log_failure(
+                    "document", did, "AI draft generation violated controlled template structure",
+                    reason="AI draft generation produced no usable content; document content was not changed.",
+                )
+                yield f"data: {json.dumps({'error': 'AI draft generation produced no usable content. No document content was changed. Please try again.'})}\n\n"
+                return
             qdb.update_document(did, {"content": full})
             audit.log("document", did, "AI draft generated", new={"content_length": len(full)})
             # Controlled-template structure enforcement (Document Control
