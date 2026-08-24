@@ -1,0 +1,370 @@
+/* ── Login screen — Premium Animated Login (2026-08-23) ───────────────────────
+   Scope: pharmagpt/templates/index.html #login-view only. Every rule below is
+   prefixed under .login-view so nothing here can leak into the rest of the
+   app's light "Premium Enterprise" theme (style.css :root tokens untouched).
+
+   Brand: colors are derived from the existing --blue / --blue-light walnut-
+   brown brand hue (style.css), brightened into a warm brass/gold for
+   contrast against a dark background — not the reference image's palette.
+
+   Behavior: purely decorative. No rule here changes layout of the existing
+   #login-form/#login-email/#login-password/#login-remember/#login-error/
+   #login-submit/#login-submit-label/#login-spinner elements' semantics —
+   only their appearance and entrance/focus/error motion. See
+   pharmagpt/static/js/login_animation.js for the (also purely decorative,
+   auth.js-independent) class toggling this file reacts to.
+   ──────────────────────────────────────────────────────────────────────── */
+
+.login-view {
+  --login-bg-1: #15110D;
+  --login-bg-2: #241B14;
+  --login-gold: #D9A86C;
+  --login-gold-soft: #C9935C;
+  --login-gold-dim: rgba(217, 168, 108, 0.21);
+  --login-glass: rgba(255, 255, 255, 0.06);
+  --login-glass-border: rgba(255, 255, 255, 0.14);
+  --login-text: #F5F0EA;
+  --login-text-muted: #B7AB9C;
+
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background:
+    radial-gradient(ellipse 900px 600px at 30% 40%, var(--login-gold-dim), transparent 60%),
+    linear-gradient(160deg, var(--login-bg-2) 0%, var(--login-bg-1) 65%);
+  color: var(--login-text);
+}
+
+/* Slow, subtle ambient light drift behind the scene — transform/opacity only
+   (compositor-friendly, no layout/paint cost) so it never taxes the CPU.
+   --ambient-scale is read inside the login-ambient-drift keyframe below, not
+   set as a plain transform here — the drift animation runs continuously, so
+   a plain `transform` on .is-active would just get overwritten every frame
+   by the still-running keyframe; routing it through a custom property the
+   keyframe itself reads is what makes the focus-response actually visible
+   (also gives prefers-reduced-motion, where the animation is switched off,
+   a correct static fallback value to snap to). */
+.login-ambient {
+  --ambient-scale: 1;
+  position: absolute;
+  inset: -10%;
+  pointer-events: none;
+  opacity: 0.85;
+  transform: scale(var(--ambient-scale));
+  background: radial-gradient(circle 480px at 32% 38%, var(--login-gold-dim), transparent 65%);
+  animation: login-ambient-drift 16s ease-in-out infinite alternate;
+  transition: opacity 0.6s ease, transform 0.6s ease;
+  will-change: transform, opacity;
+}
+
+/* Focus response (email/password/etc. — see .login-scene.is-active in
+   login_animation.js's focusin/focusout delegation): the whole ambient
+   layer brightens and swells slightly, on top of the lamp/card response
+   below. */
+.login-scene.is-active .login-ambient { --ambient-scale: 1.12; opacity: 1; }
+
+.login-scene {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(24px, 6vw, 96px);
+  width: 100%;
+  max-width: 980px;
+  padding: 32px 24px;
+}
+
+/* ── Ambient lamp illustration (abstract, CSS/SVG only) ──────────────────── */
+.login-lamp {
+  flex: 0 0 auto;
+  width: clamp(120px, 18vw, 220px);
+  filter: drop-shadow(0 0 40px var(--login-gold-dim));
+  transition: filter 0.6s ease;
+}
+
+.login-lamp-svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+.login-lamp-glow {
+  /* Referenced by the keyframe below via var() — a keyframe using a custom
+     property re-reads it live off the animating element, so overriding
+     these two in .is-active (further down) genuinely raises the breathing
+     range, not just a static value the still-running animation would
+     otherwise keep overriding every frame. */
+  --lamp-glow-lo: 0.18;
+  --lamp-glow-hi: 0.28;
+  fill: var(--login-gold);
+  opacity: var(--lamp-glow-lo);
+  filter: blur(18px);
+  animation: login-lamp-breathe 6s ease-in-out infinite;
+  transform-origin: center;
+}
+
+.login-lamp-shade {
+  fill: #EDE6DC;
+  opacity: 0.92;
+}
+
+.login-lamp-neck,
+.login-lamp-base {
+  fill: #8B8580;
+  opacity: 0.85;
+}
+
+.login-lamp-pull {
+  fill: var(--login-gold-soft);
+}
+
+/* Card focus / loading raises the lamp's glow and gives it gentle life. */
+.login-scene.is-active .login-lamp { filter: drop-shadow(0 0 76px var(--login-gold-dim)); }
+.login-scene.is-active .login-lamp-glow { --lamp-glow-lo: 0.26; --lamp-glow-hi: 0.4; animation-duration: 3.2s; }
+.login-scene.is-active .login-lamp-svg { animation: login-lamp-sway 4s ease-in-out infinite; }
+
+/* ── Glass card ────────────────────────────────────────────────────────── */
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--login-glass);
+  border: 1px solid var(--login-glass-border);
+  border-radius: 20px;
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45), 0 2px 10px rgba(0, 0, 0, 0.3);
+  padding: 36px 30px;
+  animation: login-card-enter 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  transition: box-shadow 0.4s ease, border-color 0.4s ease, transform 0.4s ease;
+}
+
+.login-scene.is-active .login-card {
+  border-color: rgba(217, 168, 108, 0.4);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(217, 168, 108, 0.12),
+    0 0 48px var(--login-gold-dim);
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 26px;
+}
+
+.login-view .logo-icon {
+  background: linear-gradient(135deg, var(--login-gold) 0%, var(--login-gold-soft) 100%);
+  color: #201509;
+  font-weight: 700;
+}
+
+.login-view .header-titles h1 { color: var(--login-text); font-size: 16px; }
+.login-view .header-titles p { color: var(--login-text-muted); }
+
+.login-form .form-group { margin-bottom: 16px; }
+
+.login-form label {
+  display: block;
+  font-size: 12px;
+  color: var(--login-text-muted);
+  margin-bottom: 6px;
+}
+
+.login-form input {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 11px 13px;
+  font-size: 13px;
+  color: var(--login-text);
+  background: rgba(255, 255, 255, 0.04);
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
+}
+
+.login-form input::placeholder { color: rgba(183, 171, 156, 0.55); }
+
+.login-form input:focus {
+  border-color: var(--login-gold);
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 0 0 3px var(--login-gold-dim);
+}
+
+/* Keep native browser autofill legible on the dark glass card without
+   altering autofill behavior itself. */
+.login-form input:-webkit-autofill,
+.login-form input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--login-text);
+  -webkit-box-shadow: 0 0 0 1000px #241D17 inset;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+.login-remember {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--login-text-muted);
+  margin-bottom: 18px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.login-remember input { accent-color: var(--login-gold); cursor: pointer; }
+
+.login-error {
+  background: rgba(195, 95, 91, 0.16);
+  border: 1px solid rgba(224, 130, 125, 0.4);
+  color: #F3B9B6;
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 12px;
+  margin-bottom: 16px;
+}
+
+.login-submit {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  border-radius: 10px;
+  color: #201509;
+  background: linear-gradient(135deg, var(--login-gold) 0%, var(--login-gold-soft) 100%);
+  box-shadow: 0 8px 22px rgba(217, 168, 108, 0.28);
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.login-submit:hover:not(:disabled) {
+  filter: brightness(1.06);
+  box-shadow: 0 10px 28px rgba(217, 168, 108, 0.36);
+  transform: translateY(-1px);
+}
+
+.login-submit:active:not(:disabled) { transform: translateY(0); filter: brightness(0.98); }
+
+.login-submit:disabled { opacity: 0.75; cursor: default; transform: none; }
+
+.login-submit:focus-visible,
+.login-form input:focus-visible,
+.login-remember input:focus-visible {
+  outline: 2px solid var(--login-gold);
+  outline-offset: 2px;
+}
+
+.login-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(32, 21, 9, 0.35);
+  border-top-color: #201509;
+  border-radius: 50%;
+  animation: login-spin 0.7s linear infinite;
+}
+
+.session-check-view {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.login-spinner-lg {
+  width: 28px;
+  height: 28px;
+  border-width: 3px;
+  border-color: var(--border);
+  border-top-color: var(--blue-light);
+}
+
+/* ── Keyframes ─────────────────────────────────────────────────────────── */
+@keyframes login-spin { to { transform: rotate(360deg); } }
+
+@keyframes login-card-enter {
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes login-ambient-drift {
+  from { transform: translate3d(0, 0, 0) scale(var(--ambient-scale, 1)); opacity: 0.85; }
+  to { transform: translate3d(3%, -2%, 0) scale(var(--ambient-scale, 1)); opacity: 1; }
+}
+
+@keyframes login-lamp-breathe {
+  0%, 100% { opacity: var(--lamp-glow-lo, 0.18); }
+  50% { opacity: var(--lamp-glow-hi, 0.28); }
+}
+
+@keyframes login-lamp-sway {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(0.6deg); }
+}
+
+/* login-shake itself is applied via the Web Animations API in
+   login_animation.js, not a CSS class — see the comment there for why
+   (swapping .login-card's `animation` shorthand for a shake class would
+   also change animation-name away and back, re-triggering login-card-enter
+   underneath it). That also means the reduced-motion check for the shake
+   lives in JS (matchMedia), not here. */
+
+/* App shell — smooth entrance the moment login hands off to the app (see
+   style.css header/.app-body; auth.js flips their display none -> flex on
+   successful auth, which is exactly when a CSS *animation* (unlike a
+   transition) auto-replays). */
+@keyframes app-shell-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Responsive ────────────────────────────────────────────────────────── */
+@media (max-width: 860px) {
+  .login-lamp { width: clamp(90px, 16vw, 150px); }
+  .login-scene { gap: 32px; }
+}
+
+@media (max-width: 640px) {
+  .login-scene { flex-direction: column; gap: 20px; padding: 24px 16px; }
+  .login-lamp { width: 96px; opacity: 0.9; }
+  .login-card { max-width: 440px; width: 100%; padding: 28px 22px; border-radius: 16px; }
+}
+
+/* ── Motion accessibility ─────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .login-ambient,
+  .login-lamp-glow,
+  .login-lamp-svg,
+  .login-card,
+  .login-submit,
+  header,
+  .app-body {
+    animation: none !important;
+    transition: none !important;
+  }
+  .login-submit:hover:not(:disabled) { transform: none; }
+  /* The spinner still communicates real in-flight request state, so it is
+     kept — but calmed to a slow opacity pulse instead of a spin. */
+  .login-spinner {
+    animation: login-spinner-pulse 1.4s ease-in-out infinite !important;
+    border-top-color: inherit;
+  }
+}
+
+@keyframes login-spinner-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}

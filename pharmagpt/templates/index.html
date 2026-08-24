@@ -21,6 +21,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/header.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/error_pages.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile_nav.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/login.css') }}" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <!-- Wave 1 (AI-02, PharmaGPT Production Readiness Audit): sanitizes
        marked.parse() output before it's ever assigned to innerHTML
@@ -34,41 +35,62 @@
 <body>
 
   <!-- ══════════════════════════════════════════════════════════════════════ -->
-  <!-- ── Login (Supabase Auth) — IMPLEMENTATION_ROADMAP.md Phase 2 step 2.6 ── -->
-  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- ── Login (Supabase Auth) — IMPLEMENTATION_ROADMAP.md Phase 2 step 2.6 ──
+       Premium animated login (2026-08-23): pharmagpt/static/css/login.css +
+       pharmagpt/static/js/login_animation.js. Purely decorative — every
+       existing id below (login-form/login-email/login-password/
+       login-remember/login-error/login-submit/login-submit-label/
+       login-spinner) is unchanged, so pharmagpt/static/js/auth.js
+       (authentication logic) was NOT modified. The only additions are the
+       .login-scene/.login-ambient/.login-lamp wrapper (decorative) and an
+       id on the card for CSS/animation hooking. ── -->
   <div class="login-view" id="login-view" style="display:none">
-    <div class="login-card">
-      <div class="login-brand">
-        <div class="logo-icon">Rx</div>
-        <div class="header-titles">
-          <h1>Yuktav</h1>
-          <p>Manufacturing & Quality Intelligence Platform</p>
-        </div>
+    <div class="login-scene" id="login-scene">
+      <div class="login-ambient" aria-hidden="true"></div>
+
+      <div class="login-lamp" aria-hidden="true">
+        <svg class="login-lamp-svg" viewBox="0 0 200 260" focusable="false">
+          <ellipse class="login-lamp-glow" cx="100" cy="90" rx="90" ry="70" />
+          <path class="login-lamp-shade" d="M40 70 Q100 20 160 70 L172 96 Q100 118 28 96 Z" />
+          <rect class="login-lamp-neck" x="96" y="96" width="8" height="70" rx="4" />
+          <circle class="login-lamp-pull" cx="100" cy="176" r="5" />
+          <path class="login-lamp-base" d="M60 232 Q100 216 140 232 L150 244 Q100 258 50 244 Z" />
+        </svg>
       </div>
 
-      <form id="login-form" class="login-form" novalidate>
-        <div class="form-group">
-          <label for="login-email">Email</label>
-          <input type="email" id="login-email" name="email" placeholder="you@company.com"
-                 autocomplete="username" required />
-        </div>
-        <div class="form-group">
-          <label for="login-password">Password</label>
-          <input type="password" id="login-password" name="password" placeholder="••••••••"
-                 autocomplete="current-password" required />
+      <div class="login-card" id="login-card">
+        <div class="login-brand">
+          <div class="logo-icon">Rx</div>
+          <div class="header-titles">
+            <h1>Yuktav</h1>
+            <p>Manufacturing & Quality Intelligence Platform</p>
+          </div>
         </div>
 
-        <label class="login-remember">
-          <input type="checkbox" id="login-remember" /> Remember me
-        </label>
+        <form id="login-form" class="login-form" novalidate>
+          <div class="form-group">
+            <label for="login-email">Email</label>
+            <input type="email" id="login-email" name="email" placeholder="you@company.com"
+                   autocomplete="username" required />
+          </div>
+          <div class="form-group">
+            <label for="login-password">Password</label>
+            <input type="password" id="login-password" name="password" placeholder="••••••••"
+                   autocomplete="current-password" required />
+          </div>
 
-        <div class="login-error" id="login-error" role="alert" style="display:none"></div>
+          <label class="login-remember">
+            <input type="checkbox" id="login-remember" /> Remember me
+          </label>
 
-        <button type="submit" class="btn-primary login-submit" id="login-submit">
-          <span id="login-submit-label">Log In</span>
-          <span class="login-spinner" id="login-spinner" style="display:none"></span>
-        </button>
-      </form>
+          <div class="login-error" id="login-error" role="alert" style="display:none"></div>
+
+          <button type="submit" class="btn-primary login-submit" id="login-submit">
+            <span id="login-submit-label">Log In</span>
+            <span class="login-spinner" id="login-spinner" style="display:none"></span>
+          </button>
+        </form>
+      </div>
     </div>
   </div>
 
@@ -443,10 +465,19 @@
       <!-- ══ PharmaPilot (placeholder — no AI implementation). The
            existing, fully functional AI Assistant chat is kept alongside
            it unchanged (#nav-chat / #view-chat) so that working feature
-           is not removed. Unchanged per ALD-001 §4. ══ -->
+           is not removed. Unchanged per ALD-001 §4.
+
+           Sidebar Cleanup (2026-08-23): the "PharmaPilot" nav item itself
+           is hidden — view-pharmapilot's own content is explicitly labeled
+           "coming soon" / "a placeholder for a future phase" with no AI
+           logic behind it (docs/04_FRONTEND_SPECIFICATION.md §3 confirms
+           the same for its workspace-selector tile). Element, id, data-view,
+           and view-pharmapilot markup are NOT deleted — only the sidebar
+           entry point is hidden via display:none — so this reverses cleanly
+           once PharmaPilot ships for real. ══ -->
       <div class="sidebar-section" data-workspace="pharmapilot">
         <div class="sidebar-label">PharmaPilot</div>
-        <div class="sidebar-item" id="nav-pharmapilot" data-view="view-pharmapilot">
+        <div class="sidebar-item" id="nav-pharmapilot" data-view="view-pharmapilot" style="display:none">
           <span class='icon' data-lucide='bot'></span> PharmaPilot
         </div>
         <div class="sidebar-item" id="nav-chat" data-view="view-chat">
@@ -2530,6 +2561,7 @@
   <script src="{{ url_for('static', filename='js/favorites.js') }}"></script>
   <script src="{{ url_for('static', filename='js/recent_items.js') }}"></script>
   <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/login_animation.js') }}"></script>
   <script src="{{ url_for('static', filename='js/user_picker.js') }}"></script>
 
   <!-- Load order: workspace (shared shell) -> dashboard -> projects -> documents -> insights -> validation_config -> validation -> knowledge_base -> chat -->
