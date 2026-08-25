@@ -42,21 +42,41 @@ NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL")
 
 # ── AI orchestration router (pharmagpt/providers/router.py) ──────────────────
-# Opt-in, additive: only consulted by router.py's get_client()/
-# generate_content() — AI_PROVIDER above still fully controls the single
-# gemini_client every existing route/service uses via pharmagpt/state.py.
+# Stage 1 (AI Gateway stabilization): routes/chat.py now calls this router
+# instead of the raw gemini_client singleton — see router.py's module
+# docstring for the full failure-classification/retry/fallback/cooldown
+# design. Every other route/service still uses pharmagpt/state.py's
+# gemini_client directly and is unaffected.
+#
 # Provider selected for conversational/reasoning task intents (CHAT,
-# GENERAL_QA, SUMMARY, SEARCH, UNKNOWN).
-DEFAULT_CHAT_PROVIDER = os.getenv("DEFAULT_CHAT_PROVIDER", "nemotron").strip().lower()
+# GENERAL_QA, SUMMARY, SEARCH, UNKNOWN). Defaults to "gemini" — matching
+# AI_PROVIDER's own default above — so migrating routes/chat.py onto the
+# router does not silently change chat's effective provider for any
+# deployment that hasn't explicitly set this var. NVIDIA Nemotron remains
+# available as the automatic fallback (see ENABLE_FALLBACK) without being
+# the default primary.
+DEFAULT_CHAT_PROVIDER = os.getenv("DEFAULT_CHAT_PROVIDER", "gemini").strip().lower()
 
 # Provider selected for structured document-generation task intents (URS, DQ,
 # IQ, OQ, PQ, SAT, FAT, VALIDATION_PLAN, VALIDATION_SUMMARY, RISK_ASSESSMENT,
-# FMEA, CAPA, CHANGE_CONTROL, SOP, FACILITY_URS).
+# FMEA, CAPA, CHANGE_CONTROL, SOP, FACILITY_URS). No call site routes these
+# intents through the router yet (Stage 1 migrates chat only); kept for when
+# a document-generation call site is migrated in a later stage.
 DEFAULT_DOCUMENT_PROVIDER = os.getenv("DEFAULT_DOCUMENT_PROVIDER", "gemini").strip().lower()
 
-# When true, router.py retries the selected provider once, then falls back to
-# the other provider, on a failed call. Set "false" to fail fast instead.
+# When true, router.py falls back to the other provider on a failed call
+# (subject to the failure category being fallback-eligible — see
+# router.py's FailureCategory). Set "false" to fail fast instead, never
+# trying the second provider.
 ENABLE_FALLBACK = os.getenv("ENABLE_FALLBACK", "true").strip().lower() == "true"
+
+# How long (seconds) a provider is skipped after router.py classifies one of
+# its failures as QUOTA (429 / RESOURCE_EXHAUSTED / rate-limit) — subsequent
+# requests during this window go straight to the fallback provider instead
+# of re-discovering the same exhausted quota on every call. Per-provider,
+# in-memory, reset on process restart (acceptable: a fresh worker re-learns
+# the exhausted state on its own next 429, at most one wasted call).
+PROVIDER_QUOTA_COOLDOWN_SECONDS = int(os.getenv("PROVIDER_QUOTA_COOLDOWN_SECONDS", 60))
 
 # Flask debug mode — set to False in production.
 # Defaults to False (fail-safe): an accidentally-unset env var in production

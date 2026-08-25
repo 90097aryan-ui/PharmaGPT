@@ -16,6 +16,7 @@ Covers the three concrete gaps the redesign fixed:
 """
 
 import io
+from types import SimpleNamespace
 
 import pytest
 from docx import Document as DocxDocument
@@ -82,15 +83,24 @@ def test_template_download_unknown_id_404s(client):
 # ── AI-Assisted SOP Creation: equipment/Knowledge Base retrieval ────────────
 
 @pytest.fixture()
-def capture_prompt(monkeypatch):
-    import pharmagpt.routes.qms_documents as doc_routes
+def capture_prompt(isolated_ai_gateway):
+    """Registers a fake "gemini" provider with the AI Gateway (Stage 3:
+    generate_draft() now calls pharmagpt.providers.router instead of
+    qms_shared.stream_gemini) and captures the prompt text it was called
+    with, exactly like the old monkeypatched stream_gemini fixture did."""
     captured = {}
 
-    def _fake(prompt, temperature=0.3):
-        captured["prompt"] = prompt
-        yield "# SOP\n\n## 1. Purpose\nText.\n"
+    def _fake(*, model=None, contents=None, config=None):
+        captured["prompt"] = contents[0].parts[0].text
+        yield SimpleNamespace(text="# SOP\n\n## 1. Purpose\nText.\n")
 
-    monkeypatch.setattr(doc_routes, "stream_gemini", _fake)
+    class _FakeModels:
+        generate_content_stream = staticmethod(_fake)
+
+    class _FakeClient:
+        models = _FakeModels()
+
+    isolated_ai_gateway.register_provider("gemini", lambda: _FakeClient(), model="fake-model")
     return captured
 
 

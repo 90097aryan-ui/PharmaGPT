@@ -15,7 +15,6 @@ import time
 
 import pytest
 
-from pharmagpt.services import urs_generation_job as gen_job
 from google.genai import types
 
 
@@ -310,7 +309,7 @@ def _wait_for_terminal_status(client, urs_id, timeout=10.0):
     pytest.fail(f"generation never reached a terminal status: {status}")
 
 
-def test_facility_urs_generation_uses_facility_prompt(client, monkeypatch):
+def test_facility_urs_generation_uses_facility_prompt(client, isolated_ai_gateway):
     """The facility prompt must be used (not the equipment one), and the
     generation pipeline (batching/retry/persistence) must be the exact same
     code path the equipment flow already exercises in test_urs_routes.py."""
@@ -327,7 +326,7 @@ def test_facility_urs_generation_uses_facility_prompt(client, monkeypatch):
             "verification_method": "Design Review", "acceptance_criteria": "Grade D confirmed",
         }]))
 
-    monkeypatch.setattr(gen_job, "gemini_client", _FakeClient(fake_generate_content))
+    isolated_ai_gateway.register_provider("gemini", lambda: _FakeClient(fake_generate_content), model="fake-model")
 
     project = _create_project(client)
     facility = _create_facility(client, project["id"])
@@ -355,7 +354,7 @@ def test_facility_urs_generation_uses_facility_prompt(client, monkeypatch):
     assert "EQUIPMENT DETAILS" not in prompt
 
 
-def test_equipment_urs_generation_still_uses_equipment_prompt(client, monkeypatch):
+def test_equipment_urs_generation_still_uses_equipment_prompt(client, isolated_ai_gateway):
     """Regression guard: the urs_type dispatch in urs_service.build_
     generation_prompt() must not change equipment-flow behaviour."""
     captured_prompts = []
@@ -368,7 +367,7 @@ def test_equipment_urs_generation_still_uses_equipment_prompt(client, monkeypatc
             "regulatory_ref": "", "verification_method": "Functional Test", "acceptance_criteria": "",
         }]))
 
-    monkeypatch.setattr(gen_job, "gemini_client", _FakeClient(fake_generate_content))
+    isolated_ai_gateway.register_provider("gemini", lambda: _FakeClient(fake_generate_content), model="fake-model")
 
     urs = client.post("/urs/", json={"equipment_name": "Autoclave-01"}).get_json()
     client.post(f"/urs/{urs['id']}/generate", json={"sections": ["Functional Requirements"]})

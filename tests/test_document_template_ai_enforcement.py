@@ -11,13 +11,19 @@ Two layers, both tested:
      cannot *guarantee* an LLM complies, this is the actual, testable check
      run against generated content, with no AI call involved.
 
-Route-level tests mock stream_gemini exactly like tests/test_qms_routes.py's
-existing mock_gemini fixture does — no live API dependency.
+Route-level tests register fake providers with the AI Gateway
+(pharmagpt/providers/router.py) — Stage 3 migrated generate_draft() off the
+old qms_shared.stream_gemini() onto the router, so these tests inject fake
+Gemini/NVIDIA responses via isolated_ai_gateway (tests/conftest.py) instead
+of monkeypatching a stream_gemini name that no longer exists on
+routes/qms_documents.py. No live API dependency either way.
 """
 
 import json
+from types import SimpleNamespace
 
 import pytest
+from google.genai import errors as genai_errors
 
 from pharmagpt.prompts import qms_document_prompt as qp
 
@@ -161,25 +167,62 @@ def test_prompt_with_template_but_empty_structure_falls_back_to_default():
 
 
 # ── Route level: generate_draft wires template + surfaces structure_check ───
+#
+# Fake providers registered with the AI Gateway (isolated_ai_gateway, see
+# tests/conftest.py). A fake's generate_content_stream(contents, config)
+# returns/yields SimpleNamespace(text=...) chunks — the same duck-typed
+# shape every real provider client (google.genai's own response objects,
+# providers/nemotron_client.py's _StreamChunk) uses, and what
+# routes/qms_documents.py's migrated generate_draft() reads via chunk.text.
+
+class _FakeModels:
+    def __init__(self, fn):
+        self._fn = fn
+
+    def generate_content_stream(self, *, model=None, contents=None, config=None):
+        return self._fn(contents, config)
+
+
+class _FakeClient:
+    def __init__(self, fn):
+        self.models = _FakeModels(fn)
+
+
+def _text_chunks(*texts):
+    return (SimpleNamespace(text=t) for t in texts)
+
+
+def _register(rt, name, fn, model="fake-model"):
+    rt.register_provider(name, lambda: _FakeClient(fn), model=model)
+
+
+def _refuse(name):
+    def _fn(contents, config):
+        raise AssertionError(f"{name} should not have been called")
+    return _fn
+
+
+def _quota_error():
+    return genai_errors.ClientError(429, {"message": "Resource exhausted", "status": "RESOURCE_EXHAUSTED"})
+
+
+def _transient_error():
+    return genai_errors.ServerError(503, {"message": "backend unavailable", "status": "UNAVAILABLE"})
+
 
 @pytest.fixture()
-def mock_stream_gemini_compliant(monkeypatch):
-    import pharmagpt.routes.qms_documents as doc_routes
-
-    def _fake(prompt, temperature=0.3):
-        yield COMPLIANT_CONTENT
-
-    monkeypatch.setattr(doc_routes, "stream_gemini", _fake)
+def mock_stream_gemini_compliant(isolated_ai_gateway):
+    _register(isolated_ai_gateway, "gemini", lambda contents, config: _text_chunks(COMPLIANT_CONTENT))
+    _register(isolated_ai_gateway, "nemotron", _refuse("nemotron"))  # happy path never falls back
 
 
 @pytest.fixture()
-def mock_stream_gemini_violates_structure(monkeypatch):
-    import pharmagpt.routes.qms_documents as doc_routes
-
-    def _fake(prompt, temperature=0.3):
-        yield "# Cleaning SOP\n\n## 1. Purpose\nOnly this section, nothing else.\n"
-
-    monkeypatch.setattr(doc_routes, "stream_gemini", _fake)
+def mock_stream_gemini_violates_structure(isolated_ai_gateway):
+    _register(
+        isolated_ai_gateway, "gemini",
+        lambda contents, config: _text_chunks("# Cleaning SOP\n\n## 1. Purpose\nOnly this section, nothing else.\n"),
+    )
+    _register(isolated_ai_gateway, "nemotron", _refuse("nemotron"))
 
 
 def _sse_events(response):
@@ -199,6 +242,12 @@ def test_generate_draft_with_compliant_output_reports_valid(client, mock_stream_
 
     r = client.post(f"/qms/documents/{doc['id']}/generate", json={})
     events = _sse_events(r)
+
+    # SSE contract: at least one 'chunk' event carrying the streamed text,
+    # exactly one 'done' event, and no 'error' event on a clean success.
+    chunk_events = [e for e in events if "chunk" in e]
+    assert chunk_events and "".join(e["chunk"] for e in chunk_events) == COMPLIANT_CONTENT
+    assert not any("error" in e for e in events)
     done_event = next(e for e in events if "done" in e)
     assert done_event["structure_check"]["valid"] is True
 
@@ -234,23 +283,21 @@ def test_generate_draft_without_template_has_no_structure_check(client, mock_str
     assert done_event["structure_check"] is None
 
 
-# ── Zero usable Gemini chunks: generation failure, not an empty draft ───────
-# stream_gemini() (services/qms_shared.py) silently skips any chunk whose
-# .text is falsy, so the route can see zero usable text with no exception
-# raised. That must be reported as a failed generation (SSE 'error', no
-# 'done', no structure_check, document content untouched) rather than a
-# successful-but-incomplete draft.
+# ── Zero usable AI chunks: generation failure, not an empty draft ───────────
+# The route filters any chunk whose .text is falsy (matching the old
+# stream_gemini()'s own filtering), so it can see zero usable text with no
+# exception raised — whether that's because Gemini's stream itself produced
+# nothing, or (see the empty-fallback-output test below) NVIDIA's did after
+# a Gemini failure. Either way this must be reported as a failed generation
+# (SSE 'error', no 'done', no structure_check, document content untouched)
+# rather than a successful-but-incomplete draft.
 
 @pytest.fixture()
-def mock_stream_gemini_empty(monkeypatch):
-    """Zero usable chunks — mirrors stream_gemini() skipping every chunk
-    whose .text is falsy (e.g. a filtered/empty Gemini response)."""
-    import pharmagpt.routes.qms_documents as doc_routes
-
-    def _fake(prompt, temperature=0.3):
-        return iter(())
-
-    monkeypatch.setattr(doc_routes, "stream_gemini", _fake)
+def mock_stream_gemini_empty(isolated_ai_gateway):
+    """Zero usable chunks from Gemini specifically (a successful call that
+    completes with no text) — mirrors a filtered/empty Gemini response."""
+    _register(isolated_ai_gateway, "gemini", lambda contents, config: iter(()))
+    _register(isolated_ai_gateway, "nemotron", _refuse("nemotron"))
 
 
 def test_generate_draft_with_zero_usable_chunks_reports_error_not_done(client, mock_stream_gemini_empty):
@@ -298,3 +345,128 @@ def test_generate_draft_with_zero_usable_chunks_preserves_existing_content(clien
     # a retry that produced no usable output must never overwrite content
     # the Author had already entered or previously generated
     assert qdb.get_document(doc["id"])["content"] == before
+
+
+# ── Provider fallback (Stage 3: AI Gateway) ──────────────────────────────────
+# Gemini stays primary, NVIDIA is the fallback (docs/AI_PROVIDER_ROUTER.md).
+# The gateway's own contract (unchanged from Stage 1) is that retry/fallback
+# only ever happen while trying to *start* the stream — before the caller
+# has received a single chunk. These tests exercise that contract through
+# Document Control's actual generate_draft() endpoint, not just the router
+# in isolation (already covered by tests/test_provider_router.py).
+
+def _make_doc(client):
+    t = client.post("/qms/documents/templates",
+                     json={"doc_type": "SOP", "name": "Cleaning SOP Template", "structure": STRUCTURE}).get_json()
+    return client.post("/qms/documents", json={"title": "Cleaning SOP", "template_id": t["id"]}).get_json()
+
+
+def test_generate_draft_quota_before_first_chunk_falls_back_to_nemotron(client, isolated_ai_gateway):
+    gemini_calls = []
+
+    def fake_gemini(contents, config):
+        gemini_calls.append(1)
+        raise _quota_error()
+
+    _register(isolated_ai_gateway, "gemini", fake_gemini)
+    _register(isolated_ai_gateway, "nemotron", lambda contents, config: _text_chunks(COMPLIANT_CONTENT))
+
+    doc = _make_doc(client)
+    r = client.post(f"/qms/documents/{doc['id']}/generate", json={})
+    events = _sse_events(r)
+
+    assert len(gemini_calls) == 1  # NOT retried — quota skips the same-provider retry
+    assert not any("error" in e for e in events)
+    done_event = next(e for e in events if "done" in e)
+    assert done_event["structure_check"]["valid"] is True
+
+    from pharmagpt import qms_document_database as qdb
+    assert "1. Purpose" in qdb.get_document(doc["id"])["content"]
+
+    from pharmagpt.providers import router as ai_router
+    assert ai_router._in_cooldown("gemini")  # circuit breaker engaged for this provider
+
+
+def test_generate_draft_gemini_transient_failure_retries_then_succeeds(client, isolated_ai_gateway):
+    calls = []
+
+    def fake_gemini(contents, config):
+        calls.append(1)
+        if len(calls) == 1:
+            raise _transient_error()
+        return _text_chunks(COMPLIANT_CONTENT)
+
+    _register(isolated_ai_gateway, "gemini", fake_gemini)
+    _register(isolated_ai_gateway, "nemotron", _refuse("nemotron"))  # never needed — gemini's own retry succeeds
+
+    doc = _make_doc(client)
+    r = client.post(f"/qms/documents/{doc['id']}/generate", json={})
+    events = _sse_events(r)
+
+    assert len(calls) == 2  # gateway's bounded retry, transparent to this route
+    assert not any("error" in e for e in events)
+    done_event = next(e for e in events if "done" in e)
+    assert done_event["structure_check"]["valid"] is True
+
+
+def test_generate_draft_both_providers_unavailable_reports_error(client, isolated_ai_gateway):
+    from pharmagpt import qms_document_database as qdb
+    from pharmagpt import qms_database as qmsdb
+
+    def fake_down(contents, config):
+        raise _transient_error()
+
+    _register(isolated_ai_gateway, "gemini", fake_down)
+    _register(isolated_ai_gateway, "nemotron", fake_down)
+
+    doc = _make_doc(client)
+    r = client.post(f"/qms/documents/{doc['id']}/generate", json={})
+    events = _sse_events(r)
+
+    assert not any("chunk" in e for e in events)  # never started — no partial output reached the browser
+    assert not any("done" in e for e in events)
+    error_event = next(e for e in events if "error" in e)
+    # ProviderCallError's sanitized message reaches the client — never the
+    # upstream provider's raw response body (router.ProviderCallError's own
+    # contract, unchanged from Stage 1/2).
+    assert "AI request failed" in error_event["error"]
+    assert "backend unavailable" not in error_event["error"]  # raw upstream body never leaks
+
+    assert qdb.get_document(doc["id"])["content"] == ""
+
+    audit_trail = qmsdb.get_audit_trail("document", doc["id"])
+    assert any(a["action"] == "AI draft generation failed" for a in audit_trail)
+
+
+def test_generate_draft_empty_fallback_output_still_reports_failure(client, isolated_ai_gateway):
+    """Gemini fails with a fallback-eligible error before any chunk; NVIDIA
+    is tried and 'succeeds' in the sense of not raising, but produces zero
+    usable text. This must be treated exactly like a zero-usable-chunks
+    Gemini response — a failed generation, not a successful empty draft."""
+    from pharmagpt import qms_document_database as qdb
+    from pharmagpt import qms_database as qmsdb
+
+    def fake_gemini(contents, config):
+        raise _quota_error()
+
+    def fake_nemotron(contents, config):
+        return iter(())
+
+    _register(isolated_ai_gateway, "gemini", fake_gemini)
+    _register(isolated_ai_gateway, "nemotron", fake_nemotron)
+
+    doc = _make_doc(client)
+    r = client.post(f"/qms/documents/{doc['id']}/generate", json={})
+    events = _sse_events(r)
+
+    assert not any("done" in e for e in events)
+    error_event = next(e for e in events if "error" in e)
+    assert error_event["error"] == (
+        "AI draft generation produced no usable content. No document content was changed. Please try again."
+    )
+    assert qdb.get_document(doc["id"])["content"] == ""
+
+    audit_trail = qmsdb.get_audit_trail("document", doc["id"])
+    failures = [a for a in audit_trail
+                if a["action"] == "AI draft generation violated controlled template structure"]
+    assert len(failures) == 1

@@ -77,6 +77,7 @@ import json
 import logging
 import re
 from flask import Blueprint, g, jsonify, request, Response, stream_with_context, send_file
+from google.genai import types
 
 from pharmagpt import audit
 from pharmagpt import qms_document_database as qdb
@@ -85,12 +86,14 @@ from pharmagpt import qms_workflow_database as wfdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
 from pharmagpt.auth.workspace_access import require_workspace_access
+from pharmagpt.prompts import PHARMA_SYSTEM_PROMPT
+from pharmagpt.providers import router as ai_router
+from pharmagpt.providers.router import TaskIntent
 from pharmagpt.services import esignature_service
 from pharmagpt.services import kb_sync
 from pharmagpt.services import lifecycle_engine
 from pharmagpt.services import qms_document_service as svc
 from pharmagpt.services import workflow_engine as wfe
-from pharmagpt.services.qms_shared import stream_gemini
 from pharmagpt.prompts import qms_document_prompt as qp
 
 logger = logging.getLogger(__name__)
@@ -437,11 +440,35 @@ def generate_draft(did):
     def stream():
         full = ""
         try:
-            for chunk in stream_gemini(prompt, temperature=0.3):
-                full += chunk
-                yield f"data: {json.dumps({'chunk': chunk})}\n\n"
-            # stream_gemini() silently skips any chunk with falsy chunk.text,
-            # so the loop above can complete with full == "" and no
+            # AI Gateway (Stage 3): routes through pharmagpt.providers.router
+            # instead of the old qms_shared.stream_gemini — same Gemini
+            # primary / NVIDIA fallback pair Stage 1/2 already established,
+            # via TaskIntent.SOP (the router's existing bucket for
+            # structured document generation; Document Control has no
+            # dedicated intent of its own, and adding one is out of this
+            # stage's scope). The router only retries/falls back while
+            # trying to *start* the stream — once a chunk has reached this
+            # generator, a later failure propagates directly rather than
+            # restarting, so a browser can never receive partial Gemini
+            # output followed by a silent switch to NVIDIA mid-draft (see
+            # router.generate_content_stream's own docstring/contract,
+            # unchanged from Stage 1).
+            for chunk in ai_router.generate_content_stream(
+                TaskIntent.SOP,
+                contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
+                config=types.GenerateContentConfig(
+                    system_instruction=PHARMA_SYSTEM_PROMPT,
+                    temperature=0.3,
+                ),
+            ):
+                if not chunk.text:
+                    continue
+                full += chunk.text
+                yield f"data: {json.dumps({'chunk': chunk.text})}\n\n"
+            # A chunk with falsy .text is skipped above (matches the old
+            # stream_gemini()'s own filtering), and a stream that starts but
+            # yields nothing usable at all (from either provider — see
+            # docstring above) completes the loop with full == "" and no
             # exception raised. Treat that as a generation failure, not a
             # successful-but-incomplete draft: never persist/validate an
             # empty result, and never overwrite whatever content (if any)

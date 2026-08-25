@@ -88,13 +88,13 @@ def test_docx_export_logs_download_failed_on_generation_error(client, monkeypatc
     assert "DOCX Downloaded" not in trail
 
 
-def test_generation_logs_started_and_completed(db_path, monkeypatch):
+def test_generation_logs_started_and_completed(db_path, isolated_ai_gateway):
     urs = udb.create_urs({"title": "Audit Generation Test", "equipment_name": "Autoclave"}, company_id="test-company-1")
 
     def fake_generate_content(model, contents, config):
         return _FakeResponse(_req_json("Functional Requirements"))
 
-    monkeypatch.setattr(gen_job, "gemini_client", _FakeClient(fake_generate_content))
+    isolated_ai_gateway.register_provider("gemini", lambda: _FakeClient(fake_generate_content), model="fake-model")
 
     gen_job.submit_generation_job(
         urs["id"], urs, ["Functional Requirements"], performed_by="QA Engineer",
@@ -120,13 +120,18 @@ def test_generation_logs_started_and_completed(db_path, monkeypatch):
     assert completed["performed_by"] == "QA Engineer"
 
 
-def test_generation_logs_failed_when_every_batch_errors(db_path, monkeypatch):
+def test_generation_logs_failed_when_every_batch_errors(db_path, isolated_ai_gateway):
     urs = udb.create_urs({"title": "Audit Generation Failure Test", "equipment_name": "X"}, company_id="test-company-1")
 
     def fake_generate_content(model, contents, config):
         raise RuntimeError("Gemini is down")
 
-    monkeypatch.setattr(gen_job, "gemini_client", _FakeClient(fake_generate_content))
+    # Both providers registered as failing, deterministically — the gateway
+    # retries/falls back internally either way, but the batch must still
+    # end up failed regardless of whether a real NVIDIA_API_KEY happens to
+    # be configured in the environment running this test.
+    isolated_ai_gateway.register_provider("gemini", lambda: _FakeClient(fake_generate_content), model="fake-model")
+    isolated_ai_gateway.register_provider("nemotron", lambda: _FakeClient(fake_generate_content), model="fake-model")
 
     gen_job._run_generation_job(urs["id"], urs, [["Functional Requirements"]], "System")
 

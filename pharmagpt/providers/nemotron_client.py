@@ -79,6 +79,24 @@ _DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 _DEFAULT_TIMEOUT_SECONDS = 120
 
 
+def safe_model_label(model: str | None) -> str:
+    """Redact `model` for logging unless it demonstrably matches NVIDIA's
+    documented catalog-slug shape ('vendor/model-name', e.g.
+    'nvidia/nemotron-3-ultra-550b-a55b' — see .env.example) and does not
+    carry the 'nvapi-' prefix reserved for API keys (the same prefix check
+    factory.py already applies to NVIDIA_API_KEY). NVIDIA_MODEL is normally
+    a non-secret identifier safe to log, but nothing prevents a
+    misconfigured deployment from putting a real key there instead (see
+    Stage 4B: exactly this happened and the key-shaped value was logged in
+    plaintext by this file's own request/response log lines) — when the
+    shape doesn't match, redact rather than risk logging a secret."""
+    if not model:
+        return "<unset>"
+    if "/" in model and not model.startswith("nvapi-"):
+        return model
+    return "<redacted: NVIDIA_MODEL does not match the expected 'vendor/model-name' catalog-slug format>"
+
+
 def _content_text(content) -> str:
     return "".join(getattr(part, "text", "") or "" for part in (content.parts or []))
 
@@ -187,7 +205,7 @@ class _NemotronModels:
         payload = self._build_payload(contents, config, stream=False)
         logger.info(
             "Nemotron request: model=%s messages=%d stream=False",
-            self._model, len(payload["messages"]),
+            safe_model_label(self._model), len(payload["messages"]),
         )
         start = time.perf_counter()
         try:
@@ -209,7 +227,7 @@ class _NemotronModels:
         logger.info(
             "Nemotron response: model=%s elapsed=%.2fs finish_reason=%s "
             "prompt_tokens=%s completion_tokens=%s",
-            self._model, elapsed, getattr(finish_reason, "name", finish_reason),
+            safe_model_label(self._model), elapsed, getattr(finish_reason, "name", finish_reason),
             prompt_tokens, completion_tokens,
         )
         return _Response(text, finish_reason, prompt_tokens, completion_tokens)
@@ -219,7 +237,7 @@ class _NemotronModels:
         payload = self._build_payload(contents, config, stream=True)
         logger.info(
             "Nemotron request: model=%s messages=%d stream=True",
-            self._model, len(payload["messages"]),
+            safe_model_label(self._model), len(payload["messages"]),
         )
         start = time.perf_counter()
         try:
@@ -254,7 +272,7 @@ class _NemotronModels:
             elapsed = time.perf_counter() - start
             logger.info(
                 "Nemotron stream complete: model=%s elapsed=%.2fs chunks=%d",
-                self._model, elapsed, chunk_count,
+                safe_model_label(self._model), elapsed, chunk_count,
             )
 
 

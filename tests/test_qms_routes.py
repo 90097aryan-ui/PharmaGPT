@@ -13,14 +13,20 @@ network dependency.
 
 import json
 import io
+from types import SimpleNamespace
 
 import pytest
 
 
 @pytest.fixture()
-def mock_gemini(monkeypatch):
-    """Monkeypatch call_gemini/stream_gemini across all three QMS services to
-    return deterministic canned output instead of calling the real API.
+def mock_gemini(monkeypatch, isolated_ai_gateway):
+    """Monkeypatch call_gemini across all three QMS services to return
+    deterministic canned output instead of calling the real API, and
+    register a fake "gemini" provider with the AI Gateway for Document
+    Control's generate_draft() (Stage 3: migrated off qms_shared.
+    stream_gemini onto pharmagpt.providers.router — CAPA/Deviation/Change
+    Control/investigation still use call_gemini, untouched by that
+    migration, so they stay monkeypatched exactly as before).
 
     Each service does `from qms_shared import call_gemini`, which binds its
     own local name — patching qms_shared.call_gemini alone would not affect
@@ -32,19 +38,22 @@ def mock_gemini(monkeypatch):
     import pharmagpt.services.qms_capa_service as capa_svc
     import pharmagpt.services.qms_change_control_service as cc_svc
     import pharmagpt.services.investigation_engine as inv_engine
-    import pharmagpt.routes.qms_documents as doc_routes
 
     def _fake_call_gemini(prompt, temperature=0.3):
         return "canned response"
 
-    def _fake_stream_gemini(prompt, temperature=0.4):
-        yield "# Generated Title\n"
-        yield "Some generated markdown content."
-
     for mod in (shared, doc_svc, dev_svc, capa_svc, cc_svc, inv_engine):
         monkeypatch.setattr(mod, "call_gemini", _fake_call_gemini)
-    monkeypatch.setattr(shared, "stream_gemini", _fake_stream_gemini)
-    monkeypatch.setattr(doc_routes, "stream_gemini", _fake_stream_gemini)
+
+    class _FakeModels:
+        def generate_content_stream(self, *, model=None, contents=None, config=None):
+            yield SimpleNamespace(text="# Generated Title\n")
+            yield SimpleNamespace(text="Some generated markdown content.")
+
+    class _FakeClient:
+        models = _FakeModels()
+
+    isolated_ai_gateway.register_provider("gemini", lambda: _FakeClient(), model="fake-model")
     return shared
 
 

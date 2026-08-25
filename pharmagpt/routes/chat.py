@@ -7,6 +7,7 @@ POST /stream   stream a Gemini response, optionally injecting document context
 """
 
 import json
+import logging
 
 from pharmagpt import database as db
 from pharmagpt import tenancy
@@ -14,9 +15,12 @@ from flask import Blueprint, g, jsonify, request, Response, stream_with_context
 from google.genai import errors, types
 from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.prompts import PHARMA_SYSTEM_PROMPT
+from pharmagpt.providers import router as ai_router
+from pharmagpt.providers.router import TaskIntent
 from pharmagpt.services.document_search import search_project_documents
-from pharmagpt.state import gemini_client, get_history, history_cache
-from pharmagpt.config import GEMINI_MODEL
+from pharmagpt.state import get_history, history_cache
+
+logger = logging.getLogger(__name__)
 
 bp = Blueprint("chat", __name__)
 
@@ -85,8 +89,8 @@ def stream():
     def generate():
         reply_parts: list[str] = []
         try:
-            for chunk in gemini_client.models.generate_content_stream(
-                model=GEMINI_MODEL,
+            for chunk in ai_router.generate_content_stream(
+                TaskIntent.CHAT,
                 contents=history,
                 config=types.GenerateContentConfig(
                     system_instruction=PHARMA_SYSTEM_PROMPT,
@@ -101,9 +105,25 @@ def stream():
             db.save_message(project_id, "model", full_reply)
             yield f"data: {json.dumps({'done': True, 'sources': captured_sources})}\n\n"
 
+        except ai_router.ProviderCallError as exc:
+            # Every provider the router tried failed to even start the
+            # stream (retry + cooldown-aware fallback both exhausted, or the
+            # failure category made fallback pointless — see
+            # ai_router._run_with_fallback / FailureCategory). Same rollback
+            # as the ServerError case below; the underlying provider error
+            # is available via exc.__cause__ for logs only, never surfaced
+            # to the client.
+            history.pop()
+            db.clear_project_messages(project_id)
+            history_cache.pop(project_id, None)
+            logger.warning("chat stream failed for all providers: %s", exc)
+            yield f"data: {json.dumps({'error': 'AI service is temporarily unavailable. Please try again.'})}\n\n"
+
         except errors.ServerError:
-            # Server errors are transient — roll back the optimistic history append
-            # and clear the cache so it rebuilds cleanly from the DB on next request.
+            # Mid-stream interruption after the first chunk was already
+            # yielded to the caller — ai_router.generate_content_stream does
+            # not retry/fall back past that point (see its docstring), so
+            # the original provider exception type propagates here directly.
             history.pop()
             db.clear_project_messages(project_id)
             history_cache.pop(project_id, None)
