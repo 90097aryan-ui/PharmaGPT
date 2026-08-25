@@ -73,6 +73,27 @@ def db_path(tmp_path, monkeypatch):
 
 
 @pytest.fixture()
+def isolated_ai_gateway(monkeypatch):
+    """Isolate pharmagpt.providers.router's (the AI Gateway, see
+    docs/AI_PROVIDER_ROUTER.md) provider registry/model-map/client-cache/
+    cooldown state for a single test, so a test can register throwaway fake
+    providers without affecting any other test or the real gemini/nemotron
+    builders. Shared by every test file exercising code migrated onto the
+    router (routes/chat.py Stage 1, services/urs_generation_job.py Stage 2,
+    ...) instead of the old module-level pharmagpt.state.gemini_client.
+    tests/test_provider_router.py keeps its own file-local, equivalent
+    fixture (isolated_router) predating this one — both isolate the same
+    module state, just for that file's own test style."""
+    from pharmagpt.providers import router
+
+    monkeypatch.setattr(router, "_PROVIDER_BUILDERS", dict(router._PROVIDER_BUILDERS))
+    monkeypatch.setattr(router, "_PROVIDER_MODELS", dict(router._PROVIDER_MODELS))
+    monkeypatch.setattr(router, "_CLIENT_CACHE", {})
+    monkeypatch.setattr(router, "_provider_cooldown_until", {})
+    return router
+
+
+@pytest.fixture()
 def client(db_path, monkeypatch):
     """Flask test client wired to the db_path fixture's throwaway database.
     pharmagpt.app may already be imported from an earlier test — that's fine,

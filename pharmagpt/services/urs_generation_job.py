@@ -44,6 +44,34 @@ Resilience layers per batch, in order
    summary ("2 of 3 sections generated successfully...") rather than a raw
    error string, built from which sections actually appear in the returned
    requirements — not just which batches nominally succeeded.
+
+Stage 2 (AI Gateway migration): _generate_batch() now calls
+pharmagpt.providers.router.generate_content(TaskIntent.URS, ...) instead of
+the raw pharmagpt.state.gemini_client — the router applies its own failure
+classification, bounded same-provider retry (TRANSIENT/MODEL), and
+cooldown-aware fallback to NVIDIA Nemotron (QUOTA/AUTHENTICATION/TRANSIENT/
+MODEL) underneath this call, transparently. This does NOT change the
+resilience layers above:
+
+  - Layer 2 (finish_reason) and layer 3/4 (malformed-JSON retry + partial
+    recovery) only ever see a response that a provider call already
+    RETURNED successfully — they have no way to observe, and never need to
+    know about, a retry/fallback the router already resolved underneath.
+  - A call that the router could NOT resolve (every attempt on every
+    provider exhausted, or a SAFETY/APPLICATION-classified failure the
+    router deliberately never retries/falls back on — see router.py's
+    FailureCategory) raises router.ProviderCallError, which is not
+    _RetryableGenerationError, so it is never caught or retried by layer 3
+    below — it propagates out of _generate_batch_resilient() on the FIRST
+    top-level attempt, exactly like a raw google.genai.errors.ServerError/
+    ClientError used to propagate before this migration. The two retry
+    loops are additive, not multiplicative: the router's retry is fully
+    contained inside one _generate_batch() call and is invisible to layer
+    3's attempt counter; layer 3 only spends one of its own attempts when
+    a call the router already completed successfully turns out to have
+    unusable *content* (malformed JSON, MAX_TOKENS truncation, or empty
+    text) — a fundamentally different failure mode than a call the router
+    itself never managed to complete.
 """
 
 from __future__ import annotations
@@ -54,16 +82,16 @@ import time
 
 from pharmagpt import urs_database as udb
 from pharmagpt.config import (
-    GEMINI_MODEL,
     URS_GENERATION_BATCH_SIZE,
     URS_GENERATION_MAX_RETRIES,
     URS_GENERATION_SLOW_WARNING_SECONDS,
 )
 from pharmagpt.prompts import PHARMA_SYSTEM_PROMPT
+from pharmagpt.providers import router as ai_router
+from pharmagpt.providers.router import TaskIntent
 from pharmagpt.services import urs_service as svc
 from pharmagpt.services.job_runner import job_runner
 from pharmagpt.services.urs_requirement_library import SECTION_PREFIX
-from pharmagpt.state import gemini_client
 from google.genai import types
 
 logger = logging.getLogger(__name__)
@@ -303,17 +331,20 @@ def _generate_batch(
     """Run one Gemini call for a subset of sections and return (raw_text, parsed_requirements).
 
     Raises _RetryableGenerationError for malformed JSON or MAX_TOKENS
-    truncation (both retryable), GenerationBlockedError for a
-    safety/recitation stop (not retryable), or lets any other exception
-    (network, auth, quota) propagate untouched (not retryable). Logs
-    prompt/response token counts and timing for every attempt regardless of
-    outcome.
+    truncation (both retryable at this layer), GenerationBlockedError for a
+    safety/recitation stop (not retryable), or lets router.ProviderCallError
+    (every provider attempt the gateway itself would try is exhausted) or
+    any other exception propagate untouched (not retryable at this layer —
+    see the module docstring on why the two retry layers don't compound).
+    Logs prompt/response token counts and timing for every attempt
+    regardless of outcome and regardless of which provider the gateway
+    actually used to serve the call.
     """
     prompt = svc.build_generation_prompt(urs_info, sections)
 
-    gemini_start = time.perf_counter()
-    response = gemini_client.models.generate_content(
-        model=GEMINI_MODEL,
+    ai_call_start = time.perf_counter()
+    response = ai_router.generate_content(
+        TaskIntent.URS,
         contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
         config=types.GenerateContentConfig(
             system_instruction=PHARMA_SYSTEM_PROMPT,
@@ -323,22 +354,22 @@ def _generate_batch(
             response_schema=_REQUIREMENT_ARRAY_SCHEMA,
         ),
     )
-    gemini_seconds = time.perf_counter() - gemini_start
+    ai_call_seconds = time.perf_counter() - ai_call_start
 
     usage = getattr(response, "usage_metadata", None)
     prompt_tokens = getattr(usage, "prompt_token_count", None)
     response_tokens = getattr(usage, "candidates_token_count", None)
 
     logger.info(
-        "URS %s generation batch %d/%d attempt %d/%d [%s]: gemini=%.2fs prompt_tokens=%s response_tokens=%s",
+        "URS %s generation batch %d/%d attempt %d/%d [%s]: ai_call=%.2fs prompt_tokens=%s response_tokens=%s",
         urs_id, batch_num, batch_total, attempt, max_attempts,
-        ", ".join(sections) or "default sections", gemini_seconds, prompt_tokens, response_tokens,
+        ", ".join(sections) or "default sections", ai_call_seconds, prompt_tokens, response_tokens,
     )
-    if gemini_seconds > URS_GENERATION_SLOW_WARNING_SECONDS:
+    if ai_call_seconds > URS_GENERATION_SLOW_WARNING_SECONDS:
         logger.warning(
             "URS %s generation batch %d/%d attempt %d took %.2fs (> %ds threshold) — "
             "consider lowering URS_GENERATION_BATCH_SIZE",
-            urs_id, batch_num, batch_total, attempt, gemini_seconds, URS_GENERATION_SLOW_WARNING_SECONDS,
+            urs_id, batch_num, batch_total, attempt, ai_call_seconds, URS_GENERATION_SLOW_WARNING_SECONDS,
         )
 
     raw_text = response.text or ""

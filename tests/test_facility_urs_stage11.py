@@ -13,7 +13,6 @@ import json
 
 import pytest
 
-from pharmagpt.services import urs_generation_job as gen_job
 from google.genai import types
 
 
@@ -273,7 +272,7 @@ class _FakeResponse:
         self.candidates = [_FakeCandidate()]
 
 
-def test_generation_prompt_adapts_to_stage11_metadata(client, monkeypatch):
+def test_generation_prompt_adapts_to_stage11_metadata(client, isolated_ai_gateway):
     import time as _time
 
     captured_prompts = []
@@ -286,7 +285,7 @@ def test_generation_prompt_adapts_to_stage11_metadata(client, monkeypatch):
             "regulatory_ref": "", "verification_method": "Design Review", "acceptance_criteria": "",
         }]))
 
-    monkeypatch.setattr(gen_job, "gemini_client", _FakeClient(fake_generate_content))
+    isolated_ai_gateway.register_provider("gemini", lambda: _FakeClient(fake_generate_content), model="fake-model")
 
     project = _create_project(client)
     facility = _create_facility(client, project["id"], classification="Brownfield", product_category="Injectables")
@@ -324,7 +323,7 @@ def test_generation_prompt_adapts_to_stage11_metadata(client, monkeypatch):
     assert reqs[0]["requirement_source"] == ""  # no default declared for this facility
 
 
-def test_generation_prompt_backward_compatible_with_no_stage11_metadata(client, monkeypatch):
+def test_generation_prompt_backward_compatible_with_no_stage11_metadata(client, isolated_ai_gateway):
     """A Stage-1-only facility (no classification/design_basis set beyond
     defaults) must still produce a sensible prompt, not an error or a
     prompt full of blank/None artifacts."""
@@ -338,7 +337,7 @@ def test_generation_prompt_backward_compatible_with_no_stage11_metadata(client, 
             "regulatory_ref": "", "verification_method": "Design Review", "acceptance_criteria": "",
         }]))
 
-    monkeypatch.setattr(gen_job, "gemini_client", _FakeClient(fake_generate_content))
+    isolated_ai_gateway.register_provider("gemini", lambda: _FakeClient(fake_generate_content), model="fake-model")
 
     project = _create_project(client)
     facility = client.post(f"/projects/{project['id']}/facility", json={

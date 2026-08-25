@@ -63,9 +63,9 @@ def get_ai_client(
                 "NVIDIA_API_KEY does not start with the expected 'nvapi-' "
                 "prefix — verify it was copied correctly from build.nvidia.com."
             )
-        from pharmagpt.providers.nemotron_client import NemotronClient
+        from pharmagpt.providers.nemotron_client import NemotronClient, safe_model_label
 
-        logger.info("AI provider: NVIDIA Nemotron (model=%s)", nvidia_model)
+        logger.info("AI provider: NVIDIA Nemotron (model=%s)", safe_model_label(nvidia_model))
         return NemotronClient(api_key=nvidia_api_key, model=nvidia_model)
 
     raise ProviderConfigError(

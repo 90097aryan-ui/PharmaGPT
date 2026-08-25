@@ -14,7 +14,6 @@ import time
 
 import pytest
 
-from pharmagpt.services import urs_generation_job as gen_job
 from google.genai import types
 
 
@@ -69,12 +68,12 @@ def _wait_for_terminal_status(client, urs_id, timeout=10.0):
     pytest.fail(f"generation never reached a terminal status: {status}")
 
 
-def test_generate_endpoint_returns_immediately_then_completes(client, monkeypatch):
+def test_generate_endpoint_returns_immediately_then_completes(client, isolated_ai_gateway):
     def fake_generate_content(model, contents, config):
-        time.sleep(0.05)  # simulated Gemini latency
+        time.sleep(0.05)  # simulated AI-call latency
         return _FakeResponse(_req_json("Functional Requirements"))
 
-    monkeypatch.setattr(gen_job, "gemini_client", _FakeClient(fake_generate_content))
+    isolated_ai_gateway.register_provider("gemini", lambda: _FakeClient(fake_generate_content), model="fake-model")
 
     urs = client.post("/urs/", json={
         "title": "URS - Autoclave", "equipment_name": "Autoclave-01",
