@@ -423,6 +423,46 @@ def init_db() -> None:
     _add_column_if_missing(conn, "qms_workflow_instance_steps", "eligible_roles", "TEXT NOT NULL DEFAULT ''")
     conn.commit()
 
+    # ── Configurable quorum approval — schema foundation only ─────────────────
+    # Manually reconstructed minimal batch (Oracle checkpoint), sourced from
+    # two historical Document Control redesign commits that on main also
+    # bring in unrelated application features not wanted here:
+    #   - the two _add_column_if_missing() calls below: originally part of
+    #     commit ff498ff ("Phase 1 — Document Control immutable version
+    #     architecture"), which also added 9 unrelated qms_document_versions
+    #     columns and 2 immutability triggers (excluded from this batch).
+    #   - the backfill UPDATE below: originally part of commit b3a01f1
+    #     ("Phase 3 — Document Control approver pool + quorum scoped to
+    #     final approval"), which also added the qms_document_approver_pool
+    #     table and workflow_engine.py's quorum-approval read logic
+    #     (excluded from this batch) — SQL/WHERE clause reproduced verbatim,
+    #     unchanged from the original.
+    # Placed in this order (ALTER before backfill) from the start — main's
+    # equivalent commit sequence briefly had the backfill run first (inside
+    # qms_database.py's QMS_SCHEMA, via executescript(), before these
+    # ALTERs), which crashed on any database that already had these tables
+    # with sqlite3.OperationalError: no such column: quorum_eligible; see
+    # commit 0ab05a9 ("Fix quorum_eligible migration ordering for existing
+    # databases") for the full incident writeup. This batch never puts the
+    # backfill anywhere but here, so that bug cannot occur in this history.
+    # quorum_eligible defaults to 1 (today's single-decider behaviour) and
+    # is not read anywhere in this codebase yet — application logic that
+    # consumes it (services/workflow_engine.py's use_quorum check) is a
+    # separate, later batch, deliberately not included here. Additive only;
+    # no existing column altered or dropped, no existing row mutated except
+    # by the scoped backfill below.
+    _add_column_if_missing(conn, "qms_workflow_template_steps", "quorum_eligible", "INTEGER NOT NULL DEFAULT 1")
+    _add_column_if_missing(conn, "qms_workflow_instance_steps", "quorum_eligible", "INTEGER NOT NULL DEFAULT 1")
+    # Review stays single-reviewer — none of these steps are ever
+    # quorum-gated. Idempotent and self-correcting on every startup.
+    conn.execute("""
+        UPDATE qms_workflow_template_steps
+        SET quorum_eligible = 0
+        WHERE step_key IN ('under_review', 'department_head_approval', 'quality_head_approval', 'effective')
+          AND template_id = (SELECT id FROM qms_workflow_templates WHERE workflow_key = 'DOCUMENT_WORKFLOW_V1')
+    """)
+    conn.commit()
+
     # ── Investigation Case Phase 2 (Investigation Tasks / Evidence / ─────────
     # Interviews / Summary capability additions) ──────────────────────────────
     # Additive columns only — qms_investigation_tasks itself is a brand new
