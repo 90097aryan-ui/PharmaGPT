@@ -875,14 +875,16 @@ QMS_SCHEMA = """
     -- Document Control redesign (Phase 3, still true post-restructure):
     -- Review stays single-reviewer — none of the four approval steps are
     -- ever quorum-gated now that Department Head/Quality Head/Plant Head
-    -- are sequential single-decider steps, not a shared quorum step. An
-    -- UPDATE (not part of the step INSERT above) so it's idempotent and
-    -- self-correcting even for a DB whose rows were already seeded by an
-    -- earlier boot before quorum_eligible existed.
-    UPDATE qms_workflow_template_steps
-    SET quorum_eligible = 0
-    WHERE step_key IN ('under_review', 'department_head_approval', 'quality_head_approval', 'effective')
-      AND template_id = (SELECT id FROM qms_workflow_templates WHERE workflow_key = 'DOCUMENT_WORKFLOW_V1');
+    -- are sequential single-decider steps, not a shared quorum step.
+    -- This used to be an UPDATE right here, but quorum_eligible is only
+    -- guaranteed to exist once database.py's own _add_column_if_missing()
+    -- calls have run — which happens *after* this whole script, not
+    -- during it (see database.py's "Configurable quorum approval" /
+    -- migration-ordering comment). Moved there so it runs once the column
+    -- is actually guaranteed to exist, instead of assuming CREATE TABLE
+    -- IF NOT EXISTS above already added it (true for a brand-new database,
+    -- false for one that already had this table before quorum_eligible
+    -- existed — that's exactly the case this script must also support).
 
     -- ── Configurable approver pool (Document Control redesign, Phase 3) ──────
     -- Department Head and Quality Head/Designee are mandatory pool seats;

@@ -455,6 +455,21 @@ def init_db() -> None:
     _add_column_if_missing(conn, "qms_workflow_instances", "document_version_id", "INTEGER DEFAULT NULL")
     _add_column_if_missing(conn, "qms_workflow_template_steps", "quorum_eligible", "INTEGER NOT NULL DEFAULT 1")
     _add_column_if_missing(conn, "qms_workflow_instance_steps", "quorum_eligible", "INTEGER NOT NULL DEFAULT 1")
+    # Moved out of QMS_SCHEMA (qms_database.py): that script runs via
+    # executescript() above, before the quorum_eligible ALTERs directly
+    # above this line — so on a database that already had
+    # qms_workflow_template_steps (CREATE TABLE IF NOT EXISTS there is a
+    # no-op), this UPDATE used to run against a column that didn't exist
+    # yet and crashed init_db() with "no such column: quorum_eligible"
+    # before ever reaching the ALTERs that would have added it. Semantics
+    # unchanged from the original — same WHERE clause, still idempotent
+    # and self-correcting on every startup.
+    conn.execute("""
+        UPDATE qms_workflow_template_steps
+        SET quorum_eligible = 0
+        WHERE step_key IN ('under_review', 'department_head_approval', 'quality_head_approval', 'effective')
+          AND template_id = (SELECT id FROM qms_workflow_templates WHERE workflow_key = 'DOCUMENT_WORKFLOW_V1')
+    """)
     _add_column_if_missing(conn, "qms_document_training", "document_version_id", "INTEGER DEFAULT NULL")
     _add_column_if_missing(conn, "qms_documents", "template_id", "INTEGER DEFAULT NULL")
     # DROP + CREATE (not IF NOT EXISTS) so an already-migrated DB always
