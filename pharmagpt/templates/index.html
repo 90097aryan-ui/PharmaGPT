@@ -462,22 +462,17 @@
 
       <div class="sidebar-divider"></div>
 
-      <!-- ══ PharmaPilot (placeholder — no AI implementation). The
-           existing, fully functional AI Assistant chat is kept alongside
-           it unchanged (#nav-chat / #view-chat) so that working feature
-           is not removed. Unchanged per ALD-001 §4.
-
-           Sidebar Cleanup (2026-08-23): the "PharmaPilot" nav item itself
-           is hidden — view-pharmapilot's own content is explicitly labeled
-           "coming soon" / "a placeholder for a future phase" with no AI
-           logic behind it (docs/04_FRONTEND_SPECIFICATION.md §3 confirms
-           the same for its workspace-selector tile). Element, id, data-view,
-           and view-pharmapilot markup are NOT deleted — only the sidebar
-           entry point is hidden via display:none — so this reverses cleanly
-           once PharmaPilot ships for real. ══ -->
+      <!-- ══ PharmaPilot — Yuktav Brain Compliance Check (Regulatory
+           Comparison V1). The existing, fully functional AI Assistant chat
+           is kept alongside it unchanged (#nav-chat / #view-chat). Sidebar
+           Cleanup (2026-08-23) had hidden this nav item while
+           view-pharmapilot was a "coming soon" placeholder with no AI
+           logic behind it; it is un-hidden here because view-pharmapilot
+           now hosts a real capability — see #view-pharmapilot below and
+           static/js/brain_compare.js. ══ -->
       <div class="sidebar-section" data-workspace="pharmapilot">
         <div class="sidebar-label">PharmaPilot</div>
-        <div class="sidebar-item" id="nav-pharmapilot" data-view="view-pharmapilot" style="display:none">
+        <div class="sidebar-item" id="nav-pharmapilot" data-view="view-pharmapilot">
           <span class='icon' data-lucide='bot'></span> PharmaPilot
         </div>
         <div class="sidebar-item" id="nav-chat" data-view="view-chat">
@@ -934,14 +929,59 @@
       </div>
     </main>
 
-    <!-- ── PharmaPilot (Phase 4) — placeholder only, no AI implementation.
+    <!-- ── PharmaPilot: Yuktav Brain Compliance Check ───────────────────────
+         Presentation layer only, over the already-verified, already-tested
+         POST /brain/compare (pharmagpt/services/brain_comparison.py) — no
+         new backend logic lives here. See PROJECT_MEMORY/DECISIONS.md for
+         the Global-vs-Client Regulatory Knowledge architecture this exposes.
          The working AI Assistant (chat) below is unchanged and remains
          reachable from the same sidebar group. ─────────────────────────── -->
-    <main class="ws-placeholder" id="view-pharmapilot" style="display:none">
-      <span class="ws-placeholder-icon icon" data-lucide="bot"></span>
-      <h2>PharmaPilot</h2>
-      <p>Enterprise AI Assistant — coming soon.</p>
-      <p class="ws-placeholder-sub">This workspace is a placeholder for a future phase. Use <strong>AI Assistant</strong> below for the current chat assistant.</p>
+    <main class="qms-view" id="view-pharmapilot" style="display:none">
+      <div class="qms-section-card">
+        <h2><span class="icon" data-lucide="bot"></span> PharmaPilot — Compliance Check</h2>
+        <p style="font-size:12.5px;color:var(--text-muted)">
+          Ask whether your project's evidence satisfies an applicable regulatory expectation.
+          Yuktav Brain compares Global Regulatory Knowledge against your project's own evidence
+          and returns an evidence-backed conclusion — a decision-support result, not a substitute
+          for review.
+        </p>
+        <div class="form-field">
+          <label for="brain-compare-question">Compliance question or regulatory topic</label>
+          <textarea id="brain-compare-question" rows="3"
+            placeholder="Does our cleaning validation procedure satisfy the applicable regulatory expectation?"></textarea>
+        </div>
+        <div class="qms-form-actions">
+          <button class="btn-primary" id="brain-compare-run-btn" onclick="BrainCompare.run()">
+            <span class="icon" data-lucide="sparkles"></span> Run Compliance Check
+          </button>
+        </div>
+      </div>
+      <div class="qms-section-card" id="brain-compare-result" hidden></div>
+
+      <!-- ── Regulatory Gap Analysis V1 — a second, independent Yuktav Brain
+           capability on the same PharmaPilot surface, over POST
+           /brain/gap-analysis (pharmagpt/services/brain_gap_analysis.py).
+           Not a replacement for Compliance Check above; does not modify
+           /brain/compare or its markup. ─────────────────────────────────── -->
+      <div class="sidebar-divider"></div>
+      <div class="qms-section-card">
+        <h2><span class="icon" data-lucide="search-check"></span> PharmaPilot — Regulatory Gap Analysis</h2>
+        <p style="font-size:12.5px;color:var(--text-muted)">
+          Identify which applicable regulatory requirements for a topic are covered, partially
+          covered, not covered, or impossible to assess from your project's available evidence.
+        </p>
+        <div class="form-field">
+          <label for="gap-analysis-question">Regulatory topic or question</label>
+          <textarea id="gap-analysis-question" rows="3"
+            placeholder="What are the cleaning validation requirements for shared manufacturing equipment?"></textarea>
+        </div>
+        <div class="qms-form-actions">
+          <button class="btn-primary" id="gap-analysis-run-btn" onclick="BrainGapAnalysis.run()">
+            <span class="icon" data-lucide="search-check"></span> Run Regulatory Gap Analysis
+          </button>
+        </div>
+      </div>
+      <div class="qms-section-card" id="gap-analysis-result" hidden></div>
     </main>
 
     <!-- ── Chat view ────────────────────────────────────────────────────────── -->
@@ -2600,6 +2640,8 @@
   <script src="{{ url_for('static', filename='js/search.js') }}"></script>
   <script src="{{ url_for('static', filename='js/notifications.js') }}"></script>
   <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/brain_compare.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/brain_gap_analysis.js') }}"></script>
   <script src="{{ url_for('static', filename='js/mobile_nav.js') }}"></script>
 
   <!-- The "Validation sidebar nav items" builder (buildValNav), plus

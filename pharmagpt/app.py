@@ -49,6 +49,7 @@ from pharmagpt.routes.rbac            import bp as rbac_bp
 from pharmagpt.routes.org_structure   import bp as org_structure_bp
 from pharmagpt.routes.backup_admin    import bp as backup_admin_bp
 from pharmagpt.routes.security_admin  import bp as security_admin_bp
+from pharmagpt.routes.brain           import bp as brain_bp
 
 
 # ── Application setup ─────────────────────────────────────────────────────────
@@ -101,6 +102,7 @@ app.register_blueprint(rbac_bp)
 app.register_blueprint(org_structure_bp)
 app.register_blueprint(backup_admin_bp)
 app.register_blueprint(security_admin_bp)
+app.register_blueprint(brain_bp)
 
 
 # ── SPA shell ─────────────────────────────────────────────────────────────────

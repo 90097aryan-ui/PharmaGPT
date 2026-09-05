@@ -568,6 +568,7 @@ def get_investigation_knowledge_base(did):
     result = retrieval_engine.retrieve_context(
         document_type="Deviation",
         project_id=deviation.get("project_id") or 0,
+        company_id=g.tenant.company_id,
         equipment_name=deviation.get("equipment", ""),
         questionnaire=_investigation_context(deviation),
         max_chunks=10,

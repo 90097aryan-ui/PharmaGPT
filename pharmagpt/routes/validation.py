@@ -116,6 +116,7 @@ def validation_generate():
     retrieval = retrieve_context(
         document_type=doc_type,
         project_id=project_id,
+        company_id=g.tenant.company_id,
         equipment_name=equipment_name,
         questionnaire=form_data.get("details", {}),
         max_chunks=10,

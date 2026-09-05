@@ -285,6 +285,26 @@ def init_db() -> None:
     _add_column_if_missing(conn, "kb_documents", "source_id",   "INTEGER DEFAULT NULL")
     conn.commit()
 
+    # ── Yuktav Brain: Global Regulatory Knowledge governance (additive) ──────
+    # Global knowledge is a kb_documents row with company_id='' (the same
+    # sentinel qms_document_database.py already uses for platform-wide
+    # templates) — no second table. These columns govern ONLY that
+    # company_id='' lifecycle; every ordinary tenant-owned KB document keeps
+    # its existing behavior unchanged (retrieval only ever consults
+    # content_status on the company_id='' branch — see retrieval_engine.py).
+    # content_status defaults to 'active' on backfill so pre-existing
+    # (all tenant-owned) rows are inert to that filter.
+    _add_column_if_missing(conn, "kb_documents", "content_category", "TEXT DEFAULT NULL")   # 'regulatory_source' | 'yuktav_interpretation'
+    _add_column_if_missing(conn, "kb_documents", "source_authority",  "TEXT DEFAULT NULL")
+    _add_column_if_missing(conn, "kb_documents", "source_reference",  "TEXT DEFAULT NULL")
+    _add_column_if_missing(conn, "kb_documents", "jurisdiction",      "TEXT DEFAULT NULL")
+    _add_column_if_missing(conn, "kb_documents", "publication_date",  "TEXT DEFAULT NULL")
+    _add_column_if_missing(conn, "kb_documents", "content_status",    "TEXT NOT NULL DEFAULT 'active'")  # staged|active|superseded|retired
+    _add_column_if_missing(conn, "kb_documents", "published_by",      "TEXT DEFAULT NULL")
+    _add_column_if_missing(conn, "kb_documents", "published_at",      "TEXT DEFAULT NULL")
+    _add_column_if_missing(conn, "kb_documents", "supersedes",        "INTEGER DEFAULT NULL")
+    conn.commit()
+
     # ── Risk Management Suite tables ──────────────────────────────────────────
     from pharmagpt.risk_database import RISK_SCHEMA
     conn.executescript(RISK_SCHEMA)
@@ -1283,7 +1303,14 @@ def create_kb_document(title: str, folder: str, tags: str, doc_version: str,
                        effective_date: str | None, review_date: str | None,
                        original_name: str, stored_filename: str,
                        file_type: str, file_size: int, *, company_id: str,
-                       created_by: str = "") -> dict:
+                       created_by: str = "",
+                       content_category: str | None = None,
+                       source_authority: str | None = None,
+                       source_reference: str | None = None,
+                       jurisdiction: str | None = None,
+                       publication_date: str | None = None,
+                       content_status: str = "active",
+                       supersedes: int | None = None) -> dict:
     """Insert a new KB document row and return the full row dict.
 
     `company_id` must be the caller's authenticated tenant
@@ -1291,17 +1318,30 @@ def create_kb_document(title: str, folder: str, tags: str, doc_version: str,
     `created_by` (RBF-001 Fix 2) is likewise authenticated-only.
     `updated_by`/`updated_at` are seeded to the same actor/timestamp as
     creation.
+
+    `content_category`/`source_authority`/`source_reference`/`jurisdiction`/
+    `publication_date`/`content_status`/`supersedes` are the Yuktav Brain
+    Global Regulatory Knowledge governance fields (see the schema comment in
+    init_db()) — meaningless for an ordinary tenant-owned document and left
+    at their defaults by every existing caller. `content_status` defaults to
+    'active' so existing/tenant callers are completely unaffected; the
+    global-authoring route (routes/knowledge_base.py) is the only caller
+    that passes 'staged' explicitly.
     """
     conn = get_connection()
     cur = conn.execute(
         """INSERT INTO kb_documents
            (title, folder, tags, doc_version, effective_date, review_date,
             original_name, stored_filename, file_type, file_size, company_id,
-            created_by, updated_by, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+            created_by, updated_by, updated_at,
+            content_category, source_authority, source_reference, jurisdiction,
+            publication_date, content_status, supersedes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)""",
         (title, folder, tags, doc_version, effective_date or None,
          review_date or None, original_name, stored_filename, file_type, file_size, company_id,
-         created_by, created_by),
+         created_by, created_by,
+         content_category, source_authority, source_reference, jurisdiction,
+         publication_date, content_status, supersedes),
     )
     conn.commit()
     row = dict(conn.execute(
@@ -1309,6 +1349,64 @@ def create_kb_document(title: str, folder: str, tags: str, doc_version: str,
     ).fetchone())
     conn.close()
     return row
+
+
+# ── Yuktav Brain: Global Regulatory Knowledge lifecycle ──────────────────────
+# Global knowledge is a kb_documents row with company_id=''. Authoring
+# (create_kb_document(..., company_id="", content_status="staged")) never
+# makes content retrievable by itself — only publish_global_kb_document()
+# below can set content_status='active', and only routes/knowledge_base.py's
+# super_admin-gated, segregation-of-duty-checked publish route ever calls it.
+
+def get_global_kb_document(kb_id: int) -> dict | None:
+    """Return a kb_documents row only if it belongs to the global
+    (company_id='') scope — mirrors tenancy.scoped_or_none()'s exact-match
+    contract, but for the empty-string sentinel instead of a real
+    company_id, so the global lifecycle can never be pointed at a tenant's
+    own document."""
+    doc = get_kb_document(kb_id)
+    if not doc or doc.get("company_id") != "":
+        return None
+    return doc
+
+
+def publish_global_kb_document(kb_id: int, published_by: str) -> dict:
+    """Publish a staged global document: content_status -> 'active',
+    published_by/published_at stamped from the authenticated publisher
+    (caller's responsibility — see routes/knowledge_base.py — to have
+    already verified `published_by` is a different super_admin from the
+    one who staged it). If this document records a `supersedes` id, that
+    earlier global document flips to 'superseded' in the same commit — old
+    content is never deleted, only excluded from future Brain retrieval."""
+    conn = get_connection()
+    row = conn.execute("SELECT supersedes FROM kb_documents WHERE id = ?", (kb_id,)).fetchone()
+    supersedes = row["supersedes"] if row else None
+    conn.execute(
+        """UPDATE kb_documents SET content_status = 'active', published_by = ?,
+           published_at = CURRENT_TIMESTAMP WHERE id = ?""",
+        (published_by, kb_id),
+    )
+    if supersedes:
+        conn.execute(
+            "UPDATE kb_documents SET content_status = 'superseded' WHERE id = ? AND company_id = ''",
+            (supersedes,),
+        )
+    conn.commit()
+    doc = dict(conn.execute("SELECT * FROM kb_documents WHERE id = ?", (kb_id,)).fetchone())
+    conn.close()
+    return doc
+
+
+def retire_global_kb_document(kb_id: int) -> dict:
+    """Retire an active global document: excluded from Brain retrieval from
+    this point on, retained in the table for audit — never a physical
+    delete."""
+    conn = get_connection()
+    conn.execute("UPDATE kb_documents SET content_status = 'retired' WHERE id = ?", (kb_id,))
+    conn.commit()
+    doc = dict(conn.execute("SELECT * FROM kb_documents WHERE id = ?", (kb_id,)).fetchone())
+    conn.close()
+    return doc
 
 
 def set_kb_document_source(kb_id: int, source_type: str, source_id: int) -> None:

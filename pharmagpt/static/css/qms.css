@@ -391,6 +391,17 @@
 .badge-pending          { background: #F1ECE6; color: #66615B; }
 .badge-pass             { background: #E8F2EA; color: #5F8A61; }
 .badge-fail             { background: #F7E8E7; color: #C35F5B; }
+.badge-warning          { background: #FFF4E5; color: #A97D2E; }
+
+/* ── Yuktav Brain: evidence scope tags (Compliance Check, PharmaPilot) ───── */
+.badge-global           { background: #E7EEF6; color: #6E8FA5; }
+.badge-client           { background: #F1ECE6; color: #66615B; }
+
+/* ── Yuktav Brain: Regulatory Gap Analysis coverage tags (PharmaPilot) ────── */
+.badge-covered               { background: #E8F2EA; color: #5F8A61; }
+.badge-partially-covered     { background: #FFF4E5; color: #A97D2E; }
+.badge-not-covered           { background: #F7E8E7; color: #C35F5B; }
+.badge-insufficient-evidence { background: #F1ECE6; color: #66615B; }
 
 /* ── Change Control status/type variants (base .badge from risk.css) ─────── */
 .badge-critical         { background: #F7E8E7; color: #A9534F; }

@@ -6,8 +6,16 @@ text chunks, ranked by multiple pharmaceutical domain signals.
 
 Public API
 ----------
-retrieve_context(document_type, project_id, equipment_name, questionnaire, max_chunks=10)
+retrieve_context(document_type, project_id, company_id, equipment_name, questionnaire, max_chunks=10)
     → RetrievalResult
+
+`company_id` is required and must come from the caller's authenticated
+TenantContext (g.tenant.company_id) — never from client input. It scopes
+every Knowledge Base row this function can see to that tenant's own
+documents plus platform-wide global knowledge (company_id=''), mirroring
+the same global-fallback convention qms_document_database.list_templates()
+already uses. There is no cross-company fallback. Callers must not rely on
+any frontend/UI filtering to enforce tenant isolation here.
 
 Architecture notes
 ------------------
@@ -105,6 +113,17 @@ class RetrievedChunk:
     section_title: str          # best-effort heading extracted from chunk start
     score:         float
     folder:        str = ""     # KB folder label, if applicable
+    # Yuktav Brain: Global Regulatory Knowledge provenance. `scope` is always
+    # derived from the chunk's own company_id ("Global" iff company_id==''),
+    # never caller-supplied. The remaining fields are only ever populated
+    # for KB-sourced chunks and only when the database actually holds a
+    # value — never fabricated (see retrieve_context() docstring).
+    scope:             str = "Client"   # "Global" | "Client"
+    content_category:  str | None = None  # 'regulatory_source' | 'yuktav_interpretation'
+    source_authority:  str | None = None
+    source_reference:  str | None = None
+    jurisdiction:      str | None = None
+    publication_date:  str | None = None
 
 
 @dataclass
@@ -220,16 +239,37 @@ def _load_project_docs(project_id: int) -> list[dict]:
     return db.get_all_document_texts(project_id)
 
 
-def _load_kb_all() -> list[dict]:
-    """Return all KB rows that have successfully extracted text."""
+def _load_kb_all(company_id: str) -> list[dict]:
+    """Return KB rows that have successfully extracted text, scoped to
+    `company_id`'s own documents plus platform-wide global knowledge
+    (company_id='').
+
+    `company_id` is required (no default, no None-means-all fallback) so a
+    caller can never accidentally retrieve every company's Knowledge Base —
+    mirrors the company_id-required discipline database.py:get_kb_documents
+    already documents for the same table.
+
+    The tenant-isolation predicate `(company_id = ? OR company_id = '')` is
+    unchanged from the TEN-01 fix. The additional
+    `(company_id != '' OR content_status = 'active')` clause is new (Yuktav
+    Brain Global Regulatory Knowledge governance): it only ever constrains
+    the company_id='' branch — a caller's own tenant-owned rows are
+    completely unaffected regardless of their content_status value, since
+    `company_id != ''` is already true for them.
+    """
     conn = db.get_connection()
     rows = conn.execute(
-        """SELECT id, title, folder, tags, original_name, text_content, page_count
+        """SELECT id, title, folder, tags, original_name, text_content, page_count,
+                  company_id, content_category, source_authority, source_reference,
+                  jurisdiction, publication_date
            FROM kb_documents
            WHERE extraction_status = 'ok'
              AND text_content IS NOT NULL
              AND text_content != ''
-           ORDER BY upload_date DESC"""
+             AND (company_id = ? OR company_id = '')
+             AND (company_id != '' OR content_status = 'active')
+           ORDER BY upload_date DESC""",
+        (company_id,),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -263,6 +303,7 @@ def _folder_to_source_type(folder: str) -> str:
 def retrieve_context(
     document_type: str,
     project_id: int,
+    company_id: str,
     equipment_name: str = "",
     questionnaire: dict | None = None,
     max_chunks: int = 10,
@@ -279,6 +320,13 @@ def retrieve_context(
     document_type  : "IQ" | "OQ" | "PQ" | "URS" | "DQ" | "FAT" | "SAT" |
                      "FMEA" | "CAPA" | "Deviation" | "Change Control"
     project_id     : active project ID
+    company_id     : the calling tenant's company_id (g.tenant.company_id) —
+                     required; scopes the Knowledge Base source (sources 2-6
+                     below) to that tenant's own documents plus global
+                     (company_id='') knowledge, so this function can never
+                     surface another company's SOPs/protocols. Project
+                     documents and generated documents are already scoped by
+                     `project_id` itself.
     equipment_name : concatenation of equipment_name + model + manufacturer
                      from form_data (used for relevance boosting)
     questionnaire  : form_data["details"] dict — values are mined for query tokens
@@ -330,13 +378,16 @@ def retrieve_context(
 
     # ── Source 2–6 : Knowledge Base ───────────────────────────────────────────
     try:
-        for row in _load_kb_all():
+        for row in _load_kb_all(company_id):
             text = row.get("text_content", "")
             if not text.strip():
                 continue
             folder   = row.get("folder", "Others")
             src_type = _folder_to_source_type(folder)
             title    = row.get("title") or row.get("original_name", "KB Document")
+            # scope is derived from the row's own company_id — never
+            # caller-supplied — so a chunk can never be mislabeled Global.
+            scope    = "Global" if row.get("company_id") == "" else "Client"
             for chunk in chunk_text(text):
                 s = score_chunk(chunk, query_tokens, equipment_tokens,
                                 doc_type_tokens, boost_terms)
@@ -350,6 +401,12 @@ def retrieve_context(
                         section_title=_extract_section_title(chunk),
                         score=s,
                         folder=folder,
+                        scope=scope,
+                        content_category=row.get("content_category"),
+                        source_authority=row.get("source_authority"),
+                        source_reference=row.get("source_reference"),
+                        jurisdiction=row.get("jurisdiction"),
+                        publication_date=row.get("publication_date"),
                     ))
     except Exception:
         logger.exception("retrieval_engine: error scanning knowledge base")
@@ -397,7 +454,19 @@ def retrieve_context(
     for c in top:
         key = (c.doc_type, c.doc_id)
         if key not in seen:
-            seen[key] = {"id": c.doc_id, "name": c.doc_name, "doc_type": c.doc_type}
+            seen[key] = {
+                "id": c.doc_id, "name": c.doc_name, "doc_type": c.doc_type,
+                # Yuktav Brain provenance — scope is derived from the chunk's
+                # own company_id (see the loader above), never caller input.
+                # The remaining fields are None unless the database actually
+                # holds a value for that document.
+                "scope": c.scope,
+                "content_category": c.content_category,
+                "source_authority": c.source_authority,
+                "source_reference": c.source_reference,
+                "jurisdiction": c.jurisdiction,
+                "publication_date": c.publication_date,
+            }
     sources = list(seen.values())
 
     return RetrievalResult(
@@ -432,6 +501,21 @@ _SECTION_HEADERS = {
 }
 
 
+def _scope_label(scope: str, content_category: str | None) -> str:
+    """Human-readable provenance label for a chunk's evidence category —
+    Yuktav Brain Global Regulatory Knowledge governance. `scope` and
+    `content_category` are always derived from the document's own
+    company_id/content_category columns (see the KB loader above), never
+    caller-supplied."""
+    if scope != "Global":
+        return "Client Knowledge"
+    if content_category == "regulatory_source":
+        return "Global Regulatory Source"
+    if content_category == "yuktav_interpretation":
+        return "Yuktav Interpretation"
+    return "Global Regulatory Knowledge"
+
+
 def _build_context_package(
     chunks: list[RetrievedChunk],
     document_type: str,
@@ -442,6 +526,10 @@ def _build_context_package(
 
     Each chunk carries a traceability header:
       [Source: <doc_name> | Type: <doc_type> | Section: <title> | Relevance: <score>]
+    plus, for Yuktav Brain Global Regulatory Knowledge, a Scope label
+    (Global Regulatory Source | Yuktav Interpretation | Client Knowledge)
+    and any recorded Authority/Jurisdiction/Reference/Published metadata —
+    only ever the fields the database actually holds, never fabricated.
 
     Sections are ordered by knowledge-source priority so the LLM sees the
     most authoritative context first.
@@ -472,6 +560,15 @@ def _build_context_package(
                 meta_parts.append(f"Section: {c.section_title[:60]}")
             if c.page_number is not None:
                 meta_parts.append(f"Page: {c.page_number}")
+            meta_parts.append(f"Scope: {_scope_label(c.scope, c.content_category)}")
+            if c.source_authority:
+                meta_parts.append(f"Authority: {c.source_authority}")
+            if c.jurisdiction:
+                meta_parts.append(f"Jurisdiction: {c.jurisdiction}")
+            if c.publication_date:
+                meta_parts.append(f"Published: {c.publication_date}")
+            if c.source_reference:
+                meta_parts.append(f"Reference: {c.source_reference}")
             meta_parts.append(f"Relevance: {c.score:.3f}")
 
             lines.append(f"[{' | '.join(meta_parts)}]")
