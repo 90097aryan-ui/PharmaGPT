@@ -727,6 +727,23 @@ def init_db() -> None:
         _add_column_if_missing(conn, "qms_documents", _col, _ddl)
     conn.commit()
 
+    # Document Control: version-scoped approval-chain confirmation (Phase 7A,
+    # ported into this release). The chain identity (reviewer/department_head/
+    # quality_head/plant_head) stays on qms_documents above — one chain per
+    # document, not duplicated per version. This column answers a different
+    # question: "has THIS version's chain been explicitly confirmed by the
+    # Author", so a chain left over from a rejected/superseded version can
+    # never silently count for its successor. Same shape as
+    # self_check_completed_at: per-version, empty by default on every new row
+    # (_insert_version_row never carries it forward), stamped only by
+    # qms_document_database.set_review_chain() while the version is still
+    # draft. See services/document_versioning.py's sibling
+    # self_check_completed_at column for the identical pattern. Additive only
+    # — safe for existing databases (existing rows simply read '' until the
+    # Author next assigns/reassigns the chain on their current draft).
+    _add_column_if_missing(conn, "qms_document_versions", "chain_confirmed_at", "TEXT DEFAULT ''")
+    conn.commit()
+
     # Business terminology fix: the final Approval step's business action is
     # "Quality Release" (spec), not the generic "Made Effective" label the
     # step was originally seeded with. QMS_SCHEMA's own INSERT OR IGNORE seed

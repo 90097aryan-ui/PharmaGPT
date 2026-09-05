@@ -207,6 +207,8 @@ QMS_SCHEMA = """
                                                          -- approval_rejected version; never cleared or moved
         self_check_completed_at TEXT   DEFAULT '',      -- Author Self-Check hard gate (per-version; never
                                                          -- carried forward to a new version)
+        chain_confirmed_at     TEXT    DEFAULT '',      -- approval-chain confirmation hard gate (per-version;
+                                                         -- never carried forward — see database.py's Phase 7A note)
         source_attachment_id   INTEGER DEFAULT NULL,    -- FK to qms_attachments.id when this version's content
                                                          -- came from an "Upload Final Author Version" file
         effective_date         TEXT    DEFAULT '',      -- set only on the version that actually became Effective

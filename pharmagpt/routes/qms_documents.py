@@ -862,19 +862,28 @@ def _submission_gate_error(did, document: dict | None = None) -> str | None:
     require Final Author Version before Review submission" — Attachments
     are supporting records only and must never satisfy this), and — SOP
     workflow correction — that the Author has assigned a complete chain
-    (Reviewer, Department Head, Quality Head; Plant Head optional) before
-    Submit for Review is allowed to lock it. If it's 'effective' (Submit for
-    Review would otherwise trigger qms_document_database.start_new_revision()
-    to fork a fresh Draft as a side effect of wfe.start_instance()'s own
-    version lookup), submission is now always blocked here instead — a
-    version that doesn't exist yet cannot possibly already have a recorded
-    Self-Check or Final Author Version, so the old single-call "fork and
-    submit" shortcut could never have satisfied a fresh gate. Callers must
-    fork explicitly via POST .../versions/start-revision, complete both
-    gates on the resulting new Draft, then submit — matching the fact that a
-    human must actually review the carried-over draft in between. Returns
-    None when it's safe to proceed, else the error string to return as a
-    409. `document` is accepted to avoid a redundant fetch when the caller
+    (Reviewer, Department Head, Quality Head; Plant Head optional) AND
+    explicitly confirmed it FOR THIS VERSION (Phase 7A, ported into this
+    release alongside the Final Author Version gate above — neither
+    replaces the other) before Submit for Review is allowed to lock it.
+    The chain identity lives on qms_documents (reused across revisions),
+    but qdb.is_chain_confirmed() is version-scoped and never carries
+    forward — a chain last confirmed for a rejected or superseded version
+    can never silently satisfy its successor; the Author must call
+    POST .../assign-chain again (even re-submitting the same people
+    re-confirms it) before a new Draft can be submitted. If it's
+    'effective' (Submit for Review would otherwise trigger
+    qms_document_database.start_new_revision() to fork a fresh Draft as a
+    side effect of wfe.start_instance()'s own version lookup), submission
+    is now always blocked here instead — a version that doesn't exist yet
+    cannot possibly already have a recorded Self-Check, Final Author
+    Version, or confirmed chain, so the old single-call "fork and submit"
+    shortcut could never have satisfied a fresh gate. Callers must fork
+    explicitly via POST .../versions/start-revision, complete all gates on
+    the resulting new Draft, then submit — matching the fact that a human
+    must actually review the carried-over draft in between. Returns None
+    when it's safe to proceed, else the error string to return as a 409.
+    `document` is accepted to avoid a redundant fetch when the caller
     already has it; fetched here otherwise."""
     version = qdb.get_current_version(did)
     if not version:
@@ -887,7 +896,8 @@ def _submission_gate_error(did, document: dict | None = None) -> str | None:
         return _FINAL_VERSION_REQUIRED_ERROR
     document = document if document is not None else qdb.get_document(did)
     chain = qdb.get_review_chain(document or {})
-    if not (chain["reviewer"] and chain["department_head"] and chain["quality_head"]):
+    chain_complete = bool(chain["reviewer"] and chain["department_head"] and chain["quality_head"])
+    if not (chain_complete and qdb.is_chain_confirmed(did)):
         return _REVIEW_CHAIN_REQUIRED_ERROR
     return None
 

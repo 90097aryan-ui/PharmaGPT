@@ -423,16 +423,27 @@ def is_self_check_cleared(document_id: int) -> bool:
 
 def set_review_chain(document_id: int, chain: dict, *, assigned_by: str) -> dict:
     """Store the Author's chosen Reviewer/Department Head/Quality Head/
-    Plant Head for this document. Only legal while the current version is
-    still 'draft' — routes/qms_documents.py additionally enforces this at
-    the route layer (the actual lock point spec §4 requires) so a direct
-    request against an already-submitted document is rejected before this
-    function is ever called, not silently no-op'd here."""
+    Plant Head for this document, AND stamp chain_confirmed_at on the
+    CURRENT version (Phase 7A hard gate, ported into this release --
+    see database.py's migration comment): the chain identity lives on
+    qms_documents (one per document, reused across revisions), but "has
+    THIS version's chain been explicitly confirmed" is per-version and
+    never carried forward -- a version forked by rejection or by a new
+    revision cycle always starts with chain_confirmed_at='' (this module's
+    row-insert default), exactly like self_check_completed_at, so a
+    rejected version's old chain can never silently satisfy its
+    successor's Submit-for-Review gate. Only legal while the current
+    version is still 'draft' — routes/qms_documents.py additionally
+    enforces this at the route layer (the actual lock point spec §4
+    requires) so a direct request against an already-submitted document
+    is rejected before this function is ever called, not silently
+    no-op'd here."""
     version = get_current_version(document_id)
     if not version or version["status"] != "draft":
         raise ValueError("The review/approval chain can only be assigned or changed while the "
                           "current version is Draft — it locks once Submitted for Review")
     from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
     conn = get_connection()
     conn.execute(
         """UPDATE qms_documents
@@ -447,13 +458,29 @@ def set_review_chain(document_id: int, chain: dict, *, assigned_by: str) -> dict
             chain.get("department_head_user_id", ""), chain.get("department_head_name", ""),
             chain.get("quality_head_user_id", ""), chain.get("quality_head_name", ""),
             chain.get("plant_head_user_id", ""), chain.get("plant_head_name", ""),
-            assigned_by, datetime.now(timezone.utc).isoformat(),
+            assigned_by, now,
             document_id,
         ),
+    )
+    conn.execute(
+        "UPDATE qms_document_versions SET chain_confirmed_at = ? WHERE id = ?",
+        (now, version["id"]),
     )
     conn.commit()
     conn.close()
     return get_document(document_id)
+
+
+def is_chain_confirmed(document_id: int) -> bool:
+    """Whether the document's CURRENT version has an explicitly confirmed
+    approval chain (Phase 7A hard gate, ported into this release) -- the
+    check routes/qms_documents.py's _submission_gate_error() calls before
+    allowing Submit for Review, alongside is_self_check_cleared() and
+    TARGET's own Final Author Version check. A chain left over from a
+    rejected/superseded version never satisfies this for its successor,
+    since chain_confirmed_at is never carried forward."""
+    version = get_current_version(document_id)
+    return bool(version and version.get("chain_confirmed_at"))
 
 
 def get_review_chain(document: dict) -> dict:
