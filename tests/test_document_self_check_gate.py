@@ -255,6 +255,10 @@ def test_submit_blocked_after_start_revision_until_fresh_self_check(client, monk
 
     client.post(f"/qms/documents/{did}/self-check")
     _upload_final_version(client, did)
+    # Chain confirmation (Phase 7A) is also per-version — the chain assigned
+    # on the Effective version does not carry forward to this new Draft, so
+    # it must be (re-)confirmed here too before Submit for Review can succeed.
+    _assign_chain(client, did)
     r = client.post(f"/qms/documents/{did}/workflow/start")
     assert r.status_code == 201
 
@@ -268,6 +272,9 @@ def test_full_two_step_revision_flow_via_legacy_endpoint(client, monkeypatch):
     assert r.status_code == 201
     client.post(f"/qms/documents/{did}/self-check")
     _upload_final_version(client, did)
+    # Chain confirmation (Phase 7A) is also per-version — re-confirm it for
+    # this new Draft before Submit for Review, same as the self-check above.
+    _assign_chain(client, did)
     _as(monkeypatch, _REVIEWER_USER_ID, "Rita", role="reviewer_qa")
     r = client.post(f"/qms/documents/{did}/approval", json={"action": "Submitted for Review"})
     assert r.status_code == 201

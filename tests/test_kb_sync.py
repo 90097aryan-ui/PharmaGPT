@@ -299,6 +299,9 @@ def test_republish_snapshots_the_outgoing_version_instead_of_discarding_it(clien
     client.post(f"/qms/documents/{doc['id']}/versions/start-revision")
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v2 — revised"})
     _self_check(client, doc["id"])
+    # Chain confirmation (Phase 7A) is per-version — re-confirm it for this
+    # new Draft before Submit for Review, same as the self-check above.
+    _assign_chain(client, doc["id"])
     _submit_and_fully_approve(client, doc["id"], monkeypatch)
     _clear_training_gate(client, doc["id"])
 
@@ -348,6 +351,9 @@ def test_republish_logs_version_created_and_updated_audit_entries(client, monkey
     client.post(f"/qms/documents/{doc['id']}/versions/start-revision")
     client.put(f"/qms/documents/{doc['id']}", json={"content": "# SOP v2 — revised"})
     _self_check(client, doc["id"])
+    # Chain confirmation (Phase 7A) is per-version — re-confirm it for this
+    # new Draft before Submit for Review, same as the self-check above.
+    _assign_chain(client, doc["id"])
     _submit_and_fully_approve(client, doc["id"], monkeypatch)
     _clear_training_gate(client, doc["id"])
 

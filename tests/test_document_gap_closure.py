@@ -302,12 +302,14 @@ def test_existing_sop_full_revision_lifecycle_with_two_rejections(client, monkey
     assert v1_1["status"] == "draft"
 
     # 1.1 -> Review Rejected -> 1.2 new immutable Draft
-    # (the chain assigned earlier by _reach_approved_via_route is stored on
-    # the document itself and persists across revision cycles — no need to
-    # reassign it here.)
+    # (the chain identity assigned earlier by _reach_approved_via_route is
+    # stored on the document itself and persists across revision cycles, but
+    # its per-version *confirmation* (Phase 7A) does not — assign-chain must
+    # be called again on this new Draft before Submit for Review.)
     client.put(f"/qms/documents/{did}", json={"content": "v1.1 edits"})
     client.post(f"/qms/documents/{did}/self-check")
     _upload_final_version(client, did, b"v1.1 final upload")
+    _assign_chain(client, did)
     client.post(f"/qms/documents/{did}/workflow/start")
     _as(monkeypatch, REVIEWER_USER_ID, "Rita")
     with _reauth(True):
@@ -326,6 +328,9 @@ def test_existing_sop_full_revision_lifecycle_with_two_rejections(client, monkey
     client.put(f"/qms/documents/{did}", json={"content": "v1.2 edits"})
     client.post(f"/qms/documents/{did}/self-check")
     _upload_final_version(client, did, b"v1.2 final upload")
+    # Chain confirmation (Phase 7A) is per-version too — re-confirm it for
+    # this new Draft, same as above.
+    _assign_chain(client, did)
     client.post(f"/qms/documents/{did}/workflow/start")
     _as(monkeypatch, REVIEWER_USER_ID, "Rita")
     with _reauth(True):

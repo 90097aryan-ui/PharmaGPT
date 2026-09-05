@@ -211,8 +211,11 @@ def test_existing_effective_sop_becomes_2_0_on_next_release(client, monkeypatch)
     client.post(f"/qms/documents/{did}/versions/start-revision")
     client.post(f"/qms/documents/{did}/self-check")
     _upload_final_version(client, did, b"revised content")
-    # The chain assigned on the first cycle is stored on the document itself
-    # (not per-version) and still applies — no need to reassign.
+    # The chain identity assigned on the first cycle is stored on the
+    # document itself and still applies, but its per-version *confirmation*
+    # (Phase 7A) does not carry forward — assign-chain must be called again
+    # on this new Draft before Submit for Review.
+    _assign_chain(client, did)
     client.post(f"/qms/documents/{did}/workflow/start")
     _as(monkeypatch, REVIEWER_USER_ID, "Rita")
     with _reauth(True):
