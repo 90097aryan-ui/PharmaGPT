@@ -95,8 +95,16 @@
   body.mobile-nav-drawer-open .sidebar-backdrop { display: block; }
 
   /* Reserve room at the bottom of every view so its own content isn't
-     hidden behind the fixed bottom tab bar. */
-  body.mobile-chrome-visible .app-body > main {
+     hidden behind the fixed bottom tab bar. Selector updated for the
+     Yuktav UI Redesign's .app-main-col wrapper (Yuktav UI Redesign) —
+     views are now .app-main-col > main, not a direct .app-body child. */
+  body.mobile-chrome-visible .app-main-col > main {
     padding-bottom: 70px;
   }
+
+  /* Module topbar becomes horizontally scrollable chrome above the mobile
+     drawer's off-canvas sidebar; no left-offset needed since .app-main-col
+     already takes full width once .sidebar leaves the flex flow below. */
+  .module-topbar-tabs,
+  .module-topbar-subtabs { -webkit-overflow-scrolling: touch; }
 }

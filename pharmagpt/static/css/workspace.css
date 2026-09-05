@@ -171,3 +171,129 @@ body.ent-ws-active > header { display: none; }
 
 .pw-tab-panel { display: none; }
 .pw-tab-panel.active { display: block; }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   YUKTAV UI REDESIGN — module session shell (5-item sidebar + module topbar)
+   ──────────────────────────────────────────────────────────────────────────────
+   .app-main-col wraps every existing `<main id="view-*">` (untouched) in a real
+   flex column that sits beside .sidebar inside .app-body, with #module-topbar
+   as its first, flex-shrink:0 child. This gives the topbar real layout height
+   instead of a position:fixed overlay, so every view's own pre-existing
+   overflow/scroll rules (.dash-container, .qms-view + .qms-body, .chat-container,
+   etc.) keep working completely unchanged — .app-main-col itself never scrolls;
+   whichever single <main> is visible still owns its own one scroll region.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.app-main-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* ── Module topbar: back button + title + authorized sub-function tabs ─────── */
+.module-topbar {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.module-topbar-row1 {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.module-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+.module-back-btn:hover { background: var(--bg-secondary); }
+.module-back-btn .icon svg { width: 14px; height: 14px; }
+
+.module-topbar-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.module-topbar-tabs,
+.module-topbar-subtabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 20px;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+}
+
+.module-topbar-subtabs {
+  padding-top: 4px;
+  padding-bottom: 10px;
+  border-top: 1px dashed var(--divider);
+  margin-top: -2px;
+}
+
+/* Re-theme relocated .sidebar-item elements for the light topbar (they were
+   designed for the dark .sidebar background) without touching .sidebar-item
+   itself, so nothing about the real sidebar's own appearance changes. */
+.module-tab,
+.module-subtab {
+  border-left: none;
+  border-radius: var(--radius);
+  padding: 7px 14px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.module-tab:hover,
+.module-subtab:hover {
+  background: var(--bg-secondary);
+  color: var(--navy);
+}
+.module-tab.active,
+.module-subtab.active {
+  background: var(--blue-light);
+  color: #FFF;
+  font-weight: 600;
+}
+.module-tab .icon,
+.module-subtab .icon { opacity: 1; }
+.module-subtab { font-size: 11.5px; padding: 5px 12px; }
+
+@media (max-width: 768px) {
+  .module-topbar-row1 { padding: 10px 16px; }
+  .module-topbar-tabs,
+  .module-topbar-subtabs { padding-left: 12px; padding-right: 12px; }
+}
+
+/* ── Projects tab (view-validation-projects) — #project-list/.qms-nav-group
+   were designed to render on the dark .sidebar background; scoped override
+   for their new light .qms-body home. Nothing outside this view is affected. */
+#view-validation-projects .qms-nav-group-label { color: var(--text-muted); }
+#view-validation-projects .btn-new-project { }
+#view-validation-projects .project-item { border: 1px solid var(--border); margin-bottom: 6px; }
+#view-validation-projects .project-item:hover  { background: var(--bg-secondary); }
+#view-validation-projects .project-item.active { background: #F1ECE6; }
+#view-validation-projects .proj-item-name { color: var(--text); }
+#view-validation-projects .proj-item-sub  { color: var(--text-muted); }
+#view-validation-projects .proj-icon      { color: var(--text-muted); }
+#view-validation-projects .proj-delete-btn,
+#view-validation-projects .proj-fav-btn   { color: var(--text-disabled); }

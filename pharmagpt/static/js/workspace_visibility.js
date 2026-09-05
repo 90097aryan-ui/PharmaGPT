@@ -45,6 +45,20 @@
       el.style.display = visible ? "" : "none";
     });
 
+    // Yuktav UI Redesign: Document Control's primary sidebar row merges two
+    // previously-independent sections (Document Generator + Knowledge Base),
+    // each gated by its own single workspace key. A single [data-workspace]
+    // check would wrongly hide the whole row for a user who has only one of
+    // the two. [data-workspace-any] is visible if the user has ANY of a
+    // comma-separated list — additive to the check above, does not change
+    // how [data-workspace] itself behaves anywhere else.
+    const anyGatedEls = document.querySelectorAll("[data-workspace-any]");
+    anyGatedEls.forEach((el) => {
+      const keys = el.dataset.workspaceAny.split(",").map((k) => k.trim());
+      const visible = isAdmin || keys.some((k) => accessible.has(k));
+      el.style.display = visible ? "" : "none";
+    });
+
     const usernameEl = document.getElementById("ws-selector-username");
     if (usernameEl) usernameEl.textContent = (user && (user.display_name || user.email)) || "back";
 
