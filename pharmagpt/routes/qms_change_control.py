@@ -350,7 +350,7 @@ def start_workflow(cc_id):
         return jsonify({"error": "Not found"}), 404
     sig = tenancy.signing_identity(g.tenant)
     try:
-        state = wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, cc_id, g.tenant.company_id, sig["performed_by"])
+        state = wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, cc_id, g.tenant.company_id, sig["performed_by"], tenant=g.tenant)
     except wfe.WorkflowError as e:
         audit.log_failure("change_control", cc_id, "Workflow start blocked", reason=str(e))
         return jsonify({"error": str(e)}), 409
@@ -403,6 +403,7 @@ def decide_workflow_step(cc_id, step_order):
             RECORD_TYPE, cc_id, step_order, decision,
             user_id=g.tenant.user_id, role=g.tenant.role,
             performed_by=sig["performed_by"], comments=data.get("comments", ""),
+            tenant=g.tenant,
         )
     except wfe.WorkflowPermissionError as e:
         audit.log_failure("change_control", cc_id, f"Workflow decision blocked ({decision})", reason=str(e))
@@ -480,7 +481,7 @@ def submit_approval(cc_id):
     comments = data.get("comments", "")
     try:
         if not wfdb.get_active_instance(RECORD_TYPE, cc_id):
-            wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, cc_id, g.tenant.company_id, sig["performed_by"])
+            wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, cc_id, g.tenant.company_id, sig["performed_by"], tenant=g.tenant)
         state = wfe.get_instance_state(RECORD_TYPE, cc_id)
         instance = state["instance"]
         if not instance or instance["status"] != "in_progress":
@@ -499,7 +500,8 @@ def submit_approval(cc_id):
                                       [{"user_id": g.tenant.user_id, "display_name": sig["performed_by"]}])
         wfe.decide_step(RECORD_TYPE, cc_id, step["step_order"], decision,
                          user_id=g.tenant.user_id, role=g.tenant.role,
-                         performed_by=sig["performed_by"], comments=comments)
+                         performed_by=sig["performed_by"], comments=comments,
+                         tenant=g.tenant)
     except (wfe.WorkflowPermissionError, wfe.WorkflowError) as e:
         audit.log_failure("change_control", cc_id, f"Approval action blocked ({action_name})", reason=str(e))
         return jsonify({"error": str(e)}), 409

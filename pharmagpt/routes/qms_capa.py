@@ -328,7 +328,7 @@ def start_workflow(cid):
         return jsonify({"error": "Not found"}), 404
     sig = tenancy.signing_identity(g.tenant)
     try:
-        state = wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, cid, g.tenant.company_id, sig["performed_by"])
+        state = wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, cid, g.tenant.company_id, sig["performed_by"], tenant=g.tenant)
     except wfe.WorkflowError as e:
         audit.log_failure("capa", cid, "Workflow start blocked", reason=str(e))
         return jsonify({"error": str(e)}), 409
@@ -393,6 +393,7 @@ def decide_workflow_step(cid, step_order):
             RECORD_TYPE, cid, step_order, decision,
             user_id=g.tenant.user_id, role=g.tenant.role,
             performed_by=sig["performed_by"], comments=data.get("comments", ""),
+            tenant=g.tenant,
         )
     except wfe.WorkflowPermissionError as e:
         audit.log_failure("capa", cid, f"Workflow decision blocked ({decision})", reason=str(e))
@@ -483,7 +484,7 @@ def submit_effectiveness_verification(cid):
             RECORD_TYPE, cid, step["step_order"], decision,
             user_id=g.tenant.user_id, role=g.tenant.role,
             performed_by=sig["performed_by"], comments=data.get("comments", ""),
-            return_to=return_to,
+            return_to=return_to, tenant=g.tenant,
         )
     except (wfe.WorkflowPermissionError, wfe.WorkflowError) as e:
         audit.log_failure("capa", cid, f"Effectiveness Verification blocked ({result})", reason=str(e))
@@ -566,7 +567,7 @@ def submit_approval(cid):
     comments = data.get("comments", "")
     try:
         if not wfdb.get_active_instance(RECORD_TYPE, cid):
-            wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, cid, g.tenant.company_id, sig["performed_by"])
+            wfe.start_instance(WORKFLOW_KEY, RECORD_TYPE, cid, g.tenant.company_id, sig["performed_by"], tenant=g.tenant)
         state = wfe.get_instance_state(RECORD_TYPE, cid)
         instance = state["instance"]
         if not instance or instance["status"] != "in_progress":
@@ -590,7 +591,8 @@ def submit_approval(cid):
                                       [{"user_id": g.tenant.user_id, "display_name": sig["performed_by"]}])
         wfe.decide_step(RECORD_TYPE, cid, step["step_order"], decision,
                          user_id=g.tenant.user_id, role=g.tenant.role,
-                         performed_by=sig["performed_by"], comments=comments)
+                         performed_by=sig["performed_by"], comments=comments,
+                         tenant=g.tenant)
     except (wfe.WorkflowPermissionError, wfe.WorkflowError) as e:
         audit.log_failure("capa", cid, f"Approval action blocked ({action_name})", reason=str(e))
         return jsonify({"error": str(e)}), 409

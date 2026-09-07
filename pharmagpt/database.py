@@ -475,6 +475,17 @@ def init_db() -> None:
     _add_column_if_missing(conn, "qms_workflow_instances", "document_version_id", "INTEGER DEFAULT NULL")
     _add_column_if_missing(conn, "qms_workflow_template_steps", "quorum_eligible", "INTEGER NOT NULL DEFAULT 1")
     _add_column_if_missing(conn, "qms_workflow_instance_steps", "quorum_eligible", "INTEGER NOT NULL DEFAULT 1")
+
+    # Yuktav org/RBAC/workflow authorization task — optional, additive
+    # department + functional-role auto-resolution for an approval step, as
+    # an alternative to a hand-picked named user_id. NULL (the default) on
+    # every existing template step reproduces today's behaviour exactly:
+    # services/workflow_engine.py::start_instance() only attempts
+    # auto-resolution when BOTH columns are set on a step, and named-user
+    # assignment via assign_approvers()/the Document Control chain remains
+    # fully supported and untouched either way.
+    _add_column_if_missing(conn, "qms_workflow_template_steps", "department_code", "TEXT DEFAULT NULL")
+    _add_column_if_missing(conn, "qms_workflow_template_steps", "functional_role_name", "TEXT DEFAULT NULL")
     # Moved out of QMS_SCHEMA (qms_database.py): that script runs via
     # executescript() above, before the quorum_eligible ALTERs directly
     # above this line — so on a database that already had

@@ -43,6 +43,7 @@ from pharmagpt import risk_database as rdb
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
+from pharmagpt.auth.module_access import require_business_permission
 from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.db import qms_repo
 from pharmagpt.services import esignature_service
@@ -189,6 +190,7 @@ def update_assessment(aid):
 
 @bp.route("/assessments/<int:aid>", methods=["DELETE"])
 @require_role("company_admin")
+@require_business_permission("Validation", "Delete")
 def delete_assessment(aid):
     existing = tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id)
     if not existing:
@@ -335,6 +337,7 @@ def get_approval(aid):
 
 @bp.route("/assessments/<int:aid>/approval", methods=["POST"])
 @require_role("company_admin", "reviewer_qa")
+@require_business_permission("Validation", "Approve")
 def add_approval(aid):
     a = tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id)
     if not a:
@@ -398,6 +401,7 @@ def add_approval(aid):
 
 @bp.route("/assessments/<int:aid>/publish", methods=["POST"])
 @require_role("company_admin", "reviewer_qa")
+@require_business_permission("Validation", "Approve")
 def publish_to_library(aid):
     """Phase F fix (C7): this endpoint previously had no role guard and no
     status check at all, letting any authenticated `user` publish an

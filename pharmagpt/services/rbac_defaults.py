@@ -20,7 +20,11 @@ MODULES = [
     "Change Control", "QMS", "Warehouse", "Administration", "Reports",
 ]
 
-ACTIONS = ["View", "Create", "Edit", "Delete", "Review", "Approve", "Export", "Admin"]
+# "Submit"/"Reject" (Yuktav org/RBAC authorization task) are additive to the
+# original 8 — every existing (module, action) row and every existing test
+# asserting the original 8-action shape is unaffected; these two only ever
+# appear in NEW rows for the NEW department/functional-role templates below.
+ACTIONS = ["View", "Create", "Edit", "Delete", "Review", "Approve", "Export", "Admin", "Submit", "Reject"]
 
 # (name, department_code) — department_code is a hint resolved to a real
 # departments.id at clone time; never string-matched afterward.
@@ -32,6 +36,7 @@ DEFAULT_DEPARTMENTS = [
     ("Validation", "VALIDATION"),
     ("Engineering", "ENGINEERING"),
     ("Warehouse", "WAREHOUSE"),
+    ("PPIC", "PPIC"),
     ("Environmental Health & Safety (EHS)", "EHS"),
     ("Regulatory Affairs", "REGULATORY_AFFAIRS"),
     ("Human Resources", "HR"),
@@ -83,11 +88,144 @@ HOME_MODULES_BY_DEPARTMENT: dict[str, list[str]] = {
 _CROSS_CUTTING_QUALITY_MODULES = ["Deviations", "CAPA", "Change Control", "QMS"]
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Yuktav organization/RBAC/workflow authorization task — department +
+# functional-role templates (Company -> Department -> Functional Role ->
+# Module Access target model). Additive to the 21 tier-based templates
+# above: a distinct set of role templates, one per (department, functional
+# role) cell in the target org chart, so "Production Reviewer" carries its
+# own grant set independent of "QA Reviewer" — never a single global
+# "Reviewer" role shared across departments (see docs/LESSONS_LEARNED.md §5:
+# exact designation/role-string filtering has previously hidden legitimate
+# users; here the distinction is deliberate, not a naming accident).
+#
+# Functional role names match workflow_roles.name (migration 0014) exactly
+# — Initiator/Coordinator/Reviewer/Approver/Plant Head — so a user's
+# per-department functional role (user_departments.workflow_role_id) and
+# their cloned rbac_roles grant set are always describing the same concept
+# under two different names for two different purposes (workflow capability
+# vs. permission grants), never two competing vocabularies.
+
+# major "business" module -> the rbac_permissions.module catalog entries it
+# covers. This is the single mapping between the 4-module business
+# vocabulary (QMS / Validation / Document Control / PharmaPilot) the target
+# org model is expressed in, and the existing 15-module fine-grained
+# catalog — additive documentation-and-lookup, not a second permission
+# system (mirrors services/approval_engine.py's WORKFLOWS docstring
+# rationale for the same kind of one-place mapping).
+MAJOR_MODULE_MAP: dict[str, set[str]] = {
+    "QMS": {"QMS", "Deviations", "CAPA", "Change Control", "Warehouse"},
+    "Validation": {"Validation", "Risk Assessment", "Equipment Library", "Projects"},
+    "Document Control": {"Document Control", "Knowledge Base"},
+    "PharmaPilot": {"AI Assistant"},
+}
+
+# functional role -> the actions it grants on every major-module marked
+# TRUE for its (department, role) cell below. Plant Head reuses Approver's
+# action set (final approval authority, not record creation or RBAC
+# administration).
+FUNCTIONAL_ROLE_ACTIONS: dict[str, set[str]] = {
+    "Initiator": {"View", "Create", "Edit", "Submit"},
+    "Reviewer": {"View", "Review"},
+    "Approver": {"View", "Review", "Approve", "Reject"},
+    "Coordinator": {"View", "Create", "Edit", "Submit", "Review", "Approve", "Reject", "Admin", "Delete"},
+    "Plant Head": {"View", "Review", "Approve", "Reject"},
+}
+
+# (department_code, functional_role) -> {major_module: bool}. This is the
+# authoritative TRUE/FALSE target matrix — the exact source a route or test
+# should cite, not a hand re-derivation. FALSE means no permission row is
+# ever created for that (department, role, major_module) combination.
+TARGET_MODULE_MATRIX: dict[tuple[str, str], dict[str, bool]] = {
+    ("QA", "Coordinator"):        {"QMS": True, "Validation": True,  "Document Control": True},
+    ("QA", "Initiator"):          {"QMS": True, "Validation": False, "Document Control": True},
+    ("QA", "Reviewer"):           {"QMS": True, "Validation": True,  "Document Control": True},
+    ("QA", "Approver"):           {"QMS": True, "Validation": True,  "Document Control": True},
+    ("PRODUCTION", "Initiator"):  {"QMS": True, "Validation": False, "Document Control": True},
+    ("PRODUCTION", "Reviewer"):   {"QMS": True, "Validation": True,  "Document Control": True},
+    ("PRODUCTION", "Approver"):   {"QMS": True, "Validation": True,  "Document Control": True},
+    ("WAREHOUSE", "Initiator"):   {"QMS": True, "Validation": False, "Document Control": True},
+    ("WAREHOUSE", "Reviewer"):    {"QMS": True, "Validation": True,  "Document Control": True},
+    ("WAREHOUSE", "Approver"):    {"QMS": True, "Validation": True,  "Document Control": True},
+    ("PPIC", "Initiator"):        {"QMS": True, "Validation": False, "Document Control": True},
+    ("PPIC", "Reviewer"):         {"QMS": True, "Validation": False, "Document Control": True},
+    ("PPIC", "Approver"):         {"QMS": True, "Validation": False, "Document Control": True},
+    ("ENGINEERING", "Initiator"): {"QMS": True, "Validation": False, "Document Control": True},
+    ("ENGINEERING", "Reviewer"):  {"QMS": True, "Validation": True,  "Document Control": True},
+    ("ENGINEERING", "Approver"):  {"QMS": True, "Validation": True,  "Document Control": True},
+    ("QC", "Initiator"):          {"QMS": True, "Validation": False, "Document Control": True},
+    ("QC", "Reviewer"):           {"QMS": True, "Validation": True,  "Document Control": True},
+    ("QC", "Approver"):           {"QMS": True, "Validation": True,  "Document Control": True},
+    ("VALIDATION", "Initiator"):  {"QMS": True, "Validation": True,  "Document Control": True},
+    ("VALIDATION", "Reviewer"):   {"QMS": True, "Validation": True,  "Document Control": True},
+    ("VALIDATION", "Approver"):   {"QMS": True, "Validation": True,  "Document Control": True},
+    ("PLANT_HEAD", "Plant Head"): {"QMS": True, "Validation": True,  "Document Control": True},
+}
+
+# rbac_roles.name (global template, seeded in migrations/0016_..._up.sql) ->
+# (department_code, functional_role). The single place that ties a cloned
+# template's display name back to its matrix cell — default_grants_for_role
+# below checks this dict before falling back to the original 21-tier lookup.
+DEPARTMENT_ROLE_TEMPLATES: dict[str, tuple[str, str]] = {
+    "QA Coordinator/Admin": ("QA", "Coordinator"),
+    "QA Initiator": ("QA", "Initiator"),
+    "QA Reviewer": ("QA", "Reviewer"),
+    "QA Approver": ("QA", "Approver"),
+    "Production Initiator": ("PRODUCTION", "Initiator"),
+    "Production Reviewer": ("PRODUCTION", "Reviewer"),
+    "Production Approver": ("PRODUCTION", "Approver"),
+    "Warehouse Initiator": ("WAREHOUSE", "Initiator"),
+    "Warehouse Reviewer": ("WAREHOUSE", "Reviewer"),
+    "Warehouse Approver": ("WAREHOUSE", "Approver"),
+    "PPIC Initiator": ("PPIC", "Initiator"),
+    "PPIC Reviewer": ("PPIC", "Reviewer"),
+    "PPIC Approver": ("PPIC", "Approver"),
+    "Engineering Initiator": ("ENGINEERING", "Initiator"),
+    "Engineering Reviewer": ("ENGINEERING", "Reviewer"),
+    "Engineering Approver": ("ENGINEERING", "Approver"),
+    "QC Initiator": ("QC", "Initiator"),
+    "QC Reviewer": ("QC", "Reviewer"),
+    "QC Approver": ("QC", "Approver"),
+    "Validation Initiator": ("VALIDATION", "Initiator"),
+    "Validation Reviewer": ("VALIDATION", "Reviewer"),
+    "Validation Approver": ("VALIDATION", "Approver"),
+    "Plant Head / Approver": ("PLANT_HEAD", "Plant Head"),
+}
+
+
+def default_grants_for_department_role(department_code: str, functional_role: str) -> set[tuple[str, str]]:
+    """Resolve the default (module, action) grant set for one (department,
+    functional_role) cell of TARGET_MODULE_MATRIX, expanded through
+    MAJOR_MODULE_MAP into concrete rbac_permissions catalog rows. Returns an
+    empty set for an unrecognized cell — fail-closed by construction: a
+    major_module marked False, or an entirely unknown cell, contributes
+    zero grant rows, not a row with granted=False."""
+    matrix_row = TARGET_MODULE_MATRIX.get((department_code, functional_role))
+    if not matrix_row:
+        return set()
+    actions = FUNCTIONAL_ROLE_ACTIONS.get(functional_role, set())
+    grants: set[tuple[str, str]] = set()
+    for major_module, allowed in matrix_row.items():
+        if not allowed:
+            continue
+        for sub_module in MAJOR_MODULE_MAP.get(major_module, set()):
+            for action in actions:
+                grants.add((sub_module, action))
+    return grants
+
+
 def default_grants_for_role(role_name: str) -> set[tuple[str, str]]:
     """Resolve the default (module, action) grant set for one of the 21
-    role templates, by tier. Returns an empty set for an unrecognized role
-    name (custom, non-template roles start with zero grants — the Company
-    Admin builds their matrix explicitly)."""
+    tier-based role templates, OR one of the newer department/functional-
+    role templates (DEPARTMENT_ROLE_TEMPLATES) — checked first, since a
+    department/functional-role template name never collides with the
+    original 21. Returns an empty set for an unrecognized role name
+    (custom, non-template roles start with zero grants — the Company Admin
+    builds their matrix explicitly)."""
+    dept_role = DEPARTMENT_ROLE_TEMPLATES.get(role_name)
+    if dept_role is not None:
+        return default_grants_for_department_role(*dept_role)
+
     entry = ROLE_TEMPLATES.get(role_name)
     if entry is None:
         return set()

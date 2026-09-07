@@ -34,6 +34,7 @@ from pharmagpt import qms_change_control_database as qccdb
 from pharmagpt import risk_database as riskdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
+from pharmagpt.auth.module_access import require_business_permission
 from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.db import equipment_repo
 from pharmagpt.services import equipment_service
@@ -250,6 +251,7 @@ def update_equipment(equipment_id):
 
 @bp.route("/equipment/<int:equipment_id>", methods=["DELETE"])
 @require_role("company_admin")
+@require_business_permission("Validation", "Delete")
 def delete_equipment(equipment_id):
     existing = equipdb.get_equipment_scoped(equipment_id, g.tenant.company_id)
     if not existing:
@@ -312,6 +314,7 @@ def link_equipment_document(equipment_id):
 
 @bp.route("/equipment/<int:equipment_id>/documents/<int:link_id>", methods=["DELETE"])
 @require_role("company_admin")
+@require_business_permission("Validation", "Delete")
 def unlink_equipment_document(equipment_id, link_id):
     if not equipdb.get_equipment_scoped(equipment_id, g.tenant.company_id):
         return jsonify({"error": "Equipment not found"}), 404

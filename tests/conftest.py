@@ -125,4 +125,24 @@ def client(db_path, monkeypatch):
     import pharmagpt.services.esignature_service as esignature_service
     monkeypatch.setattr(esignature_service, "require_esignature", lambda *a, **k: None)
 
+    # Yuktav org/RBAC/workflow authorization task, enforcement-closure phase:
+    # pharmagpt.auth.module_access.has_business_permission() no longer gives
+    # company_admin/reviewer_qa an unconditional bypass — it resolves through
+    # the same rbac_user_roles -> rbac_roles -> rbac_role_permissions tables
+    # everyone else uses (see that module's docstring for why). Same
+    # rationale as the three bypasses above: the 1000+ existing business-
+    # logic tests using this fixture predate real RBAC role assignments
+    # entirely and don't mock get_effective_permissions, so this fixture
+    # grants a broad, permissive effective-permission set for the duration
+    # of each such test — real fail-closed enforcement behavior (including
+    # the FALSE-cell denial matrix and the removal of the frozen-role
+    # bypass) is covered separately, with real RBAC-role fixtures, in
+    # tests/test_module_access.py and
+    # tests/test_workflow_engine_org_authorization.py.
+    import pharmagpt.services.rbac_defaults as rbac_defaults
+    monkeypatch.setattr(
+        "pharmagpt.auth.module_access.get_effective_permissions",
+        lambda tenant: {(m, a) for m in rbac_defaults.MODULES for a in rbac_defaults.ACTIONS},
+    )
+
     return appmod.app.test_client()

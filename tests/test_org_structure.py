@@ -187,10 +187,13 @@ def test_provision_org_defaults_for_company_is_idempotent():
 
     summary_1 = org_structure_repo.provision_org_defaults_for_company(fake, COMPANY_A)
     assert summary_1["roles_created"] == 2
-    assert len(store_["departments"]) == 12
+    # 13, not 12: Yuktav org/RBAC/workflow authorization task added PPIC to
+    # rbac_defaults.DEFAULT_DEPARTMENTS (additive — see
+    # tests/test_rbac_department_role_templates.py::test_ppic_added_to_default_departments).
+    assert len(store_["departments"]) == 13
     assert len(store_["approval_levels"]) == 3
 
     summary_2 = org_structure_repo.provision_org_defaults_for_company(fake, COMPANY_A)
     assert summary_2["roles_created"] == 0  # already cloned — idempotent
-    assert len(store_["departments"]) == 12  # find_or_create_department didn't duplicate
+    assert len(store_["departments"]) == 13  # find_or_create_department didn't duplicate
     assert len(store_["approval_levels"]) == 3

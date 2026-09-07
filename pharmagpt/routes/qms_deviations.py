@@ -876,7 +876,7 @@ def start_workflow(did):
     sig = tenancy.signing_identity(g.tenant)
     try:
         dynamic_key = _build_dynamic_workflow_key(did)
-        wfe.start_instance(dynamic_key, RECORD_TYPE, did, g.tenant.company_id, sig["performed_by"])
+        wfe.start_instance(dynamic_key, RECORD_TYPE, did, g.tenant.company_id, sig["performed_by"], tenant=g.tenant)
     except wfe.WorkflowError as e:
         audit.log_failure("deviation", did, "Workflow start blocked", reason=str(e))
         return jsonify({"error": str(e)}), 409
@@ -937,6 +937,7 @@ def decide_workflow_step(did, step_order):
             RECORD_TYPE, did, step_order, decision,
             user_id=g.tenant.user_id, role=g.tenant.role,
             performed_by=sig["performed_by"], comments=data.get("comments", ""),
+            tenant=g.tenant,
         )
     except wfe.WorkflowPermissionError as e:
         audit.log_failure("deviation", did, f"Workflow decision blocked ({decision})", reason=str(e))

@@ -56,6 +56,7 @@ from pharmagpt import qual_database as qdb
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
+from pharmagpt.auth.module_access import require_business_permission
 from pharmagpt.services import esignature_service
 from pharmagpt.services import kb_sync
 from pharmagpt.services import lifecycle_engine
@@ -190,6 +191,7 @@ def update_qualification(qid):
 
 @bp.route("/<int:qid>", methods=["DELETE"])
 @require_role("company_admin")
+@require_business_permission("Validation", "Delete")
 def delete_qualification(qid):
     existing = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
     if not existing:
@@ -253,6 +255,7 @@ def update_protocol(qid, pid):
 
 @bp.route("/<int:qid>/protocols/<int:pid>", methods=["DELETE"])
 @require_role("company_admin")
+@require_business_permission("Validation", "Delete")
 def delete_protocol(qid, pid):
     existing = _scoped_protocol(qid, pid)
     if not existing:
@@ -305,6 +308,7 @@ def update_test_case(qid, pid, tcid):
 
 @bp.route("/<int:qid>/protocols/<int:pid>/test-cases/<int:tcid>", methods=["DELETE"])
 @require_role("company_admin")
+@require_business_permission("Validation", "Delete")
 def delete_test_case(qid, pid, tcid):
     if not _scoped_protocol(qid, pid):
         return jsonify({"error": "Protocol not found"}), 404
@@ -525,6 +529,7 @@ def execute_test_case(qid, pid, tcid):
 
 @bp.route("/<int:qid>/protocols/<int:pid>/complete", methods=["POST"])
 @require_role("company_admin", "reviewer_qa")
+@require_business_permission("Validation", "Approve")
 def complete_protocol(qid, pid):
     """Mark protocol as completed and update qualification status.
 
@@ -645,6 +650,7 @@ def get_approval(qid):
 
 @bp.route("/<int:qid>/approval", methods=["POST"])
 @require_role("company_admin", "reviewer_qa")
+@require_business_permission("Validation", "Approve")
 def add_approval(qid):
     qual = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
     if not qual:

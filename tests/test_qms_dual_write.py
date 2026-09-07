@@ -33,8 +33,19 @@ AUTH_HEADERS = {"Authorization": "Bearer good-token"}
 
 
 @pytest.fixture()
-def client(db_path):
+def client(db_path, monkeypatch):
     import pharmagpt.app as appmod
+
+    # Yuktav org/RBAC/workflow authorization task, enforcement-closure phase:
+    # has_business_permission() no longer bypasses company_admin/reviewer_qa
+    # unconditionally — see tests/conftest.py's shared `client` fixture for
+    # the full rationale (this file defines its own `client`, so it needs
+    # the same mock independently).
+    import pharmagpt.services.rbac_defaults as rbac_defaults
+    monkeypatch.setattr(
+        "pharmagpt.auth.module_access.get_effective_permissions",
+        lambda tenant: {(m, a) for m in rbac_defaults.MODULES for a in rbac_defaults.ACTIONS},
+    )
 
     return appmod.app.test_client()
 

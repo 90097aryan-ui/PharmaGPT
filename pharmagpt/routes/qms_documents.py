@@ -85,6 +85,7 @@ from pharmagpt import qms_database as qmsdb
 from pharmagpt import qms_workflow_database as wfdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
+from pharmagpt.auth.module_access import require_business_permission
 from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.prompts import PHARMA_SYSTEM_PROMPT
 from pharmagpt.providers import router as ai_router
@@ -264,6 +265,7 @@ def list_templates_route():
 
 @bp.route("/templates", methods=["POST"])
 @require_role("company_admin")
+@require_business_permission("Document Control", "Admin")
 def create_template_route():
     if not g.tenant.company_id:
         return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
@@ -334,6 +336,7 @@ def get_approver_pool_route():
 
 @bp.route("/approver-pool", methods=["POST"])
 @require_role("company_admin")
+@require_business_permission("Document Control", "Admin")
 def set_approver_pool_route():
     if not g.tenant.company_id:
         return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
@@ -404,6 +407,7 @@ def update_document(did):
 
 @bp.route("/<int:did>", methods=["DELETE"])
 @require_role("company_admin")
+@require_business_permission("Document Control", "Delete")
 def delete_document(did):
     existing = tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id)
     if not existing:
@@ -624,6 +628,7 @@ def upload_final_author_version(did):
 
 @bp.route("/<int:did>/versions", methods=["POST"])
 @require_role("company_admin")
+@require_business_permission("Document Control", "Admin")
 def create_version(did):
     """Document Control redesign (spec §3/§21): the normal author workflow
     NEVER creates a version this way — version numbering is entirely system
@@ -1017,6 +1022,7 @@ def decide_workflow_step(did, step_order):
 
 @bp.route("/<int:did>/release", methods=["POST"])
 @require_role("company_admin", "reviewer_qa")
+@require_business_permission("Document Control", "Approve")
 def release_document(did):
     """Quality Coordinator / authorized Quality role release: the ONLY way a
     document ever becomes Effective. Requires the current version to already
@@ -1104,6 +1110,7 @@ _POST_EFFECTIVE_ACTIONS = {"Made Obsolete", "Send for Revision"}
 
 @bp.route("/<int:did>/approval", methods=["POST"])
 @require_role("company_admin", "reviewer_qa")
+@require_business_permission("Document Control", "Approve")
 def submit_approval(did):
     """Legacy-URL compatibility wrapper (kept for backward compatibility
     during deployment — see docs/plan). Same URL, request shape, and

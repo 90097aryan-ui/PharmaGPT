@@ -59,13 +59,22 @@ def create_template(workflow_key: str, name: str, module: str) -> dict:
 
 
 def create_template_step(template_id: int, step_order: int, step_key: str, step_name: str,
-                          step_type: str, eligible_roles: str, gate_status: str) -> dict:
+                          step_type: str, eligible_roles: str, gate_status: str, *,
+                          department_code: str | None = None, functional_role_name: str | None = None) -> dict:
+    """`department_code`/`functional_role_name` (Yuktav org/RBAC/workflow
+    authorization task): optional, additive alternative to a hand-picked
+    named approver for an 'approval' step — see
+    services/workflow_engine.py::start_instance()'s auto-resolution hook.
+    Both default to None, reproducing today's behaviour exactly for every
+    existing caller."""
     conn = get_connection()
     cur = conn.execute(
         """INSERT INTO qms_workflow_template_steps
-           (template_id, step_order, step_key, step_name, step_type, eligible_roles, gate_status)
-           VALUES (?,?,?,?,?,?,?)""",
-        (template_id, step_order, step_key, step_name, step_type, eligible_roles, gate_status),
+           (template_id, step_order, step_key, step_name, step_type, eligible_roles, gate_status,
+            department_code, functional_role_name)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (template_id, step_order, step_key, step_name, step_type, eligible_roles, gate_status,
+         department_code, functional_role_name),
     )
     conn.commit()
     row = conn.execute(

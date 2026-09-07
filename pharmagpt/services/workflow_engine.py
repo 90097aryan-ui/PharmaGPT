@@ -138,6 +138,63 @@ def _apply_gate_status(record_type: str, record_id: int, status: str) -> None:
     applier(record_id, status)
 
 
+# Minimal prerequisite reused from the (separately committed) CRIT-02
+# segregation-of-duties work: services/workflow_engine.py::
+# _maybe_auto_resolve_approver() (Yuktav org/RBAC/workflow authorization
+# task, below) calls reject_creator_as_approver() so an auto-resolved
+# department/functional-role approver is never the record's own creator —
+# the same guarantee assign_approvers() enforces for manual assignment.
+# Included here verbatim as a genuine functional dependency, not additional
+# scope of this task.
+
+def _creator_user_id_for_deviation(record_id: int) -> str:
+    from pharmagpt import qms_deviation_database as ddb
+    return (ddb.get_deviation(record_id) or {}).get("created_by_user_id", "")
+
+
+def _creator_user_id_for_capa(record_id: int) -> str:
+    from pharmagpt import qms_capa_database as capadb
+    return (capadb.get_capa(record_id) or {}).get("created_by_user_id", "")
+
+
+def _creator_user_id_for_change_control(record_id: int) -> str:
+    from pharmagpt import qms_change_control_database as ccdb
+    return (ccdb.get_change_control(record_id) or {}).get("created_by_user_id", "")
+
+
+def _creator_user_id_for_document(record_id: int) -> str:
+    from pharmagpt import qms_document_database as qdb
+    return (qdb.get_document(record_id) or {}).get("created_by_user_id", "")
+
+
+CREATOR_LOOKUP: dict[str, Callable[[int], str]] = {
+    "deviation": _creator_user_id_for_deviation,
+    "capa": _creator_user_id_for_capa,
+    "change_control": _creator_user_id_for_change_control,
+    "document": _creator_user_id_for_document,
+}
+
+
+def reject_creator_as_approver(record_type: str, record_id: int, approvers: list[dict]) -> None:
+    """Raise WorkflowError if any of `approvers` is the record's own
+    creator. Public (no leading underscore) so route handlers that assign
+    approvers outside assign_approvers() below — e.g.
+    routes/qms_deviations.py's Workflow Builder, which writes approvers
+    directly via qms_deviation_database.py rather than through this engine
+    — can call the same, single check (layer A). assign_approvers() below
+    calls it too (layer B), so the engine itself refuses even if a future
+    caller reaches it by some other path."""
+    lookup = CREATOR_LOOKUP.get(record_type)
+    creator_user_id = lookup(record_id) if lookup else ""
+    if not creator_user_id:
+        return
+    if any((a.get("user_id") or "") == creator_user_id for a in approvers):
+        raise WorkflowError(
+            "This record's creator cannot be assigned as an approver for their own record "
+            "(segregation of duties)"
+        )
+
+
 # ── Document Control redesign — version-linkage hooks ────────────────────────
 # Same registry-dispatch shape as STATUS_APPLIERS/CREATOR_LOOKUP above: one
 # entry per record_type, absent (no-op) for every module that has no version
@@ -305,6 +362,47 @@ def _require_comment_on_document_reject(record_type: str, comments: str) -> None
         raise WorkflowError("A comment is required to reject this document")
 
 
+def _maybe_auto_resolve_approver(company_id: str | None, t_step: dict, record_type: str,
+                                  record_id: int, instance_step_id: int) -> None:
+    """Yuktav org/RBAC/workflow authorization task: if `t_step` (a template
+    step) carries both department_code and functional_role_name, resolve
+    today's holder of that (department, functional role) combination and
+    snapshot them as the step's named approver — exactly the same
+    qms_workflow_step_approvers mechanism assign_approvers() writes to, so
+    decide_step()'s existing named-approver check is completely unchanged.
+    This is a SNAPSHOT taken once, at instance-creation time: a later
+    change to that person's department/role never retroactively alters an
+    already-created instance step (nothing here re-reads org data after
+    this point). A no-op (leaves the step unassigned, same as today) when:
+    the step doesn't opt in (no department_code/functional_role_name),
+    company_id is unknown, nobody currently holds that (department, role)
+    combination, or the resolved person is the record's own creator
+    (segregation of duties — reuses reject_creator_as_approver's check
+    rather than raising, since auto-resolution failing to find anyone is
+    an expected, non-fatal outcome, not a caller error)."""
+    department_code = t_step.get("department_code")
+    functional_role_name = t_step.get("functional_role_name")
+    if not department_code or not functional_role_name or not company_id:
+        return
+
+    from pharmagpt.services import org_assignment
+    from pharmagpt.services.supabase_client import get_service_role_client
+
+    client = get_service_role_client()
+    resolved = org_assignment.resolve_department_approver(
+        client, company_id, department_code, functional_role_name,
+    )
+    if not resolved:
+        return
+
+    try:
+        reject_creator_as_approver(record_type, record_id, [resolved])
+    except WorkflowError:
+        return  # resolved person is the record's own creator — leave unassigned
+
+    wfdb.set_step_approvers(instance_step_id, [resolved])
+
+
 def get_instance_state(record_type: str, record_id: int) -> dict:
     """Full workflow state for a record: the latest instance (if any) plus
     every step and its assigned approvers. Used by GET .../workflow and by
@@ -350,7 +448,7 @@ def is_unlocked(record_type: str, record_id: int, unlock_step_key: str) -> tuple
 
 def start_instance(workflow_key: str, record_type: str, record_id: int,
                     company_id: str | None, performed_by: str, *,
-                    default_quorum: int | None = None) -> dict:
+                    default_quorum: int | None = None, tenant=None) -> dict:
     """Instantiate a fresh workflow run for a record (e.g. on 'Submit for
     Review'). Step 1 is an 'activity' step representing the submission
     itself and is completed immediately by the caller; current_step_order
@@ -360,7 +458,16 @@ def start_instance(workflow_key: str, record_type: str, record_id: int,
     when given and > 1, every 'approval' step in this instance is snapshotted
     as approval_mode='quorum' requiring that many distinct approve votes
     (services/workflow_engine.py's decide_step()); omitted or <= 1 reproduces
-    today's single-decider 'any' mode exactly."""
+    today's single-decider 'any' mode exactly.
+
+    `tenant` (Yuktav org/RBAC/workflow authorization task, optional, default
+    None): when given, requires the caller to hold 'Submit' business
+    permission on record_type's major module before a fresh instance may be
+    started — the same fail-closed layer decide_step() applies to
+    approve/reject/advance, applied here to the act of submitting in the
+    first place. Deliberately NOT wired at the route level for
+    record_type='document' — see decide_step()'s docstring for why
+    Document Control's Author-driven flow is excluded from this gate."""
     template = wfdb.get_template_by_key(workflow_key)
     if not template:
         raise WorkflowError(f"Unknown workflow template '{workflow_key}'")
@@ -371,6 +478,8 @@ def start_instance(workflow_key: str, record_type: str, record_id: int,
     existing = wfdb.get_active_instance(record_type, record_id)
     if existing:
         raise WorkflowError("A workflow is already in progress for this record")
+
+    _check_business_permission(tenant, record_type, "advance")
 
     document_version_id = CURRENT_VERSION_LOOKUP.get(record_type, lambda _r: None)(record_id)
     instance = wfdb.create_instance(template["id"], record_type, record_id, company_id,
@@ -387,11 +496,13 @@ def start_instance(workflow_key: str, record_type: str, record_id: int,
         # CAPA/Deviation/Change Control regardless.
         use_quorum = (t_step["step_type"] == "approval" and t_step.get("quorum_eligible", 1)
                       and default_quorum and default_quorum > 1)
-        wfdb.create_instance_step(
+        instance_step = wfdb.create_instance_step(
             instance["id"], t_step,
             approval_mode="quorum" if use_quorum else "any",
             required_quorum=default_quorum if use_quorum else None,
         )
+        if t_step["step_type"] == "approval":
+            _maybe_auto_resolve_approver(company_id, t_step, record_type, record_id, instance_step["id"])
 
     first_step = wfdb.get_instance_step(instance["id"], 1)
     now = _now()
@@ -442,8 +553,30 @@ def assign_approvers(record_type: str, record_id: int, step_order: int,
     return get_instance_state(record_type, record_id)
 
 
+def _check_business_permission(tenant, record_type: str, decision: str) -> None:
+    """Yuktav org/RBAC/workflow authorization task: the ADDITIONAL fine-
+    grained business-permission check, called only AFTER the caller has
+    already passed the pre-existing named-approver/eligible-role identity
+    check (never before) — so an identity-check failure is always reported
+    as such, and this check can never mask a broken identity check behind
+    a coincidentally-correct permission denial. No-op when `tenant` is
+    None (every non-route caller, and any test exercising the pre-existing
+    identity checks in isolation, is completely unaffected)."""
+    if tenant is None:
+        return
+    from pharmagpt.auth.module_access import (
+        action_for_decision, has_business_permission, major_module_for_record_type,
+    )
+    major_module = major_module_for_record_type(record_type)
+    business_action = action_for_decision(decision)
+    if major_module and business_action and not has_business_permission(tenant, major_module, business_action):
+        raise WorkflowPermissionError(
+            f"This action requires '{business_action}' permission on '{major_module}'"
+        )
+
+
 def _decide_quorum_step(record_type: str, record_id: int, instance: dict, step: dict, decision: str, *,
-                         user_id: str, performed_by: str, comments: str) -> dict:
+                         user_id: str, performed_by: str, comments: str, tenant=None) -> dict:
     """Configurable-quorum approval (Document Control): a step in
     approval_mode='quorum' requires `required_quorum` distinct approve votes
     before it advances. A single reject vote immediately rejects the step
@@ -457,6 +590,7 @@ def _decide_quorum_step(record_type: str, record_id: int, instance: dict, step: 
         raise WorkflowError(f"'{step['step_name']}' has no assigned approver yet")
     if user_id not in {a["user_id"] for a in approvers}:
         raise WorkflowPermissionError("You are not an assigned approver for this step")
+    _check_business_permission(tenant, record_type, decision)
     if wfdb.has_voted(step["id"], user_id):
         raise WorkflowError("You have already voted on this step")
     if decision == "reject":
@@ -511,7 +645,7 @@ def _decide_quorum_step(record_type: str, record_id: int, instance: dict, step: 
 
 def decide_step(record_type: str, record_id: int, step_order: int, decision: str, *,
                  user_id: str, role: str, performed_by: str, comments: str = "",
-                 return_to: str = "") -> dict:
+                 return_to: str = "", tenant=None) -> dict:
     """Decide the record's *current* workflow step.
 
     decision:
@@ -533,6 +667,25 @@ def decide_step(record_type: str, record_id: int, step_order: int, decision: str
                             than the generic "Returned for Investigation"
                             label, since that label isn't part of every
                             module's status vocabulary.
+
+    `tenant` (Yuktav org/RBAC/workflow authorization task, optional, default
+    None): when given, an ADDITIONAL fine-grained business-permission check
+    runs alongside the existing named-approver/eligible-role check above —
+    the caller must also hold the matching action (Submit/Approve/Reject,
+    see pharmagpt.auth.module_access.DECISION_ACTION) on this record_type's
+    major module (pharmagpt.auth.module_access.RECORD_TYPE_MAJOR_MODULE),
+    resolved via the department/functional-role RBAC templates. Raises
+    WorkflowPermissionError (-> 403, same as the existing checks) on denial.
+    Optional and additive so this function's other, non-route callers (and
+    any test exercising the pre-existing named-approver/eligible-role
+    behavior in isolation) are entirely unaffected when they don't pass it —
+    see route call sites (routes/qms_deviations.py, qms_capa.py,
+    qms_change_control.py, qms_documents.py) for where it's wired to
+    g.tenant. Deliberately does NOT gate the existing named-approver check
+    at all — an assigned approver who additionally fails this business-
+    permission check is still denied by this new layer, but the reverse
+    (business-permission granted, not a named approver) never bypasses the
+    existing identity check above.
     """
     instance = wfdb.get_active_instance(record_type, record_id)
     if not instance:
@@ -551,7 +704,8 @@ def decide_step(record_type: str, record_id: int, step_order: int, decision: str
         if decision not in ("approve", "reject"):
             raise WorkflowError(f"Illegal decision '{decision}' for a quorum approval step")
         return _decide_quorum_step(record_type, record_id, instance, step, decision,
-                                    user_id=user_id, performed_by=performed_by, comments=comments)
+                                    user_id=user_id, performed_by=performed_by, comments=comments,
+                                    tenant=tenant)
 
     if step["step_type"] == "approval":
         if decision not in ("approve", "reject", "return"):
@@ -568,6 +722,11 @@ def decide_step(record_type: str, record_id: int, step_order: int, decision: str
             raise WorkflowError(f"Illegal decision '{decision}' for an activity step")
         if role not in _eligible_roles(step):
             raise WorkflowPermissionError(f"Role '{role}' is not eligible to advance '{step['step_name']}'")
+
+    # ADDITIONAL fine-grained business-permission check — only reached once
+    # the identity/role check above has already passed. See
+    # _check_business_permission()'s docstring for why the ordering matters.
+    _check_business_permission(tenant, record_type, decision)
 
     now = _now()
     template_steps = wfdb.get_template_steps(instance["template_id"])
