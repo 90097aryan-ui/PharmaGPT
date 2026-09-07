@@ -158,7 +158,9 @@ def test_assigned_role_grants_only_its_mapped_workspaces():
     with patch(RBAC_SERVICE_CLIENT_PATH, return_value=FakeRbacClient(store)):
         assert has_workspace_access("validation", tenant=USER_WITH_VALIDATION_ROLE) is True
         assert has_workspace_access("knowledge", tenant=USER_WITH_VALIDATION_ROLE) is False
-        assert accessible_workspaces_for(USER_WITH_VALIDATION_ROLE) == ["validation"]
+        # dashboard/pharmapilot are UNIVERSAL_WORKSPACES, present regardless
+        # of this grant (Yuktav sidebar RBAC regression fix).
+        assert accessible_workspaces_for(USER_WITH_VALIDATION_ROLE) == ["dashboard", "validation", "pharmapilot"]
 
 
 def test_unconfigured_user_fails_open_pending_migration_0015():
@@ -216,38 +218,45 @@ def _role_store(module_action_pairs, user_id):
 
 
 def test_validation_reviewer_sees_validation_only():
+    """'Only' here means 'only among the RBAC-matrix-gated workspaces' —
+    dashboard/pharmapilot are UNIVERSAL_WORKSPACES and appear for every
+    authenticated company user regardless of this grant (Yuktav sidebar
+    RBAC regression fix)."""
     tenant = TenantContext(user_id="u1", email="u1@x.com", display_name="Validation Reviewer",
                             role="user", company_id=COMPANY_A)
     store = _role_store([("Validation", "View")], tenant.user_id)
     with patch(RBAC_SERVICE_CLIENT_PATH, return_value=FakeRbacClient(store)):
-        assert accessible_workspaces_for(tenant) == ["validation"]
+        assert accessible_workspaces_for(tenant) == ["dashboard", "validation", "pharmapilot"]
 
 
 def test_validation_approver_sees_validation_only():
     """Approve is still just a grant on the 'Validation' module as far as
     workspace visibility is concerned — the workspace gate doesn't
-    distinguish View from Approve (see comment above)."""
+    distinguish View from Approve (see comment above). dashboard/
+    pharmapilot are universal, same note as above."""
     tenant = TenantContext(user_id="u2", email="u2@x.com", display_name="Validation Approver",
                             role="user", company_id=COMPANY_A)
     store = _role_store([("Validation", "Approve"), ("Risk Assessment", "Approve")], tenant.user_id)
     with patch(RBAC_SERVICE_CLIENT_PATH, return_value=FakeRbacClient(store)):
-        assert accessible_workspaces_for(tenant) == ["validation"]
+        assert accessible_workspaces_for(tenant) == ["dashboard", "validation", "pharmapilot"]
 
 
 def test_quality_user_sees_quality_only():
+    """dashboard/pharmapilot are universal, same note as above."""
     tenant = TenantContext(user_id="u3", email="u3@x.com", display_name="Quality User",
                             role="user", company_id=COMPANY_A)
     store = _role_store([("QMS", "View"), ("Deviations", "View"), ("CAPA", "View")], tenant.user_id)
     with patch(RBAC_SERVICE_CLIENT_PATH, return_value=FakeRbacClient(store)):
-        assert accessible_workspaces_for(tenant) == ["quality"]
+        assert accessible_workspaces_for(tenant) == ["dashboard", "quality", "pharmapilot"]
 
 
 def test_knowledge_user_sees_knowledge_only():
+    """dashboard/pharmapilot are universal, same note as above."""
     tenant = TenantContext(user_id="u4", email="u4@x.com", display_name="Knowledge User",
                             role="user", company_id=COMPANY_A)
     store = _role_store([("Knowledge Base", "View")], tenant.user_id)
     with patch(RBAC_SERVICE_CLIENT_PATH, return_value=FakeRbacClient(store)):
-        assert accessible_workspaces_for(tenant) == ["knowledge"]
+        assert accessible_workspaces_for(tenant) == ["dashboard", "knowledge", "pharmapilot"]
 
 
 def test_document_user_sees_documents_and_shared_quality_entry():
@@ -266,7 +275,9 @@ def test_document_user_sees_documents_and_shared_quality_entry():
                             role="user", company_id=COMPANY_A)
     store = _role_store([("Document Control", "View")], tenant.user_id)
     with patch(RBAC_SERVICE_CLIENT_PATH, return_value=FakeRbacClient(store)):
-        assert set(accessible_workspaces_for(tenant)) == {"documents", "quality"}
+        # dashboard/pharmapilot are UNIVERSAL_WORKSPACES, present regardless
+        # of this grant (Yuktav sidebar RBAC regression fix).
+        assert set(accessible_workspaces_for(tenant)) == {"documents", "quality", "dashboard", "pharmapilot"}
 
 
 def test_role_assigned_with_zero_grants_still_fails_open_today():
@@ -314,17 +325,109 @@ def test_deny_by_default_once_activated():
     with patch.object(workspace_access, "DENY_BY_DEFAULT", True):
         store = {"rbac_permissions": [], "rbac_roles": [], "rbac_role_permissions": [], "rbac_user_roles": []}
         with patch(RBAC_SERVICE_CLIENT_PATH, return_value=FakeRbacClient(store)):
-            # No RBAC role at all -> denied every restricted workspace.
-            assert accessible_workspaces_for(REVIEWER_UNCONFIGURED) == []
+            # No RBAC role at all -> denied every RBAC-matrix-gated
+            # workspace, but dashboard/pharmapilot remain visible —
+            # UNIVERSAL_WORKSPACES is checked before the granted_modules
+            # empty-set fallback, so it is unaffected by DENY_BY_DEFAULT
+            # either way (this is the exact regression this fix closes:
+            # a future strict-mode flip must not re-hide these two).
+            assert accessible_workspaces_for(REVIEWER_UNCONFIGURED) == ["dashboard", "pharmapilot"]
             # Company Admin/Super Admin -> still unrestricted regardless.
             assert accessible_workspaces_for(COMPANY_ADMIN) == list(ALL_WORKSPACES)
             assert accessible_workspaces_for(SUPER_ADMIN) == list(ALL_WORKSPACES)
 
         # An assigned role's grants still work exactly as before under
         # strict mode — only the "empty grants" fallback changes meaning.
+        # dashboard/pharmapilot are universal regardless.
         store = _store_with_validation_grant()
         with patch(RBAC_SERVICE_CLIENT_PATH, return_value=FakeRbacClient(store)):
-            assert accessible_workspaces_for(USER_WITH_VALIDATION_ROLE) == ["validation"]
+            assert accessible_workspaces_for(USER_WITH_VALIDATION_ROLE) == ["dashboard", "validation", "pharmapilot"]
+
+
+# ── Universal workspace visibility (Yuktav sidebar RBAC regression fix) ─────
+# Dashboard and PharmaPilot disappeared from the sidebar for any company
+# user holding one of the 22 new department/functional-role RBAC templates
+# (migration 0016 + rbac_defaults.TARGET_MODULE_MATRIX), because neither
+# "Dashboard" nor "AI Assistant" (PharmaPilot's module) is ever granted by
+# that matrix — see docs/LESSONS_LEARNED.md and the diagnostic report for
+# commit e3752ccb11248bbba76cb3c47065fe14ee064cf3. Product decision: both
+# are company-wide workspaces, not department privileges, so they are now
+# UNIVERSAL_WORKSPACES — visible to any authenticated user of a company
+# regardless of RBAC module grants. These tests cover exactly the six
+# scenarios that decision requires proving.
+
+def test_authenticated_company_user_always_sees_dashboard():
+    """F.1 — dashboard is visible even with zero rbac_user_roles rows and
+    under strict DENY_BY_DEFAULT, the exact combination that caused the
+    regression."""
+    with patch.object(workspace_access, "DENY_BY_DEFAULT", True):
+        store = {"rbac_permissions": [], "rbac_roles": [], "rbac_role_permissions": [], "rbac_user_roles": []}
+        with patch(RBAC_SERVICE_CLIENT_PATH, return_value=FakeRbacClient(store)):
+            assert has_workspace_access("dashboard", tenant=REVIEWER_UNCONFIGURED) is True
+
+
+def test_authenticated_company_user_always_sees_pharmapilot():
+    """F.2 — pharmapilot is visible even though TARGET_MODULE_MATRIX never
+    marks "PharmaPilot" True for any (department, role) cell (see
+    rbac_defaults.py) — the root cause of the regression for this
+    workspace specifically."""
+    with patch.object(workspace_access, "DENY_BY_DEFAULT", True):
+        store = {"rbac_permissions": [], "rbac_roles": [], "rbac_role_permissions": [], "rbac_user_roles": []}
+        with patch(RBAC_SERVICE_CLIENT_PATH, return_value=FakeRbacClient(store)):
+            assert has_workspace_access("pharmapilot", tenant=REVIEWER_UNCONFIGURED) is True
+
+
+def test_department_role_matrix_still_governs_quality_validation_documents():
+    """F.3 — the fix does not broaden QMS/Document Control/Validation: a
+    user granted only 'Validation' still cannot see 'quality' or
+    'knowledge', identical to pre-fix behavior."""
+    store = _store_with_validation_grant()
+    with patch(RBAC_SERVICE_CLIENT_PATH, return_value=FakeRbacClient(store)):
+        assert has_workspace_access("validation", tenant=USER_WITH_VALIDATION_ROLE) is True
+        assert has_workspace_access("quality", tenant=USER_WITH_VALIDATION_ROLE) is False
+        assert has_workspace_access("knowledge", tenant=USER_WITH_VALIDATION_ROLE) is False
+
+
+def test_no_company_context_not_granted_universal_workspace_access():
+    """F.4 — a non-admin caller with no company_id (e.g. super_admin before
+    assuming a company context) is NOT granted dashboard/pharmapilot via
+    the new universal-workspace path; "universal" means "universal to
+    authenticated company users", not "bypasses tenant scoping". (An
+    actual super_admin always passes regardless, via the pre-existing,
+    unmodified ADMIN_ROLES bypass above the company_id check — see
+    test_super_admin_always_has_access.)"""
+    tenant = TenantContext(user_id="ghost", email="ghost@example.com", display_name="No Company",
+                            role="user", company_id=None)
+    assert has_workspace_access("dashboard", tenant=tenant) is False
+    assert has_workspace_access("pharmapilot", tenant=tenant) is False
+    assert accessible_workspaces_for(tenant) == []
+
+
+def test_invalid_tenant_remains_denied_every_workspace():
+    """F.5 — same as above, phrased as the full accessible_workspaces_for
+    list: no company_id means zero workspaces, universal ones included."""
+    tenant = TenantContext(user_id="none", email="none@example.com", display_name="None",
+                            role="user", company_id=None)
+    assert accessible_workspaces_for(tenant) == []
+
+
+def test_universal_workspace_visibility_grants_no_business_permission():
+    """F.6 — has_workspace_access/accessible_workspaces_for answer a pure
+    visibility question and must never be conflated with the separate
+    business-action gate (pharmagpt.auth.module_access.has_business_
+    permission). A user with universal dashboard/pharmapilot visibility
+    and ZERO RBAC grants still has no Create/Edit/Approve permission on
+    any module — proving the architectural separation the fix relies on."""
+    from pharmagpt.auth.module_access import has_business_permission
+
+    store = {"rbac_permissions": [], "rbac_roles": [], "rbac_role_permissions": [], "rbac_user_roles": []}
+    with patch(RBAC_SERVICE_CLIENT_PATH, return_value=FakeRbacClient(store)):
+        assert has_workspace_access("dashboard", tenant=REVIEWER_UNCONFIGURED) is True
+        assert has_workspace_access("pharmapilot", tenant=REVIEWER_UNCONFIGURED) is True
+
+    with patch("pharmagpt.auth.module_access.get_effective_permissions", return_value=set()):
+        assert has_business_permission(REVIEWER_UNCONFIGURED, "QMS", "Approve") is False
+        assert has_business_permission(REVIEWER_UNCONFIGURED, "PharmaPilot", "Approve") is False
 
 
 @pytest.fixture()

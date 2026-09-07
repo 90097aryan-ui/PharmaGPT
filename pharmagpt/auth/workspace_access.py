@@ -59,6 +59,23 @@ logger = logging.getLogger(__name__)
 
 ADMIN_ROLES = ("company_admin", "super_admin")
 
+# Workspace keys visible to EVERY authenticated user of a company,
+# regardless of RBAC module grants and regardless of DENY_BY_DEFAULT.
+# Product decision (Yuktav sidebar RBAC regression fix): Dashboard (general
+# company/product overview) and PharmaPilot (company-wide Yuktav AI
+# workspace) are not department/functional-role privileges the way
+# QMS/Document Control/Validation are -- every authenticated user belonging
+# to a company sees them. A caller still needs a valid tenant with
+# company_id (see has_workspace_access below) -- this only removes the
+# per-module grant check for these two keys, it does not weaken the
+# authentication/tenant-scoping check every workspace already goes through.
+# WORKSPACE VISIBILITY ONLY: this does not grant, and must never be read as
+# granting, any business-action permission (Create/Edit/Approve/etc. on
+# QMS/Validation/Document Control records) -- that remains exclusively
+# governed by pharmagpt.auth.module_access / pharmagpt.auth.rbac, neither of
+# which this constant touches.
+UNIVERSAL_WORKSPACES = ("dashboard", "pharmapilot")
+
 # The one-line activation switch (see module docstring). False: a tenant
 # with empty effective permissions (no RBAC role assigned, or migration
 # 0015 not yet applied) is treated as unrestricted. True: empty effective
@@ -113,14 +130,20 @@ def _effective_modules(tenant) -> set[str]:
 def has_workspace_access(workspace_key: str, tenant=None) -> bool:
     """True if `tenant` (defaults to the current request's g.tenant) may
     see/reach the given workspace. company_admin/super_admin always can.
-    Anyone else: see the module docstring / DENY_BY_DEFAULT — empty
-    effective permissions currently fail open (DENY_BY_DEFAULT = False);
-    flip that one constant to switch to strict deny-by-default."""
+    A tenant with no company_id (e.g. an unassumed super_admin) is denied
+    every workspace. UNIVERSAL_WORKSPACES (dashboard, pharmapilot) are then
+    granted to any remaining authenticated company user unconditionally.
+    Anyone else, on any other workspace key: see the module docstring /
+    DENY_BY_DEFAULT — empty effective permissions currently fail open
+    (DENY_BY_DEFAULT = False); flip that one constant to switch to strict
+    deny-by-default."""
     tenant = tenant if tenant is not None else g.tenant
     if tenant.role in ADMIN_ROLES:
         return True
     if not tenant.company_id:
         return False
+    if workspace_key in UNIVERSAL_WORKSPACES:
+        return True
     granted_modules = _effective_modules(tenant)
     if not granted_modules:
         return not DENY_BY_DEFAULT
