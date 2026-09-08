@@ -95,6 +95,7 @@ from pharmagpt.services import kb_sync
 from pharmagpt.services import lifecycle_engine
 from pharmagpt.services import qms_document_service as svc
 from pharmagpt.services import workflow_engine as wfe
+from pharmagpt.services.company_branding import get_company_name_for_docx
 from pharmagpt.prompts import qms_document_prompt as qp
 
 logger = logging.getLogger(__name__)
@@ -309,7 +310,10 @@ def download_template_docx(tid):
         return jsonify({"error": "Not found"}), 404
     from pharmagpt.services.doc_exporter import markdown_to_docx
     md = svc.render_template_skeleton_markdown(template)
-    docx_bytes = markdown_to_docx(md, template.get("doc_type", "SOP"), {"title": template.get("name", "")})
+    docx_bytes = markdown_to_docx(md, template.get("doc_type", "SOP"), {
+        "title":        template.get("name", ""),
+        "company_name": get_company_name_for_docx(g.tenant.company_id),
+    })
     safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", template.get("name", "Controlled_Template"))[:60]
     return send_file(
         io.BytesIO(docx_bytes),
@@ -1307,9 +1311,35 @@ def export_docx(did):
         return jsonify({"error": "Not found"}), 404
     from pharmagpt.services.doc_exporter import markdown_to_docx
     md = svc.generate_report_markdown(did, _requested_version_id(did))
+    # Company Branding bridge: company_name defaults to the tenant's own
+    # `companies.legal_name` (RLS-enforced read of the caller's own company
+    # only — see get_company_name_for_docx's docstring) and can still be
+    # overridden by an explicit request-body value, which is safe because it
+    # only changes cosmetic text in a document this caller already has
+    # legitimate access to export — it grants no additional read access.
+    #
+    # There is deliberately NO logo_path override here (removed): accepting
+    # an arbitrary filesystem path from the request body let any authenticated
+    # caller make the server open and embed the contents of any file it could
+    # read (os.path.isfile()+add_picture() in docx_generator.py never
+    # validated the path was actually a company logo) — a local-file-read
+    # primitive. Auto-populating the logo itself from company_settings.
+    # logo_url is not implemented: see services/company_branding.py's
+    # module docstring for why (unvalidated free-text URL -> SSRF risk, no
+    # upload/storage integration exists to validate it against).
+    branding = request.get_json(silent=True) or {}
+    company_name = branding.get("company_name") or get_company_name_for_docx(g.tenant.company_id)
     docx_bytes = markdown_to_docx(md, document.get("doc_type", "SOP"), {
-        "title": document.get("title", ""),
-        "department": document.get("department", ""),
+        "title":            document.get("title", ""),
+        "department":       document.get("department", ""),
+        "protocol_number":  document.get("doc_number", ""),
+        "revision_number":  document.get("version", ""),
+        "effective_date":   document.get("effective_date", ""),
+        "document_status":  document.get("status", ""),
+        "prepared_by":      document.get("owner", ""),
+        "reviewed_by":      document.get("reviewer", ""),
+        "approved_by":      document.get("approver", ""),
+        "company_name":     company_name,
     })
     safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", document.get("title", "Document"))[:40]
     filename = f"{document.get('doc_number', 'DOC')}_{safe_title}.docx"

@@ -782,26 +782,36 @@ def init_db() -> None:
     # natural unique key to INSERT OR IGNORE against), so this is safe to
     # run on every startup and never creates a duplicate or touches a
     # company's own template of the same name.
+    #
+    # Structure is the Yuktav Master SOP Template (single source of truth:
+    # prompts/qms_document_prompt.py::DEFAULT_SOP_STRUCTURE — the same
+    # structure build_draft_prompt() already applies by default for any
+    # doc_type=='SOP' document with no explicit template_id, so a document
+    # created with or without attaching this row produces an identical
+    # result). Only the system-seeded row (created_by='system') is ever
+    # refreshed here if the code-level structure changes — a company's own
+    # customised copy of this template is never touched.
+    import json as _json
+    from pharmagpt.prompts.qms_document_prompt import DEFAULT_SOP_STRUCTURE as _sop_structure
+    _sop_structure_json = _json.dumps(_sop_structure)
+
     _existing_sop_template = conn.execute(
-        "SELECT 1 FROM qms_document_templates WHERE company_id = '' AND doc_type = 'SOP' "
-        "AND name = 'Standard Operating Procedure (Default)'"
+        "SELECT structure_json FROM qms_document_templates WHERE company_id = '' AND doc_type = 'SOP' "
+        "AND name = 'Standard Operating Procedure (Default)' AND created_by = 'system'"
     ).fetchone()
     if not _existing_sop_template:
-        import json as _json
-        _sop_structure = [
-            {"heading": "1. Purpose", "sub_headings": []},
-            {"heading": "2. Scope", "sub_headings": []},
-            {"heading": "3. Responsibilities", "sub_headings": []},
-            {"heading": "4. Definitions / Abbreviations", "sub_headings": []},
-            {"heading": "5. Procedure", "sub_headings": []},
-            {"heading": "6. References", "sub_headings": []},
-            {"heading": "7. Annexures", "sub_headings": []},
-            {"heading": "8. Revision History", "sub_headings": []},
-        ]
         conn.execute(
             "INSERT INTO qms_document_templates (doc_type, name, structure_json, company_id, created_by) "
             "VALUES (?,?,?,?,?)",
-            ("SOP", "Standard Operating Procedure (Default)", _json.dumps(_sop_structure), "", "system"),
+            ("SOP", "Standard Operating Procedure (Default)", _sop_structure_json, "", "system"),
+        )
+        conn.commit()
+    elif _existing_sop_template["structure_json"] != _sop_structure_json:
+        conn.execute(
+            "UPDATE qms_document_templates SET structure_json = ? "
+            "WHERE company_id = '' AND doc_type = 'SOP' "
+            "AND name = 'Standard Operating Procedure (Default)' AND created_by = 'system'",
+            (_sop_structure_json,),
         )
         conn.commit()
 

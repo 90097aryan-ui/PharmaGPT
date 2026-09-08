@@ -126,15 +126,18 @@ def _clear_training_and_release(client, did, effective_date=None):
 # ── §1: the controlled SOP template must be a real seeded row ────────────────
 
 def test_default_sop_template_is_seeded(db_path):
+    # Structure updated to the Yuktav Master SOP Template (see
+    # tests/test_sop_master_template.py) — single source of truth is
+    # prompts/qms_document_prompt.py::DEFAULT_SOP_STRUCTURE, which
+    # database.py's seed logic copies onto this row on every startup.
+    from pharmagpt.prompts.qms_document_prompt import DEFAULT_SOP_STRUCTURE
+
     templates = qdb.list_templates("SOP", COMPANY_ID)
     default = next((t for t in templates if t["name"] == "Standard Operating Procedure (Default)"), None)
     assert default is not None, "no platform-wide default SOP template was seeded"
     assert default["company_id"] == ""
     headings = [h["heading"] for h in default["structure"]]
-    assert headings == [
-        "1. Purpose", "2. Scope", "3. Responsibilities", "4. Definitions / Abbreviations",
-        "5. Procedure", "6. References", "7. Annexures", "8. Revision History",
-    ]
+    assert headings == [s["heading"] for s in DEFAULT_SOP_STRUCTURE]
 
 
 def test_default_sop_template_reachable_via_route_and_document_creatable_from_it(client):

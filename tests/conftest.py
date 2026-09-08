@@ -145,4 +145,19 @@ def client(db_path, monkeypatch):
         lambda tenant: {(m, a) for m in rbac_defaults.MODULES for a in rbac_defaults.ACTIONS},
     )
 
+    # SOP branding integration: routes/qms_documents.py's export_docx() and
+    # download_template_docx() now call services/company_branding.py's
+    # get_company_name_for_docx(), which reaches Supabase (companies table)
+    # over the network using the request's real bearer token. The 300+
+    # existing Document Control tests using this fixture predate that call
+    # and don't carry a real Supabase session — same rationale as the four
+    # bypasses above — so it's patched here to a fast, deterministic no-op
+    # (empty string, matching "no branding available") for the duration of
+    # each such test. Tests that exercise the real branding lookup patch
+    # this same reference to a fake per-test — see
+    # tests/test_sop_master_template.py.
+    monkeypatch.setattr(
+        "pharmagpt.routes.qms_documents.get_company_name_for_docx", lambda company_id: ""
+    )
+
     return appmod.app.test_client()
