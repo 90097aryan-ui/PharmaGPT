@@ -697,6 +697,21 @@ def init_db() -> None:
         _add_column_if_missing(conn, "qms_audit_trail", _col, _ddl)
     conn.commit()
 
+    # ── Yuktav P0-3 (Assume Company Context / break-glass traceability) ──────
+    # Additive, optional column: the active break_glass_access.id when a row
+    # was written while a super_admin was acting under an assumed-company
+    # grant, else '' — lets a reviewer identify (and, by joining on this id,
+    # look up who/why/for-how-long) which QMS audit entries happened under
+    # break-glass without guessing from company_id alone. Blank for every
+    # row written before this fix and for every row written outside an
+    # active grant; existing readers of qms_audit_trail (the shared
+    # attachments/comments/audit-trail viewer, pharmagpt/static/js/
+    # qms_common.js::qmsRenderAuditTrail) only read specific known keys and
+    # are unaffected by the new column. See pharmagpt/audit.py::log and
+    # ::_active_break_glass_id.
+    _add_column_if_missing(conn, "qms_audit_trail", "assumed_context", "TEXT DEFAULT ''")
+    conn.commit()
+
     # ── Document Control redesign (Phase 7 gap closure) ──────────────────────
     # Document Control Information header: Prepared By / Reviewed By /
     # Approved By are system-derived (mirrors urs_projects' identical

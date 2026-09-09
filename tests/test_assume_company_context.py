@@ -18,7 +18,8 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.test_security_tenant_rbac_esig import ADMIN_A, COMPANY_A, SUPER_ADMIN, AUTH_HEADERS, MIDDLEWARE_PATH
+from pharmagpt import qms_database as qmsdb
+from tests.test_security_tenant_rbac_esig import ADMIN_A, COMPANY_A, COMPANY_B, SUPER_ADMIN, AUTH_HEADERS, MIDDLEWARE_PATH
 
 COMPANY_CLIENT_PATH_AUTH = "pharmagpt.routes.auth.get_authenticated_client"
 COMPANY_CLIENT_PATH_MIDDLEWARE = "pharmagpt.auth.middleware.get_authenticated_client"
@@ -254,3 +255,200 @@ def test_me_reports_assumed_context_fields(client, store):
     assert body["assumed_company_id"] == COMPANY_A
     assert body["assumed_company_name"] == "Company A"
     assert "break_glass_expires_at" in body
+
+
+# ── P0-3: break-glass audit events ───────────────────────────────────────────
+
+def test_assume_company_writes_break_glass_entered_event(client, store):
+    p1, p2 = _patched_clients(store)
+    with _as(SUPER_ADMIN), p1, p2:
+        resp = client.post(
+            "/auth/assume-company",
+            json={"company_id": COMPANY_A, "reason": "Support ticket #1"},
+            headers=AUTH_HEADERS,
+        )
+    assert resp.status_code == 201
+    grant_id = store["break_glass_access"][0]["id"]
+
+    trail = qmsdb.get_audit_trail("auth", 0)
+    entry = next(e for e in trail if e["action"] == "BREAK_GLASS_CONTEXT_ENTERED")
+    # The super_admin is the actor — never the target company's own users.
+    assert entry["performed_by"] == SUPER_ADMIN.display_name
+    assert entry["company_id"] == COMPANY_A
+    assert entry["reason"] == "Support ticket #1"
+    assert grant_id in entry["detail"]
+    assert entry["created_at"]  # timestamp captured
+    assert entry["result"] == "success"
+
+
+def test_end_assume_company_writes_break_glass_exited_event(client, store):
+    p1, p2 = _patched_clients(store)
+    with _as(SUPER_ADMIN), p1, p2:
+        client.post(
+            "/auth/assume-company",
+            json={"company_id": COMPANY_A, "reason": "Support ticket #1"},
+            headers=AUTH_HEADERS,
+        )
+        grant_id = store["break_glass_access"][0]["id"]
+        end_resp = client.post("/auth/end-assume-company", headers=AUTH_HEADERS)
+
+    assert end_resp.status_code == 200
+    trail = qmsdb.get_audit_trail("auth", 0)
+    entry = next(e for e in trail if e["action"] == "BREAK_GLASS_CONTEXT_EXITED")
+    assert entry["performed_by"] == SUPER_ADMIN.display_name
+    assert entry["company_id"] == COMPANY_A
+    assert grant_id in entry["detail"]
+
+
+def test_end_assume_company_with_no_active_grant_writes_no_exit_event(client, store):
+    """Calling /auth/end-assume-company with nothing to end is a no-op, not
+    a break-glass event — it must not fabricate an exit that never
+    happened."""
+    p1, p2 = _patched_clients(store)
+    with _as(SUPER_ADMIN), p1, p2:
+        resp = client.post("/auth/end-assume-company", headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    trail = qmsdb.get_audit_trail("auth", 0)
+    assert not any(e["action"] == "BREAK_GLASS_CONTEXT_EXITED" for e in trail)
+
+
+def test_qms_action_under_assumed_context_is_marked_in_audit_trail(client, store):
+    """A QMS action taken while a break-glass grant is active must be
+    identifiable as such in qms_audit_trail (P0-3's final requirement),
+    without breaking the existing per-record audit-trail shape/consumers —
+    every other field (action/performed_by/company_id/result) stays exactly
+    as it already was for an ordinary (non-assumed) actor."""
+    p1, p2 = _patched_clients(store)
+    with _as(SUPER_ADMIN), p1, p2:
+        assume_resp = client.post(
+            "/auth/assume-company",
+            json={"company_id": COMPANY_A, "reason": "Support ticket #1"},
+            headers=AUTH_HEADERS,
+        )
+        assert assume_resp.status_code == 201
+        grant_id = store["break_glass_access"][0]["id"]
+
+        create_resp = client.post("/projects", json={"name": "Break-Glass Project"}, headers=AUTH_HEADERS)
+        assert create_resp.status_code == 201
+        project_id = create_resp.get_json()["id"]
+
+    trail = qmsdb.get_audit_trail("project", project_id)
+    entry = next(e for e in trail if e["action"] == "Project created")
+    assert entry["company_id"] == COMPANY_A
+    assert entry["performed_by"] == SUPER_ADMIN.display_name
+    assert entry["assumed_context"] == grant_id
+
+
+def test_reassume_different_company_logs_exit_then_enter(client, store):
+    """Re-entry (a grant is already active and /auth/assume-company is
+    called again, targeting a different company) must exit the OLD context
+    before entering the NEW one — P0-3 final hardening. Exactly one EXIT for
+    the old grant, no duplicate, correct old/new grant and company ids, and
+    the EXIT is written before the new ENTER."""
+    store["companies"].append({"id": COMPANY_B, "legal_name": "Company B", "status": "active"})
+    p1, p2 = _patched_clients(store)
+    with _as(SUPER_ADMIN), p1, p2:
+        first = client.post(
+            "/auth/assume-company",
+            json={"company_id": COMPANY_A, "reason": "Ticket #1"},
+            headers=AUTH_HEADERS,
+        )
+        assert first.status_code == 201
+        old_grant_id = store["break_glass_access"][0]["id"]
+
+        second = client.post(
+            "/auth/assume-company",
+            json={"company_id": COMPANY_B, "reason": "Ticket #2"},
+            headers=AUTH_HEADERS,
+        )
+        assert second.status_code == 201
+        new_grant_id = store["break_glass_access"][1]["id"]
+
+    assert old_grant_id != new_grant_id
+    # The old grant was actually revoked in the store; the new one wasn't.
+    assert store["break_glass_access"][0]["revoked_at"] is not None
+    assert store["break_glass_access"][1].get("revoked_at") is None
+
+    trail = qmsdb.get_audit_trail("auth", 0)
+    exit_events = [e for e in trail if e["action"] == "BREAK_GLASS_CONTEXT_EXITED"]
+    enter_events = [e for e in trail if e["action"] == "BREAK_GLASS_CONTEXT_ENTERED"]
+
+    # Exactly one EXIT (for the replaced old context) — no duplicate.
+    assert len(exit_events) == 1
+    assert len(enter_events) == 2
+
+    exit_entry = exit_events[0]
+    assert exit_entry["company_id"] == COMPANY_A  # old target company
+    assert old_grant_id in exit_entry["detail"]
+    assert "replaced_by_re_entry" in exit_entry["detail"]  # clearly indicates why
+    assert exit_entry["performed_by"] == SUPER_ADMIN.display_name  # acting super_admin
+    assert exit_entry["result"] == "success"
+
+    new_enter_entry = next(e for e in enter_events if new_grant_id in e["detail"])
+    assert new_enter_entry["company_id"] == COMPANY_B  # new target company
+    assert new_enter_entry["performed_by"] == SUPER_ADMIN.display_name
+
+    # Insertion order (id is autoincrement, unaffected by same-second
+    # created_at timestamps): the old context's EXIT must precede the new
+    # context's ENTER.
+    assert exit_entry["id"] < new_enter_entry["id"]
+
+
+def test_reassume_same_company_still_logs_exit_then_enter(client, store):
+    """Re-entry targeting the SAME company again (e.g. renewing/extending
+    duration) is still a re-entry — the old grant is still replaced and
+    must still get its own EXIT event, distinct from the new grant's ENTER."""
+    p1, p2 = _patched_clients(store)
+    with _as(SUPER_ADMIN), p1, p2:
+        client.post(
+            "/auth/assume-company",
+            json={"company_id": COMPANY_A, "reason": "Ticket #1"},
+            headers=AUTH_HEADERS,
+        )
+        old_grant_id = store["break_glass_access"][0]["id"]
+
+        client.post(
+            "/auth/assume-company",
+            json={"company_id": COMPANY_A, "reason": "Ticket #1, renewed"},
+            headers=AUTH_HEADERS,
+        )
+        new_grant_id = store["break_glass_access"][1]["id"]
+
+    assert old_grant_id != new_grant_id
+    trail = qmsdb.get_audit_trail("auth", 0)
+    exit_events = [e for e in trail if e["action"] == "BREAK_GLASS_CONTEXT_EXITED"]
+    assert len(exit_events) == 1
+    assert old_grant_id in exit_events[0]["detail"]
+    assert exit_events[0]["company_id"] == COMPANY_A
+
+
+def test_first_time_assume_company_does_not_log_a_spurious_exit(client, store):
+    """Control case: with no prior grant at all, assume-company must not
+    log any BREAK_GLASS_CONTEXT_EXITED — only the existing
+    test_assume_company_writes_break_glass_entered_event's ENTER."""
+    p1, p2 = _patched_clients(store)
+    with _as(SUPER_ADMIN), p1, p2:
+        resp = client.post(
+            "/auth/assume-company",
+            json={"company_id": COMPANY_A, "reason": "Support ticket #1"},
+            headers=AUTH_HEADERS,
+        )
+    assert resp.status_code == 201
+
+    trail = qmsdb.get_audit_trail("auth", 0)
+    assert not any(e["action"] == "BREAK_GLASS_CONTEXT_EXITED" for e in trail)
+
+
+def test_qms_action_outside_assumed_context_has_blank_assumed_context(client, store):
+    """Control case: an ordinary company_admin's own action (no break-glass
+    involved at all) must NOT be marked as occurring under an assumed
+    context."""
+    with _as(ADMIN_A):
+        resp = client.post("/projects", json={"name": "Ordinary Project"}, headers=AUTH_HEADERS)
+    assert resp.status_code == 201
+    project_id = resp.get_json()["id"]
+
+    trail = qmsdb.get_audit_trail("project", project_id)
+    entry = next(e for e in trail if e["action"] == "Project created")
+    assert entry["assumed_context"] == ""

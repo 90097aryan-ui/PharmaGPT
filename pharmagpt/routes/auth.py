@@ -29,6 +29,8 @@ from flask import Blueprint, g, jsonify, request
 from flask import session as flask_session
 from supabase_auth.errors import AuthApiError
 
+from pharmagpt import audit
+from pharmagpt import audit_events as evt
 from pharmagpt.auth.context import AuthenticationError, TenantContext, resolve_tenant_context
 from pharmagpt.auth.decorators import extract_bearer_token, require_auth, require_role
 from pharmagpt.auth.workspace_access import accessible_workspaces_for
@@ -84,10 +86,14 @@ def login():
             {"email": email, "password": password}
         )
     except AuthApiError:
+        audit.log_unauthenticated("auth", 0, evt.AUTH_LOGIN_FAILURE,
+                                   attempted_identifier=email, reason="Invalid credentials")
         return jsonify({"error": "Invalid email or password"}), 401
 
     session = auth_response.session
     if session is None:
+        audit.log_unauthenticated("auth", 0, evt.AUTH_LOGIN_FAILURE,
+                                   attempted_identifier=email, reason="No session returned")
         return jsonify({"error": "Invalid email or password"}), 401
 
     try:
@@ -96,6 +102,8 @@ def login():
         # Credentials were valid at Supabase but there is no active
         # PharmaGPT profile for this identity (not yet provisioned, or
         # deactivated) — do not hand back a session for it.
+        audit.log_unauthenticated("auth", 0, evt.AUTH_LOGIN_FAILURE,
+                                   attempted_identifier=email, reason=str(exc))
         return jsonify({"error": str(exc)}), 403
 
     # Mirror the access token into a signed, HttpOnly Flask session cookie
@@ -110,6 +118,15 @@ def login():
     # never goes stale relative to whatever token the frontend is currently
     # using. Never used in place of the header when a header is present.
     flask_session["access_token"] = session.access_token
+
+    # Server-verified identity (just resolved above, never client-supplied)
+    # — set g.tenant so audit.log()'s normal, non-spoofable derivation
+    # applies here exactly as it does for every other authenticated call
+    # site, rather than adding a second actor-resolution path. Harmless
+    # side channel for this request only: the response below is already
+    # built from the local `tenant` variable, not from g.tenant.
+    g.tenant = tenant
+    audit.log("auth", 0, evt.AUTH_LOGIN_SUCCESS)
 
     return jsonify({
         "access_token": session.access_token,
@@ -127,6 +144,10 @@ def logout():
     _revoke_active_grant(access_token)
     client = get_anonymous_client()
     client.auth.admin.sign_out(access_token, "global")
+    # g.tenant is still the caller's real identity here (set by the global
+    # auth gate before this view ran) — log before clearing the session,
+    # which only affects Flask's own cookie, not g.tenant.
+    audit.log("auth", 0, evt.AUTH_LOGOUT, detail="All refresh tokens revoked (global sign-out)")
     flask_session.clear()
     return jsonify({"success": True})
 
@@ -211,6 +232,26 @@ def assume_company():
 
     # Revoke any grant already active for this session before starting a new
     # one, so a Super Admin is never implicitly holding two open grants.
+    #
+    # Yuktav P0-3 final hardening (re-entry): if a grant IS already active,
+    # this is a re-entry, not a first-time assume — the old context is about
+    # to be silently replaced. Capture its id/target company from the
+    # session and log its exit BEFORE revoking it, exactly as an explicit
+    # /auth/end-assume-company call would, so the replaced grant is never
+    # dropped from the audit trail. Read directly from the session rather
+    # than teaching `_revoke_active_grant` to log — that helper is also
+    # called by logout(), which must not gain this behavior (out of scope
+    # here; logout's own revoke stays exactly as it was). Absent entirely on
+    # a first-time assume (no prior break_glass_id in session), so that path
+    # is unaffected — no EXITED event, matching today's behavior.
+    prior_break_glass_id = flask_session.get("break_glass_id")
+    prior_assumed_company_id = flask_session.get("assumed_company_id")
+    if prior_break_glass_id:
+        audit.log_cross_company(
+            "auth", 0, evt.BREAK_GLASS_CONTEXT_EXITED,
+            target_company_id=prior_assumed_company_id,
+            detail=f"break_glass_id={prior_break_glass_id} reason=replaced_by_re_entry",
+        )
     _revoke_active_grant(access_token)
 
     now = datetime.now(timezone.utc)
@@ -229,6 +270,19 @@ def assume_company():
     flask_session["assumed_company_id"] = company_id
     flask_session["break_glass_id"] = grant_row["id"]
 
+    # Yuktav P0-3: log the grant itself as an audit-trail event, distinct
+    # from break_glass_access's own row (which records the grant but isn't
+    # surfaced through the same audit-trail read path as everything else).
+    # `log_cross_company` records g.tenant (the super_admin) as the actor —
+    # never the target company's own users — filed under the TARGET
+    # company_id, not the super_admin's own (always None outside a grant).
+    audit.log_cross_company(
+        "auth", 0, evt.BREAK_GLASS_CONTEXT_ENTERED,
+        target_company_id=company_id, reason=reason,
+        detail=f"break_glass_id={grant_row['id']} company={company_row.get('legal_name')} "
+               f"duration_minutes={duration_minutes}",
+    )
+
     return jsonify({
         "assumed_company_id": company_id,
         "assumed_company_name": company_row.get("legal_name"),
@@ -242,5 +296,19 @@ def assume_company():
 @handle_postgrest_errors
 def end_assume_company():
     """Revoke the caller's active Assume Company Context grant, if any."""
+    # Yuktav P0-3: capture the grant/company identifiers BEFORE
+    # _revoke_active_grant() pops them from the Flask session below — there
+    # is nothing left to log afterward. Only log an exit event when a grant
+    # was actually active (matches _revoke_active_grant's own no-op-if-absent
+    # behavior); calling /auth/end-assume-company with nothing to end is not
+    # itself a break-glass event.
+    break_glass_id = flask_session.get("break_glass_id")
+    assumed_company_id = flask_session.get("assumed_company_id")
     _revoke_active_grant(extract_bearer_token())
+    if break_glass_id:
+        audit.log_cross_company(
+            "auth", 0, evt.BREAK_GLASS_CONTEXT_EXITED,
+            target_company_id=assumed_company_id,
+            detail=f"break_glass_id={break_glass_id}",
+        )
     return jsonify({"success": True})

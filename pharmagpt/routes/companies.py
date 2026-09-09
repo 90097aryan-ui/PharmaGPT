@@ -21,6 +21,7 @@ import logging
 
 from flask import Blueprint, g, jsonify, request
 
+from pharmagpt import audit_events as evt
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import org_structure_repo, qms_repo, rbac_repo
 from pharmagpt.services.identity_admin import IdentityProvisioningError, provision_user
@@ -34,7 +35,16 @@ def _audit_best_effort(action: str, company_id: str, reason: str = "") -> None:
     """Phase F (WP2): best-effort audit entry, mirroring routes/users.py's
     helper. The record's company_id is the *target* company (a Super Admin
     action has no company_id of their own — g.tenant.company_id is always
-    None for super_admin outside an Assume Company Context grant)."""
+    None for super_admin outside an Assume Company Context grant).
+
+    Yuktav P0-4 policy (see FINAL REPORT §D for the full rationale): kept
+    best-effort for events that create or describe state rather than
+    revoking/granting an existing principal's access — company creation
+    (the company row + its own created_at is itself durable evidence even
+    if this specific audit_trail row fails to write), the RBAC/org-defaults
+    provisioning sub-step (already a best-effort step by design), and
+    branding updates (cosmetic, non-access data). Company suspend/reactivate
+    are NOT best-effort — see `_audit_fail_closed` below."""
     try:
         qms_repo.add_audit_entry(
             extract_bearer_token(), company_id, "company", str(company_id),
@@ -42,6 +52,23 @@ def _audit_best_effort(action: str, company_id: str, reason: str = "") -> None:
         )
     except Exception:
         logger.exception("Phase F audit: failed to write company audit entry (%s)", action)
+
+
+def _audit_fail_closed(action: str, company_id: str, reason: str = "") -> None:
+    """Yuktav P0-4: fail-closed counterpart to `_audit_best_effort` above,
+    used only for company suspend/reactivate — a suspension gates access for
+    every user in that company, and a reactivation restores it; either one
+    happening without a durable audit record is a material compliance gap
+    (an admin could silently cut off, or silently restore, an entire
+    tenant's access). Deliberately does NOT catch the exception here: the
+    caller is responsible for aborting the mutation if this raises, so the
+    state change can never complete without a corresponding audit row. See
+    FINAL REPORT §D for the full classification."""
+    qms_repo.add_audit_entry(
+        extract_bearer_token(), company_id, "company", str(company_id),
+        action, actor_user_id=g.tenant.user_id, reason=reason or None,
+    )
+
 
 VALID_INDUSTRY_SEGMENTS = {
     "pharma", "nutraceutical", "medical_device", "biotech", "cdmo", "cro",
@@ -142,6 +169,14 @@ def create_company():
     except Exception:
         logger.exception("create_company: RBAC/org defaults provisioning failed for company %s", company_row["id"])
         provisioning_summary = None
+        # Wave 4B: this specific sub-step (unlike the rest of company
+        # creation) previously had zero audit coverage of its own — see the
+        # comment above this try/except. A server-derived, no-client-input
+        # failure event is safe to add without touching rbac_audit_log or
+        # the RBAC provisioning logic itself.
+        _audit_best_effort(evt.RBAC_DEFAULTS_PROVISIONED, company_row["id"], reason="failed — see server logs")
+    else:
+        _audit_best_effort(evt.RBAC_DEFAULTS_PROVISIONED, company_row["id"], reason="succeeded")
 
     _audit_best_effort("Company created", company_row["id"], reason=legal_name)
     return jsonify({
@@ -160,11 +195,27 @@ def create_company():
 @handle_postgrest_errors
 def suspend_company(company_id):
     client = get_authenticated_client(extract_bearer_token())
+
+    # Yuktav P0-4: confirm the target exists BEFORE writing the fail-closed
+    # audit entry below — an audit row must never be written for a company
+    # that turns out not to exist.
+    existing = client.table("companies").select("id").eq("id", company_id).maybe_single().execute()
+    if not (existing.data if existing else None):
+        return jsonify({"error": "Company not found"}), 404
+
+    try:
+        _audit_fail_closed("Company suspended", company_id)
+    except Exception:
+        logger.exception("Company suspend BLOCKED: audit write failed for company %s", company_id)
+        return jsonify({
+            "error": "Could not record the required audit entry for this suspension; the "
+                     "company was NOT suspended. Retry once the audit trail is writable.",
+        }), 500
+
     result = client.table("companies").update({"status": "suspended"}).eq("id", company_id).execute()
     row = (result.data or [None])[0]
     if not row:
         return jsonify({"error": "Company not found"}), 404
-    _audit_best_effort("Company suspended", company_id)
     return jsonify(row)
 
 
@@ -173,9 +224,22 @@ def suspend_company(company_id):
 @handle_postgrest_errors
 def reactivate_company(company_id):
     client = get_authenticated_client(extract_bearer_token())
+
+    existing = client.table("companies").select("id").eq("id", company_id).maybe_single().execute()
+    if not (existing.data if existing else None):
+        return jsonify({"error": "Company not found"}), 404
+
+    try:
+        _audit_fail_closed("Company reactivated", company_id)
+    except Exception:
+        logger.exception("Company reactivate BLOCKED: audit write failed for company %s", company_id)
+        return jsonify({
+            "error": "Could not record the required audit entry for this reactivation; the "
+                     "company was NOT reactivated. Retry once the audit trail is writable.",
+        }), 500
+
     result = client.table("companies").update({"status": "active"}).eq("id", company_id).execute()
     row = (result.data or [None])[0]
     if not row:
         return jsonify({"error": "Company not found"}), 404
-    _audit_best_effort("Company reactivated", company_id)
     return jsonify(row)

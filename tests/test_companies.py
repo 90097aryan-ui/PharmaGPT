@@ -108,10 +108,14 @@ def test_create_company_success_provisions_admin_and_audits(client, store):
     _, kwargs = mock_provision.call_args
     assert kwargs["role_id"] == 2  # company_admin
     assert kwargs["company_id"] == body["company"]["id"]
-    # Best-effort audit entry landed in the Postgres-side audit_trail table.
-    assert len(store["audit_trail"]) == 1
-    assert store["audit_trail"][0]["record_type"] == "company"
-    assert store["audit_trail"][0]["action"] == "Company created"
+    # Best-effort audit entries landed in the Postgres-side audit_trail
+    # table: one for the company itself, and (Wave 4B) one distinct entry
+    # for the RBAC/org-defaults provisioning sub-step — previously
+    # unaudited (see routes/companies.py's comment on that try/except).
+    assert len(store["audit_trail"]) == 2
+    actions = {e["action"] for e in store["audit_trail"]}
+    assert actions == {"Company created", "RBAC_DEFAULTS_PROVISIONED"}
+    assert all(e["record_type"] == "company" for e in store["audit_trail"])
 
 
 def test_create_company_missing_legal_name_rejected(client, store):
@@ -214,3 +218,64 @@ def test_suspend_company_non_super_admin_forbidden(client, store):
         resp = client.post(f"/companies/{COMPANY_A}/suspend", headers=AUTH_HEADERS)
 
     assert resp.status_code == 403
+
+
+# ── P0-4: fail-closed audit policy for suspend/reactivate ───────────────────
+# Company suspend/reactivate gate access for every user in the company — see
+# routes/companies.py::_audit_fail_closed and FINAL REPORT §D. If the
+# required audit entry cannot be written, the mutation must NOT happen.
+
+def test_suspend_company_audit_failure_blocks_suspension(client, store):
+    fake, p1, _unused_p2 = _patched(store)
+    with _as(SUPER_ADMIN), p1, patch(AUDIT_CLIENT_PATH, side_effect=RuntimeError("audit db unreachable")):
+        resp = client.post(f"/companies/{COMPANY_A}/suspend", headers=AUTH_HEADERS)
+
+    assert resp.status_code == 500
+    assert store["companies"][0]["status"] == "active"  # unchanged — mutation was blocked
+    assert store["audit_trail"] == []
+
+
+def test_reactivate_company_audit_failure_blocks_reactivation(client, store):
+    store["companies"][0]["status"] = "suspended"
+    fake, p1, _unused_p2 = _patched(store)
+    with _as(SUPER_ADMIN), p1, patch(AUDIT_CLIENT_PATH, side_effect=RuntimeError("audit db unreachable")):
+        resp = client.post(f"/companies/{COMPANY_A}/reactivate", headers=AUTH_HEADERS)
+
+    assert resp.status_code == 500
+    assert store["companies"][0]["status"] == "suspended"  # unchanged — mutation was blocked
+
+
+def test_suspend_nonexistent_company_never_attempts_audit_write(client, store):
+    """The pre-mutation existence check must reject before the fail-closed
+    audit write is even attempted — an audit row must never be written for a
+    company that doesn't exist."""
+    fake, p1, p2 = _patched(store)
+    with _as(SUPER_ADMIN), p1, p2:
+        resp = client.post("/companies/does-not-exist/suspend", headers=AUTH_HEADERS)
+
+    assert resp.status_code == 404
+    assert store["audit_trail"] == []
+
+
+def test_create_company_audit_failure_does_not_block_creation(client, store):
+    """Control case: company creation stays best-effort (see
+    _audit_best_effort's own docstring) — an audit write failure must not
+    prevent the company and its admin from being created."""
+    fake, p1, _unused_p2 = _patched(store)
+    with _as(SUPER_ADMIN), p1, patch(
+        AUDIT_CLIENT_PATH, side_effect=RuntimeError("audit db unreachable"),
+    ), patch(
+        PROVISION_USER_PATH,
+        return_value={"auth_user_id": "new-admin-id", "temporary_password": "temp-pw-123"},
+    ):
+        resp = client.post(
+            "/companies",
+            json={
+                "legal_name": "Resilient Co", "industry_segment": "biotech",
+                "admin_email": "admin@resilient.example", "admin_display_name": "New Admin",
+            },
+            headers=AUTH_HEADERS,
+        )
+
+    assert resp.status_code == 201
+    assert any(c["legal_name"] == "Resilient Co" for c in store["companies"])

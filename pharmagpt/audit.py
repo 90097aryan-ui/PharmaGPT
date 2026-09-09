@@ -76,6 +76,21 @@ def _current_session_id() -> str:
         return ""
 
 
+def _active_break_glass_id() -> str:
+    """Yuktav P0-3: the current request's active Assume Company Context
+    grant id (pharmagpt/auth/middleware.py::apply_assumed_company_context),
+    or "" when no break-glass grant is active for this request. Read-only —
+    never sets/clears session state itself (routes/auth.py owns that).
+    Lets a QMS audit entry written while a super_admin is acting under an
+    assumed company be identified as such (joinable back to
+    break_glass_access.id) without guessing from company_id alone, which is
+    indistinguishable from an ordinary company_admin's own row."""
+    try:
+        return flask_session.get("break_glass_id", "") or ""
+    except RuntimeError:
+        return ""
+
+
 def log(record_type: str, record_id: int, action: str, *, old=None, new=None,
         reason: str = "", result: str = "success", detail: str = "") -> dict:
     """Write one audit-trail entry.
@@ -109,12 +124,66 @@ def log(record_type: str, record_id: int, action: str, *, old=None, new=None,
         ip_address=_current_ip(),
         session_id=_current_session_id(),
         result=result,
+        assumed_context=_active_break_glass_id(),
     )
 
 
-def log_failure(record_type: str, record_id: int, action: str, reason: str) -> dict:
+def log_failure(record_type: str, record_id: int, action: str, reason: str, *, detail: str = "") -> dict:
     """Convenience wrapper for logging a blocked/rejected attempt (e.g. an
     illegal status transition, a validation failure on a GxP record) so the
     audit trail also captures unsuccessful attempts, not only successful
-    mutations."""
-    return log(record_type, record_id, action, reason=reason, result="failure")
+    mutations. `detail` is optional, additive context (e.g. the attempted
+    request path for an authorization denial) beyond `reason`."""
+    return log(record_type, record_id, action, reason=reason, result="failure", detail=detail)
+
+
+def log_cross_company(record_type: str, record_id: int, action: str, *, target_company_id: str | None,
+                       reason: str = "", detail: str = "", result: str = "success") -> dict:
+    """Yuktav P0-3: write an audit entry about a DIFFERENT company than the
+    acting identity's own — used only for a super_admin's Assume Company
+    Context grant (routes/auth.py::assume_company / end_assume_company),
+    where the actor's own `g.tenant.company_id` is None (a super_admin has
+    no standing company) but the event is unambiguously about the target
+    company being entered/exited.
+
+    `performed_by` is still derived non-spoofably from `g.tenant` exactly as
+    `log()` does — this function only changes which company_id the row is
+    filed under, never who is credited with the action. Never confuse this
+    with logging an action as if performed by a user of the target company:
+    `performed_by` here is always the super_admin's own identity."""
+    tenant = getattr(g, "tenant", None)
+    performed_by = (tenant.display_name or tenant.email or "unknown") if tenant is not None else "system"
+    return qmsdb.add_audit_entry(
+        record_type, record_id, action,
+        performed_by=performed_by,
+        detail=detail,
+        company_id=target_company_id,
+        reason=reason,
+        ip_address=_current_ip(),
+        session_id=_current_session_id(),
+        result=result,
+    )
+
+
+def log_unauthenticated(record_type: str, record_id: int, action: str, *,
+                         attempted_identifier: str = "", reason: str = "",
+                         result: str = "failure", detail: str = "") -> dict:
+    """Wave 4B: write an audit entry for an event that happens BEFORE any
+    authenticated session exists (e.g. a login attempt) — `g.tenant` is
+    never set at this point, so `log()`'s normal derivation doesn't apply.
+
+    Never invents a confirmed actor: `performed_by` is always the literal
+    string "anonymous", optionally suffixed with the caller-submitted,
+    UNVERIFIED identifier (e.g. the email typed into the login form) for
+    forensic/pattern-detection value only — this is what the requester
+    typed, not a resolved identity, and must never be confused with
+    tenant.display_name/email as written by log() above. `company_id` is
+    always None (no tenant resolved yet). Never pass a password, token, or
+    other credential as `attempted_identifier` or `detail`."""
+    performed_by = f"anonymous ({attempted_identifier})" if attempted_identifier else "anonymous"
+    return qmsdb.add_audit_entry(
+        record_type, record_id, action,
+        performed_by=performed_by, detail=detail, company_id=None,
+        reason=reason, ip_address=_current_ip(), session_id=_current_session_id(),
+        result=result,
+    )

@@ -1214,20 +1214,28 @@ def add_audit_entry(record_type: str, record_id: int, action: str,
                     performed_by: str = "", detail: str = "",
                     company_id: str | None = None, old_values: str = "",
                     new_values: str = "", reason: str = "", ip_address: str = "",
-                    session_id: str = "", result: str = "success") -> dict:
+                    session_id: str = "", result: str = "success",
+                    assumed_context: str = "") -> dict:
     """Write one audit-trail entry. Prefer `pharmagpt.audit.log()` at call
     sites — it derives `performed_by`/`company_id`/`ip_address`/`session_id`
     from the authenticated request context so they can't be spoofed by a
     caller, and computes `old_values`/`new_values` as a diff. This function
-    is the low-level DB write; it trusts whatever its caller passes in."""
+    is the low-level DB write; it trusts whatever its caller passes in.
+
+    `assumed_context` (Yuktav P0-3): the active break_glass_access.id when
+    this entry was written while a super_admin was acting under an Assume
+    Company Context grant (see pharmagpt/audit.py::_active_break_glass_id),
+    else "". Purely additive/optional — every existing caller is unaffected."""
     conn = get_connection()
     cur = conn.execute(
         """INSERT INTO qms_audit_trail
            (record_type, record_id, action, detail, performed_by, company_id,
-            old_values, new_values, reason, ip_address, session_id, result)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            old_values, new_values, reason, ip_address, session_id, result,
+            assumed_context)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (record_type, record_id, action, detail, performed_by, company_id,
-         old_values, new_values, reason, ip_address, session_id, result),
+         old_values, new_values, reason, ip_address, session_id, result,
+         assumed_context),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM qms_audit_trail WHERE id = ?", (cur.lastrowid,)).fetchone()
