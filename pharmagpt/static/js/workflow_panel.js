@@ -25,6 +25,15 @@
  * module keeps. This only batches WHEN approvers are chosen — decide_step's
  * current_step_order gate (services/workflow_engine.py, untouched) still
  * enforces that only the current step is ever actionable.
+ *
+ * CAPA / Change Control (approver-dropdown UX standardization): their
+ * per-current-step assignment form (unchanged lifecycle — one step at a
+ * time, exactly as before) now renders the same directory-backed <select>
+ * as Market Complaint/Document Control instead of a raw "Approver User
+ * ID"/"Display Name" text pair — see wfPanelActionHTML's capa/
+ * change_control branch and wfPanelAssignFromDirectory. Still posts to the
+ * unchanged .../workflow/steps/<order>/assign endpoint; the Workflow Engine
+ * and its validation are untouched.
  */
 
 async function renderWorkflowPanel(containerId, recordType, routePrefix, recordId) {
@@ -59,29 +68,37 @@ async function renderWorkflowPanel(containerId, recordType, routePrefix, recordI
   // Reviewer/Department Head/Quality Head/Plant Head picker is populated
   // straight from the tenant's existing user directory (no Approver Pool
   // prerequisite) — fetched only when actually needed (a pool_summary step
-  // with nothing assigned yet is current), so CAPA/Deviation/Change
-  // Control — which never set pool_summary — never make this call.
+  // with nothing assigned yet is current), so Deviation (its own richer
+  // Lifecycle tab, never reaches this file) never makes this call.
   //
   // Market Complaint (upfront-assignment UX): loads the directory for the
   // WHOLE workflow, not just the current step, because the "Workflow
   // Approvers" panel below (wfPanelMcApproversPanelHTML) lets every
   // approval step's approver be chosen at once — see that function.
+  //
+  // CAPA / Change Control (approver-dropdown UX standardization): same
+  // directory-backed <select> as Market Complaint, but loaded only when the
+  // CURRENT step actually needs it (no pool_summary, no approvers yet) —
+  // their per-step assignment lifecycle is otherwise completely unchanged,
+  // unlike Market Complaint's whole-workflow upfront panel.
+  const DIRECTORY_DROPDOWN_RECORD_TYPES = ["capa", "change_control"];
   const currentStep = steps.find(s => s.step_order === instance.current_step_order);
-  const needsDirectory = instance.status === "in_progress" && (
-    (currentStep && currentStep.step_type === "approval" && !(currentStep.approvers || []).length && currentStep.pool_summary)
-    || recordType === "market_complaint"
-  );
+  const currentStepNeedsDirectory = currentStep && currentStep.step_type === "approval"
+    && !(currentStep.approvers || []).length
+    && (currentStep.pool_summary || DIRECTORY_DROPDOWN_RECORD_TYPES.includes(recordType));
+  const needsDirectory = instance.status === "in_progress" && (currentStepNeedsDirectory || recordType === "market_complaint");
   let directory = (needsDirectory && window.UserPicker) ? await window.UserPicker.loadDirectory() : [];
 
   // Segregation of duties (services/workflow_engine.py::reject_creator_as_approver
-  // already refuses this server-side regardless): for Market Complaint, drop
-  // the record's own creator from the picker so the UI doesn't offer a choice
-  // the backend will reject. No further role-based filtering is applied —
-  // approval steps have no eligible_roles concept by design (see
-  // assign_approvers()'s docstring and docs/LESSONS_LEARNED.md §5: exact
-  // designation/role-string filtering has previously hidden legitimate
-  // approvers, so the full active-company directory is the source of truth).
-  if (needsDirectory && recordType === "market_complaint" && directory.length) {
+  // already refuses this server-side regardless): drop the record's own
+  // creator from the picker for every module using the directory-backed
+  // dropdown, so the UI doesn't offer a choice the backend will reject. No
+  // further role-based filtering is applied — approval steps have no
+  // eligible_roles concept by design (see assign_approvers()'s docstring and
+  // docs/LESSONS_LEARNED.md §5: exact designation/role-string filtering has
+  // previously hidden legitimate approvers, so the full active-company
+  // directory is the source of truth).
+  if (needsDirectory && (recordType === "market_complaint" || DIRECTORY_DROPDOWN_RECORD_TYPES.includes(recordType)) && directory.length) {
     try {
       const record = await qmsFetch(`${routePrefix}/${recordId}`);
       const creatorId = record.created_by_user_id || "";
@@ -305,8 +322,7 @@ function wfPanelActionHTML(containerId, recordType, routePrefix, recordId, step,
     // the time, instead of a dead-end "not configured" block. step.pool_summary
     // is only ever attached by routes/qms_documents.py::get_workflow (never
     // for CAPA/Deviation/Change Control), so this branch is Document-
-    // Control-specific; every other module keeps the manual-assignment form
-    // below, completely unchanged.
+    // Control-specific.
     if (step.pool_summary) {
       const rowsId = `${formId}-pool-rows`;
       const rows = step.pool_summary.map(p => {
@@ -335,6 +351,30 @@ function wfPanelActionHTML(containerId, recordType, routePrefix, recordId, step,
     // just points here instead of duplicating an assignment control.
     if (recordType === "market_complaint") {
       return `<div class="qms-panel-item-meta">Assign this step's approver from the <strong>Workflow Approvers</strong> panel above.</div>`;
+    }
+    // CAPA / Change Control (approver-dropdown UX standardization): same
+    // directory-backed <select> as Market Complaint's original per-step
+    // picker, reusing the SAME .../workflow/steps/<order>/assign endpoint
+    // and step-by-step assignment lifecycle — nothing about when or how
+    // often a step can be (re)assigned changes, only the input widget.
+    // `directory` already excludes the record's own creator (filtered
+    // above, same as Market Complaint); the backend independently
+    // re-validates the submitted user_id regardless
+    // (assign_workflow_step -> tenancy.missing_or_inactive_users +
+    // services/workflow_engine.py::reject_creator_as_approver, unchanged).
+    if (recordType === "capa" || recordType === "change_control") {
+      const selectId = `${formId}-approver-select`;
+      return `
+        <div class="form-field" style="max-width:320px;margin-top:8px">
+          <label>Approver</label>
+          ${window.UserPicker ? window.UserPicker.selectHTML(selectId, directory, "", "Select approver")
+                               : `<input type="text" id="${selectId}" placeholder="Select approver" />`}
+        </div>
+        <div class="qms-form-actions">
+          <button class="btn-primary" onclick="wfPanelAssignFromDirectory('${containerId}','${recordType}','${routePrefix}',${recordId},${step.step_order},'${selectId}')">Assign Approver</button>
+        </div>
+        <p style="font-size:11.5px;color:var(--text-muted);margin-top:4px">Awaiting approver assignment — this step cannot be decided until an approver is assigned.</p>
+      `;
     }
     return `
       <div class="form-grid" style="margin-top:8px">
@@ -390,6 +430,37 @@ async function wfPanelAssign(containerId, recordType, routePrefix, recordId, ste
   }
 }
 window.wfPanelAssign = wfPanelAssign;
+
+// CAPA / Change Control approver-dropdown UX standardization: counterpart
+// to wfPanelAssign above for the directory-backed <select> branch — the
+// frontend never collects or submits a raw user_id typed by the operator;
+// it only reads back the value the browser already populated from
+// GET /users/directory (window.UserPicker.selectHTML). Posts to the exact
+// same per-step .../workflow/steps/<order>/assign endpoint as wfPanelAssign
+// — only the input widget differs, not the assignment lifecycle or API.
+// The backend independently re-validates this id regardless
+// (routes/qms_capa.py / qms_change_control.py::assign_workflow_step ->
+// tenancy.missing_or_inactive_users + reject_creator_as_approver).
+async function wfPanelAssignFromDirectory(containerId, recordType, routePrefix, recordId, stepOrder, selectId) {
+  const sel = document.getElementById(selectId);
+  const user_id = sel ? sel.value : "";
+  if (!user_id) { qmsToast("Please select an approver"); return; }
+  // selectHTML's option text is "display_name (department / designation)" or
+  // bare "display_name" with neither — strip the "(...)" suffix either way,
+  // same convention as wfPanelAssignFromPool.
+  const opt = sel.options[sel.selectedIndex];
+  const display_name = opt ? opt.textContent.split(" (")[0] : "";
+  try {
+    await qmsPostJSON(`${routePrefix}/${recordId}/workflow/steps/${stepOrder}/assign`, {
+      approvers: [{ user_id, display_name }],
+    });
+    qmsToast("Approver assigned");
+    renderWorkflowPanel(containerId, recordType, routePrefix, recordId);
+  } catch (e) {
+    qmsToast("Failed to assign approver: " + e.message);
+  }
+}
+window.wfPanelAssignFromDirectory = wfPanelAssignFromDirectory;
 
 // Market Complaint upfront-assignment UX: submits every still-unassigned
 // approval step's selected approver in ONE call to
