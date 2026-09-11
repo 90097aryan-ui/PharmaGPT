@@ -25,6 +25,7 @@ import json
 from flask import g, request
 from flask import session as flask_session
 
+from pharmagpt import config
 from pharmagpt import qms_database as qmsdb
 
 # Never let a spoofable/sensitive value ride along in old/new value capture.
@@ -63,8 +64,31 @@ def _diff(old, new):
 
 
 def _current_ip() -> str:
+    """Yuktav P1-2: `request.remote_addr` is the safe default — it reflects
+    the actual TCP peer, which a client cannot spoof. It is only overridden
+    by an `X-Forwarded-For` entry when `config.TRUSTED_PROXY_COUNT` (0 by
+    default — see config.py) confirms this deployment sits behind that many
+    verified, trusted reverse proxies; in that case the peer Flask/gunicorn
+    sees is the trusted proxy itself, not the real client, so
+    `X-Forwarded-For` is the only place the real client IP exists.
+
+    Reads the header from the RIGHT, taking exactly the
+    `TRUSTED_PROXY_COUNT`-th entry from the end — the same algorithm
+    Werkzeug's ProxyFix and every other correct implementation of this uses.
+    A client can prepend arbitrary garbage entries to their own outgoing
+    X-Forwarded-For; only the entries actually *appended* by real
+    intermediate proxies (i.e. the rightmost ones) are trustworthy. If fewer
+    hops are present than configured (misconfiguration, or nothing was ever
+    appended), this falls back to `remote_addr` rather than guessing at a
+    possibly attacker-controlled value."""
     try:
-        return request.headers.get("X-Forwarded-For", request.remote_addr) or ""
+        trusted_hops = config.TRUSTED_PROXY_COUNT
+        if trusted_hops > 0:
+            forwarded = request.headers.get("X-Forwarded-For", "")
+            hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+            if len(hops) >= trusted_hops:
+                return hops[-trusted_hops]
+        return request.remote_addr or ""
     except RuntimeError:
         return ""  # no request context (e.g. background job thread)
 

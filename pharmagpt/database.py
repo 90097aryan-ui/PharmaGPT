@@ -712,6 +712,42 @@ def init_db() -> None:
     _add_column_if_missing(conn, "qms_audit_trail", "assumed_context", "TEXT DEFAULT ''")
     conn.commit()
 
+    # ── Yuktav P1-1 (qms_audit_trail database-level immutability) ────────────
+    # Prior to this, qms_audit_trail was append-only only by *application
+    # convention* — no UPDATE/DELETE function exists in this codebase for it
+    # (pharmagpt/qms_database.py::add_audit_entry only INSERTs) — but nothing
+    # at the database layer itself stopped a direct sqlite3 connection (a
+    # future call site, an ad hoc script, a REPL) from mutating or erasing a
+    # row. These two triggers make that a hard database-level refusal
+    # instead, mirroring the guarantee migrations/0008_qms_rls_up.sql already
+    # gives the Postgres-side `audit_trail` table via RLS (INSERT/SELECT-only
+    # policies, no UPDATE/DELETE policy) — SQLite has no RLS, so a
+    # BEFORE UPDATE/DELETE trigger that unconditionally RAISE(ABORT, ...)s is
+    # the equivalent mechanism for this table.
+    #
+    # `CREATE TRIGGER IF NOT EXISTS` is idempotent — safe to run on every
+    # startup/reinitialization, exactly like every other additive statement
+    # in this function. Triggers fire on UPDATE/DELETE only; INSERT and
+    # SELECT are completely unaffected, so add_audit_entry()/get_audit_trail()
+    # keep working exactly as before. RAISE(ABORT, ...) surfaces to Python
+    # callers as sqlite3.IntegrityError, which the caller (or its own
+    # try/except, e.g. routes/companies.py::_audit_fail_closed) can catch
+    # like any other database error — no new exception type to special-case.
+    conn.executescript("""
+        CREATE TRIGGER IF NOT EXISTS trg_qms_audit_trail_no_update
+        BEFORE UPDATE ON qms_audit_trail
+        BEGIN
+            SELECT RAISE(ABORT, 'qms_audit_trail is append-only: UPDATE is not permitted');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_qms_audit_trail_no_delete
+        BEFORE DELETE ON qms_audit_trail
+        BEGIN
+            SELECT RAISE(ABORT, 'qms_audit_trail is append-only: DELETE is not permitted');
+        END;
+    """)
+    conn.commit()
+
     # ── Document Control redesign (Phase 7 gap closure) ──────────────────────
     # Document Control Information header: Prepared By / Reviewed By /
     # Approved By are system-derived (mirrors urs_projects' identical

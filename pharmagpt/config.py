@@ -127,6 +127,19 @@ else:
 # Port the Flask app will run on
 FLASK_PORT = int(os.getenv("FLASK_PORT", 5000))
 
+# Yuktav P1-2: number of reverse proxies this deployment sits behind that are
+# TRUSTED to set/append to the X-Forwarded-For header (nginx in front of
+# gunicorn on the current Oracle deployment; Render's own edge on the Render
+# path — see docs/DEPLOYMENT.md). 0 by default: an arbitrary client-supplied
+# X-Forwarded-For value is NEVER trusted unless this is explicitly set, so a
+# deployment with no verified proxy boundary safely falls back to
+# request.remote_addr (pharmagpt/audit.py::_current_ip). Deliberately not
+# hardcoded to any specific count/IP here — this is an operational fact about
+# a given deployment's network topology, not something this codebase can
+# assume; set it in that environment's own .env once its proxy chain has
+# actually been verified (e.g. TRUSTED_PROXY_COUNT=1 for a single nginx hop).
+TRUSTED_PROXY_COUNT = int(os.getenv("TRUSTED_PROXY_COUNT", 0))
+
 # ── Database backend (Phase 3 migration seam) ─────────────────────────────────
 # "sqlite" (default) — every domain still reads/writes pharmagpt.db, unchanged.
 # "postgres" — reserved for later Phase 3 sub-phases (3.2+) to flip per domain
