@@ -221,7 +221,12 @@ def create_deviation():
     data = request.get_json() or {}
     if not data.get("title", "").strip():
         return jsonify({"error": "Deviation title is required"}), 400
-    deviation = ddb.create_deviation(data, company_id=g.tenant.company_id)
+    # CRIT-02 (Security Audit remediation): creator identity is stamped from
+    # the authenticated session, never client input — see database.py::
+    # init_db()'s CRIT-02 schema comment and workflow_engine.py::
+    # reject_creator_as_approver.
+    deviation = ddb.create_deviation(data, company_id=g.tenant.company_id,
+                                     created_by_user_id=g.tenant.user_id, created_by_display_name=g.tenant.display_name)
     ddb.seed_default_workflow_steps(deviation["id"])
     performed_by = tenancy.signing_identity(g.tenant)["performed_by"]
     audit.log("deviation", deviation["id"], "Deviation initiated", new=deviation)
@@ -257,6 +262,21 @@ def update_deviation(did):
                            reason="Closed deviations are immutable")
         return jsonify({"error": "This deviation is Closed and cannot be edited"}), 409
     data = request.get_json() or {}
+    # CRIT-01 (Security Audit remediation): status/approver-adjacent fields
+    # must only change through the governed Workflow Engine (POST /<id>/
+    # workflow/start or /workflow/steps/<order>/decide), never a raw field
+    # PUT. Repository-layer enforcement (qms_deviation_database.
+    # DEVIATION_CONTROLLED_FIELDS) is the actual security boundary — this
+    # check exists for a clear 400 instead of a raised-exception 500 if it's
+    # ever reached.
+    blocked = ddb.DEVIATION_CONTROLLED_FIELDS & data.keys()
+    if blocked:
+        return jsonify({
+            "error": f"{', '.join(sorted(blocked))} cannot be changed via PUT — use "
+                     "POST /qms/deviations/<id>/workflow/start or "
+                     "/qms/deviations/<id>/workflow/steps/<order>/decide to move the deviation "
+                     "through its lifecycle",
+        }), 400
     updated = ddb.update_deviation(did, data)
     _dual_write_update(updated)
     audit.log("deviation", did, "Updated", old=existing, new=updated)
@@ -754,6 +774,33 @@ def update_workflow_builder(did):
     if deviation["status"] != "Draft":
         return jsonify({"error": "The workflow can only be edited while the deviation is in Draft"}), 409
     data = request.get_json() or {}
+
+    # CRIT-02 (Security Audit remediation): this is Deviations' sole
+    # approver-configuration surface (module note above) — it does not
+    # route through services/workflow_engine.py::assign_approvers() the way
+    # CAPA/Change Control's assign endpoints do, so both checks that
+    # function applies internally must be called explicitly here instead.
+    configured_steps = data.get("steps") or []
+    capa_phase_data = data.get("capa_phase") or {}
+    configured_approvers = [
+        {"user_id": s.get("approver_user_id", "")} for s in configured_steps if isinstance(s, dict)
+    ] + [
+        {"user_id": capa_phase_data.get("qa_review_approver_user_id", "")},
+        {"user_id": capa_phase_data.get("final_approval_approver_user_id", "")},
+    ]
+    configured_approvers = [a for a in configured_approvers if a["user_id"]]
+
+    try:
+        wfe.reject_creator_as_approver("deviation", did, configured_approvers)
+    except wfe.WorkflowError as e:
+        return jsonify({"error": str(e)}), 409
+
+    invalid = tenancy.missing_or_inactive_users(
+        get_service_role_client(), g.tenant.company_id, {a["user_id"] for a in configured_approvers},
+    )
+    if invalid:
+        return jsonify({"error": f"Not a valid, active user of this company: {', '.join(sorted(invalid))}"}), 400
+
     try:
         steps = ddb.replace_workflow_steps(did, data.get("steps") or [])
     except ValueError as e:

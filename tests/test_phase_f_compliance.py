@@ -201,6 +201,11 @@ def test_closed_capa_cannot_be_edited(client):
         for action in ["Root Cause Analysis Started", "Preventive Actions Planned", "Implementation Started",
                        "Effectiveness Check Started"]:
             client.post(f"/qms/capa/{capa['id']}/approval", json={"action": action}, headers=AUTH_HEADERS)
+
+    # CRIT-02 (Security Audit remediation): ADMIN_A created this CAPA, so it
+    # can no longer self-assign as its own approver — steps 6-8 (Effectiveness
+    # Verification, QA Review, Closed) are decided as REVIEWER_A instead.
+    with _as(REVIEWER_A):
         verify_resp = client.post(f"/qms/capa/{capa['id']}/effectiveness-verification", json={
             "verification_date": "2026-08-07", "verified_by": "Rita Reviewer",
             "verification_method": "Trend review", "objective_evidence": "No recurrence observed",
@@ -212,6 +217,7 @@ def test_closed_capa_cannot_be_edited(client):
         assert close_resp.status_code == 201
         assert client.get(f"/qms/capa/{capa['id']}", headers=AUTH_HEADERS).get_json()["status"] == "Closed"
 
+    with _as(ADMIN_A):
         resp = client.put(f"/qms/capa/{capa['id']}", json={"title": "Sneaky edit"}, headers=AUTH_HEADERS)
     assert resp.status_code == 409
 

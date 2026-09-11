@@ -103,7 +103,19 @@ def get_all_assessments(company_id: str | None = None, filters: dict | None = No
     return result
 
 
-def update_assessment(assessment_id: int, data: dict) -> dict | None:
+# CRIT-01 (Security Audit remediation): mirrors qms_capa_database's
+# CAPA_CONTROLLED_FIELDS — see that comment for the full rationale.
+RISK_ASSESSMENT_CONTROLLED_FIELDS = frozenset({"status", "reviewer", "approver"})
+
+
+def update_assessment(assessment_id: int, data: dict, *, allow_controlled_fields: bool = False) -> dict | None:
+    if not allow_controlled_fields:
+        blocked = RISK_ASSESSMENT_CONTROLLED_FIELDS & data.keys()
+        if blocked:
+            raise ValueError(
+                "workflow-controlled field(s) cannot be set via a generic update: "
+                + ", ".join(sorted(blocked))
+            )
     conn = get_connection()
     fields = [
         "title", "assessment_type", "assessment_subtype", "methodology",

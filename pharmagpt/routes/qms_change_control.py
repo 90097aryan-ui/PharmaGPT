@@ -65,6 +65,7 @@ from pharmagpt.db import qms_repo
 from pharmagpt.services import esignature_service
 from pharmagpt.services import qms_change_control_service as svc
 from pharmagpt.services import workflow_engine as wfe
+from pharmagpt.services.supabase_client import get_service_role_client
 
 bp = Blueprint("qms_change_control", __name__, url_prefix="/qms/change-control")
 logger = logging.getLogger(__name__)
@@ -164,7 +165,12 @@ def create_change_control():
     data = request.get_json() or {}
     if not data.get("title", "").strip():
         return jsonify({"error": "Change control title is required"}), 400
-    cc = ccdb.create_change_control(data, company_id=g.tenant.company_id)
+    # CRIT-02 (Security Audit remediation): creator identity is stamped from
+    # the authenticated session, never client input — see database.py::
+    # init_db()'s CRIT-02 schema comment and workflow_engine.py::
+    # reject_creator_as_approver.
+    cc = ccdb.create_change_control(data, company_id=g.tenant.company_id,
+                                    created_by_user_id=g.tenant.user_id, created_by_display_name=g.tenant.display_name)
     performed_by = tenancy.signing_identity(g.tenant)["performed_by"]
     audit.log("change_control", cc["id"], "Change control drafted", new=cc)
     _dual_write_create(cc, "Change control drafted", performed_by)
@@ -192,6 +198,20 @@ def update_change_control(cc_id):
                            reason="Closed change controls are immutable")
         return jsonify({"error": "This change control is Closed and cannot be edited"}), 409
     data = request.get_json() or {}
+    # CRIT-01 (Security Audit remediation): status/approver-adjacent fields
+    # must only change through the governed workflow (POST /<id>/approval or
+    # /workflow/steps/<order>/decide), never a raw field PUT. Repository-
+    # layer enforcement (qms_change_control_database.CHANGE_CONTROL_
+    # CONTROLLED_FIELDS) is the actual security boundary — this check exists
+    # for a clear 400 instead of a raised-exception 500 if it's ever reached.
+    blocked = ccdb.CHANGE_CONTROL_CONTROLLED_FIELDS & data.keys()
+    if blocked:
+        return jsonify({
+            "error": f"{', '.join(sorted(blocked))} cannot be changed via PUT — use "
+                     "POST /qms/change-control/<id>/approval or "
+                     "/qms/change-control/<id>/workflow/steps/<order>/decide to move the change "
+                     "control through its lifecycle",
+        }), 400
     updated = ccdb.update_change_control(cc_id, data)
     _dual_write_update(updated)
     audit.log("change_control", cc_id, "Updated", old=existing, new=updated)
@@ -365,6 +385,17 @@ def assign_workflow_step(cc_id, step_order):
     approvers = data.get("approvers") or []
     if not isinstance(approvers, list) or not all(a.get("user_id") for a in approvers):
         return jsonify({"error": "approvers must be a non-empty list of {user_id, display_name}"}), 400
+    # CRIT-02 (Security Audit remediation): a proposed approver must be a
+    # real, active user of THIS company — otherwise any authenticated caller
+    # could name a user_id belonging to a different tenant. Creator-vs-
+    # approver segregation of duties is enforced one layer down, inside
+    # wfe.assign_approvers() itself (services/workflow_engine.py::
+    # reject_creator_as_approver) — no separate check needed here for that.
+    invalid = tenancy.missing_or_inactive_users(
+        get_service_role_client(), g.tenant.company_id, {a["user_id"] for a in approvers},
+    )
+    if invalid:
+        return jsonify({"error": f"Not a valid, active user of this company: {', '.join(sorted(invalid))}"}), 400
     try:
         state = wfe.assign_approvers(RECORD_TYPE, cc_id, step_order, approvers)
     except wfe.WorkflowError as e:
@@ -506,16 +537,23 @@ def submit_approval(cc_id):
         audit.log_failure("change_control", cc_id, f"Approval action blocked ({action_name})", reason=str(e))
         return jsonify({"error": str(e)}), 409
 
+    # CRIT-01: allow_controlled_fields=True on every write below — each is
+    # the e-signed, role-gated (@require_role above) outcome of a real
+    # approval decision just made via wfe.decide_step(), not a raw client
+    # field.
     if action_name == "Submitted for QA Review":
-        ccdb.update_change_control(cc_id, {"qa_reviewer": sig["performed_by"]})
+        ccdb.update_change_control(cc_id, {"qa_reviewer": sig["performed_by"]}, allow_controlled_fields=True)
     if action_name == "Approved":
-        ccdb.update_change_control(cc_id, {"approver": sig["performed_by"]})
+        ccdb.update_change_control(cc_id, {"approver": sig["performed_by"]}, allow_controlled_fields=True)
     if action_name == "Implementation Complete":
-        ccdb.update_change_control(cc_id, {"implementation_date": data.get("effective_date", "")})
+        ccdb.update_change_control(cc_id, {"implementation_date": data.get("effective_date", "")},
+                                    allow_controlled_fields=True)
     if action_name == "Verified":
-        ccdb.update_change_control(cc_id, {"verification_date": data.get("effective_date", "")})
+        ccdb.update_change_control(cc_id, {"verification_date": data.get("effective_date", "")},
+                                    allow_controlled_fields=True)
     if action_name == "Closed":
-        ccdb.update_change_control(cc_id, {"closure_date": data.get("effective_date", "")})
+        ccdb.update_change_control(cc_id, {"closure_date": data.get("effective_date", "")},
+                                    allow_controlled_fields=True)
 
     entry = qmsdb.add_approval_entry(
         "change_control", cc_id, action_name,

@@ -168,7 +168,29 @@ def get_all_documents(company_id: str | None = None, filters: dict | None = None
     return [dict(r) for r in rows]
 
 
-def update_document(document_id: int, data: dict) -> dict | None:
+# CRIT-01 (Security Audit remediation): these fields must only change via
+# this document's workflow/approval lifecycle (services/workflow_engine.py's
+# STATUS_APPLIERS, routes/qms_documents.py::submit_approval's e-signed
+# writes, and the company_admin-only create_version() escape hatch) — never
+# via a raw client-supplied update. Distinct from, and in addition to, the
+# route-level _AUTHOR_READONLY_FIELDS silent-strip already in
+# routes/qms_documents.py::update_document (effective_date/review_date/
+# prepared_by/reviewed_by/approved_by) — that mechanism already neutralizes
+# those fields at the route layer and is left unchanged here to keep this
+# fix minimal; see qms_capa_database.CAPA_CONTROLLED_FIELDS for the general
+# rationale on why this repository-layer guard exists as the primary
+# boundary.
+DOCUMENT_CONTROLLED_FIELDS = frozenset({"status", "approver", "reviewer", "version", "superseded_date"})
+
+
+def update_document(document_id: int, data: dict, *, allow_controlled_fields: bool = False) -> dict | None:
+    if not allow_controlled_fields:
+        blocked = DOCUMENT_CONTROLLED_FIELDS & data.keys()
+        if blocked:
+            raise ValueError(
+                "workflow-controlled field(s) cannot be set via a generic update: "
+                + ", ".join(sorted(blocked))
+            )
     conn = get_connection()
     fields = [
         "doc_type", "title", "department", "category", "version", "status",
@@ -937,5 +959,9 @@ def try_clear_training_gate(document_id: int, effective_date: str | None = None)
     final_number = dv.next_version_number(version["version_number"], "effective")
     transition_version_status(version["id"], "effective", effective_date=effective_date,
                                version=final_number, version_number=final_number)
+    # CRIT-01 (Security Audit remediation): allow_controlled_fields=True —
+    # this is the Quality Release / training-gate-clear path itself (see
+    # trusted callers named in the docstring above), never a raw client
+    # field.
     return update_document(document_id, {"status": "Effective", "effective_date": effective_date,
-                                          "version": final_number})
+                                          "version": final_number}, allow_controlled_fields=True)

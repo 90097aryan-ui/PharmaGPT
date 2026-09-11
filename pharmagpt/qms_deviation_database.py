@@ -18,17 +18,22 @@ from pharmagpt.qms_database import generate_deviation_number
 
 # ── Deviations ─────────────────────────────────────────────────────────────────
 
-def create_deviation(data: dict, *, company_id: str) -> dict:
+def create_deviation(data: dict, *, company_id: str, created_by_user_id: str = "",
+                     created_by_display_name: str = "") -> dict:
     """`company_id` must be the caller's authenticated tenant
-    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py."""
+    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py.
+    `created_by_user_id`/`created_by_display_name` (CRIT-02 remediation) are
+    likewise authenticated-only, never taken from `data` — see
+    database.py::init_db()'s CRIT-02 schema comment."""
     conn = get_connection()
     deviation_number = data.get("deviation_number") or generate_deviation_number()
     cur = conn.execute(
         """INSERT INTO qms_deviations
            (deviation_number, title, deviation_type, deviation_category, department, area,
             product, batch_lot, equipment, project_id, date_of_occurrence, date_reported,
-            initiated_by, description, immediate_action, status, risk_level, form_data, company_id)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            initiated_by, description, immediate_action, status, risk_level, form_data, company_id,
+            created_by_user_id, created_by_display_name)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             deviation_number,
             data.get("title", "Untitled Deviation").strip() or "Untitled Deviation",
@@ -49,6 +54,8 @@ def create_deviation(data: dict, *, company_id: str) -> dict:
             data.get("risk_level", ""),
             json.dumps(data.get("form_data", {})),
             company_id,
+            created_by_user_id,
+            created_by_display_name,
         ),
     )
     conn.commit()
@@ -103,7 +110,28 @@ def get_all_deviations(company_id: str | None = None, filters: dict | None = Non
     return result
 
 
-def update_deviation(deviation_id: int, data: dict) -> dict | None:
+# CRIT-01 (Security Audit remediation): mirrors qms_capa_database's
+# CAPA_CONTROLLED_FIELDS — see that comment for the full rationale.
+# `qa_reviewer` is deliberately NOT included here, unlike its CAPA/Change
+# Control counterparts: no internal caller stamps it as the outcome of an
+# e-signed decision for this module (the real approver-authorization record
+# is qms_deviation_workflow_steps.approver_user_id, set only via the
+# Workflow Builder), and tests/test_deviation_workflow_builder.py::
+# test_overview_update_still_accepts_qa_reviewer_field_for_backward_compat
+# asserts it must remain PUT-writable ("kept for backward compatibility
+# with any other caller") — a pre-existing, deliberate product decision
+# this fix must not break.
+DEVIATION_CONTROLLED_FIELDS = frozenset({"status", "approver", "closure_date"})
+
+
+def update_deviation(deviation_id: int, data: dict, *, allow_controlled_fields: bool = False) -> dict | None:
+    if not allow_controlled_fields:
+        blocked = DEVIATION_CONTROLLED_FIELDS & data.keys()
+        if blocked:
+            raise ValueError(
+                "workflow-controlled field(s) cannot be set via a generic update: "
+                + ", ".join(sorted(blocked))
+            )
     conn = get_connection()
     fields = [
         "title", "deviation_type", "deviation_category", "department", "area", "product",

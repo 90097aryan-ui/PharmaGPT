@@ -58,6 +58,7 @@ from pharmagpt.db import qms_repo
 from pharmagpt.services import esignature_service
 from pharmagpt.services import qms_capa_service as svc
 from pharmagpt.services import workflow_engine as wfe
+from pharmagpt.services.supabase_client import get_service_role_client
 
 bp = Blueprint("qms_capa", __name__, url_prefix="/qms/capa")
 logger = logging.getLogger(__name__)
@@ -175,7 +176,12 @@ def create_capa():
     data = request.get_json() or {}
     if not data.get("title", "").strip():
         return jsonify({"error": "CAPA title is required"}), 400
-    capa = cdb.create_capa(data, company_id=g.tenant.company_id)
+    # CRIT-02 (Security Audit remediation): creator identity is stamped from
+    # the authenticated session, never client input — see database.py::
+    # init_db()'s CRIT-02 schema comment and workflow_engine.py::
+    # reject_creator_as_approver.
+    capa = cdb.create_capa(data, company_id=g.tenant.company_id,
+                           created_by_user_id=g.tenant.user_id, created_by_display_name=g.tenant.display_name)
     performed_by = tenancy.signing_identity(g.tenant)["performed_by"]
     audit.log("capa", capa["id"], "CAPA created", new=capa)
     _dual_write_create(capa, "CAPA created", performed_by)
@@ -210,6 +216,20 @@ def update_capa(cid):
                            reason="Closed CAPAs are immutable")
         return jsonify({"error": "This CAPA is Closed and cannot be edited"}), 409
     data = request.get_json() or {}
+    # CRIT-01 (Security Audit remediation): status/approver-adjacent fields
+    # must only change through the governed workflow (POST /<id>/approval,
+    # /workflow/steps/<order>/decide, or the mandatory e-signed
+    # /effectiveness-verification gate), never a raw field PUT. Repository-
+    # layer enforcement (qms_capa_database.CAPA_CONTROLLED_FIELDS) is the
+    # actual security boundary — this check exists for a clear 400 instead
+    # of a raised-exception 500 if it's ever reached.
+    blocked = cdb.CAPA_CONTROLLED_FIELDS & data.keys()
+    if blocked:
+        return jsonify({
+            "error": f"{', '.join(sorted(blocked))} cannot be changed via PUT — use "
+                     "POST /qms/capa/<id>/approval, /qms/capa/<id>/workflow/steps/<order>/decide, "
+                     "or /qms/capa/<id>/effectiveness-verification to move the CAPA through its lifecycle",
+        }), 400
     updated = cdb.update_capa(cid, data)
     _dual_write_update(updated)
     audit.log("capa", cid, "Updated", old=existing, new=updated)
@@ -343,6 +363,17 @@ def assign_workflow_step(cid, step_order):
     approvers = data.get("approvers") or []
     if not isinstance(approvers, list) or not all(a.get("user_id") for a in approvers):
         return jsonify({"error": "approvers must be a non-empty list of {user_id, display_name}"}), 400
+    # CRIT-02 (Security Audit remediation): a proposed approver must be a
+    # real, active user of THIS company — otherwise any authenticated caller
+    # could name a user_id belonging to a different tenant. Creator-vs-
+    # approver segregation of duties is enforced one layer down, inside
+    # wfe.assign_approvers() itself (services/workflow_engine.py::
+    # reject_creator_as_approver) — no separate check needed here for that.
+    invalid = tenancy.missing_or_inactive_users(
+        get_service_role_client(), g.tenant.company_id, {a["user_id"] for a in approvers},
+    )
+    if invalid:
+        return jsonify({"error": f"Not a valid, active user of this company: {', '.join(sorted(invalid))}"}), 400
     try:
         state = wfe.assign_approvers(RECORD_TYPE, cid, step_order, approvers)
     except wfe.WorkflowError as e:
@@ -597,10 +628,14 @@ def submit_approval(cid):
         audit.log_failure("capa", cid, f"Approval action blocked ({action_name})", reason=str(e))
         return jsonify({"error": str(e)}), 409
 
+    # CRIT-01: allow_controlled_fields=True — this write is the e-signed,
+    # role-gated (@require_role above) outcome of a real approval decision
+    # just made via wfe.decide_step(), not a raw client field.
     if action_name == "Closed":
-        cdb.update_capa(cid, {"closure_date": data.get("closure_date", ""), "approver": sig["performed_by"]})
+        cdb.update_capa(cid, {"closure_date": data.get("closure_date", ""), "approver": sig["performed_by"]},
+                        allow_controlled_fields=True)
     if action_name == "Submitted for QA Review":
-        cdb.update_capa(cid, {"qa_reviewer": sig["performed_by"]})
+        cdb.update_capa(cid, {"qa_reviewer": sig["performed_by"]}, allow_controlled_fields=True)
 
     entry = qmsdb.add_approval_entry(
         "capa", cid, action_name,

@@ -13,6 +13,22 @@ tests/test_esignature_service.py.
 
 import pharmagpt.services.esignature_service as esig
 
+_APPROVER_ID = "00000000-0000-0000-0000-000000000002"  # CRIT-02 (Security Audit remediation):
+# a distinct, non-creator identity — the fixed test tenant creates every
+# CAPA in this file, so it can no longer self-assign as its own approver
+# (services/workflow_engine.py::reject_creator_as_approver), including via
+# submit_effectiveness_verification()'s "assign me if no one's assigned yet"
+# convenience.
+
+
+def _as_approver(monkeypatch):
+    import tests.conftest as conftest_module
+    from pharmagpt.auth.context import TenantContext
+    monkeypatch.setattr(conftest_module, "_TEST_TENANT", TenantContext(
+        user_id=_APPROVER_ID, email="approver@example.com", display_name="Approver User",
+        role="reviewer_qa", company_id=conftest_module._TEST_TENANT.company_id,
+    ))
+
 
 def _capa_at_effectiveness_gate(client):
     """Create a CAPA and walk it, via the legacy /approval wrapper, up to
@@ -83,8 +99,9 @@ def test_verification_rejected_when_not_at_gate(client):
 
 # ── Result branching ──────────────────────────────────────────────────────────
 
-def test_effective_result_advances_to_qa_review_and_records_history(client):
+def test_effective_result_advances_to_qa_review_and_records_history(client, monkeypatch):
     cid = _capa_at_effectiveness_gate(client)
+    _as_approver(monkeypatch)
     r = client.post(f"/qms/capa/{cid}/effectiveness-verification",
                      json={**VALID_VERIFICATION, "result": "Effective"})
     assert r.status_code == 201
@@ -100,14 +117,17 @@ def test_effective_result_advances_to_qa_review_and_records_history(client):
     steps_by_order = {s["step_order"]: s for s in wf["steps"]}
     assert steps_by_order[6]["status"] == "approved"
 
-    # CAPA may now be closed via the normal QA Review -> Closed path.
+    # CAPA may now be closed via the normal QA Review -> Closed path — still
+    # acting as _APPROVER_ID (not the creator), whose role=reviewer_qa
+    # satisfies /approval's @require_role("company_admin", "reviewer_qa").
     client.post(f"/qms/capa/{cid}/approval", json={"action": "Submitted for QA Review"})
     client.post(f"/qms/capa/{cid}/approval", json={"action": "Closed"})
     assert client.get(f"/qms/capa/{cid}").get_json()["status"] == "Closed"
 
 
-def test_partially_effective_returns_to_capa_plan(client):
+def test_partially_effective_returns_to_capa_plan(client, monkeypatch):
     cid = _capa_at_effectiveness_gate(client)
+    _as_approver(monkeypatch)
     r = client.post(f"/qms/capa/{cid}/effectiveness-verification",
                      json={**VALID_VERIFICATION, "result": "Partially Effective"})
     assert r.status_code == 201
@@ -124,8 +144,9 @@ def test_partially_effective_returns_to_capa_plan(client):
     assert client.post(f"/qms/capa/{cid}/workflow/steps/6/decide", json={"decision": "approve"}).status_code == 409
 
 
-def test_not_effective_reopens_investigation(client):
+def test_not_effective_reopens_investigation(client, monkeypatch):
     cid = _capa_at_effectiveness_gate(client)
+    _as_approver(monkeypatch)
     r = client.post(f"/qms/capa/{cid}/effectiveness-verification",
                      json={**VALID_VERIFICATION, "result": "Not Effective"})
     assert r.status_code == 201
@@ -156,10 +177,11 @@ def test_effectiveness_verification_requires_esignature(client, monkeypatch):
 
 # ── Audit trail ────────────────────────────────────────────────────────────────
 
-def test_effectiveness_verification_writes_audit_entries(client):
+def test_effectiveness_verification_writes_audit_entries(client, monkeypatch):
     cid = _capa_at_effectiveness_gate(client)
     esignatures_before = len(client.get(f"/qms/capa/{cid}/esignatures").get_json())
 
+    _as_approver(monkeypatch)
     client.post(f"/qms/capa/{cid}/effectiveness-verification",
                 json={**VALID_VERIFICATION, "result": "Effective"})
 

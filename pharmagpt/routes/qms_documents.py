@@ -404,6 +404,20 @@ def update_document(did):
         aq = data.get("approval_quorum")
         if aq is not None and (not isinstance(aq, int) or isinstance(aq, bool) or aq < 1):
             return jsonify({"error": "approval_quorum must be a positive integer or null"}), 400
+    # CRIT-01 (Security Audit remediation): status/approver-adjacent fields
+    # must only change through the governed workflow (POST /<id>/approval or
+    # /workflow/steps/<order>/decide), never a raw field PUT. Repository-
+    # layer enforcement (qms_document_database.DOCUMENT_CONTROLLED_FIELDS)
+    # is the actual security boundary — this check exists for a clear 400
+    # instead of a raised-exception 500 if it's ever reached. Distinct from
+    # the _AUTHOR_READONLY_FIELDS strip above, which already neutralizes a
+    # different field set at this same route.
+    blocked = qdb.DOCUMENT_CONTROLLED_FIELDS & data.keys()
+    if blocked:
+        return jsonify({
+            "error": f"{', '.join(sorted(blocked))} cannot be changed via PUT — use "
+                     "POST /qms/documents/<id>/approval to move the document through its lifecycle",
+        }), 400
     updated = qdb.update_document(did, data)
     audit.log("document", did, "Updated", old=existing, new=updated)
     return jsonify(updated)
@@ -657,7 +671,10 @@ def create_version(did):
     changed_by = tenancy.signing_identity(g.tenant)["performed_by"]
     qdb.create_version(did, document.get("version", "1.0"), data.get("change_summary", ""),
                        document.get("content", ""), changed_by)
-    qdb.update_document(did, {"version": new_version})
+    # CRIT-01: allow_controlled_fields=True — this route is already
+    # @require_role("company_admin")-gated above, a deliberate escape hatch,
+    # not the normal author flow (see docstring above).
+    qdb.update_document(did, {"version": new_version}, allow_controlled_fields=True)
     audit.log("document", did, "New version created",
               old={"version": document.get("version")}, new={"version": new_version})
     return jsonify(qdb.get_document(did)), 201
@@ -1163,7 +1180,10 @@ def submit_approval(did):
         if new_status == "Obsolete" and not document.get("superseded_date"):
             from datetime import date
             updates["superseded_date"] = date.today().isoformat()
-        document = qdb.update_document(did, updates)
+        # CRIT-01: allow_controlled_fields=True — this is the e-signed
+        # (require_esignature above), lifecycle_engine-validated outcome of
+        # a real approval action, not a raw client field.
+        document = qdb.update_document(did, updates, allow_controlled_fields=True)
     else:
         try:
             if not wfdb.get_active_instance(RECORD_TYPE, did):

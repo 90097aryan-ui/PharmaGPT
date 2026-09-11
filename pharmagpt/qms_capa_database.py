@@ -21,17 +21,22 @@ from pharmagpt.qms_database import generate_capa_number
 
 # ── CAPAs ──────────────────────────────────────────────────────────────────────
 
-def create_capa(data: dict, *, company_id: str) -> dict:
+def create_capa(data: dict, *, company_id: str, created_by_user_id: str = "",
+                created_by_display_name: str = "") -> dict:
     """`company_id` must be the caller's authenticated tenant
-    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py."""
+    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py.
+    `created_by_user_id`/`created_by_display_name` (CRIT-02 remediation) are
+    likewise authenticated-only, never taken from `data` — see
+    database.py::init_db()'s CRIT-02 schema comment."""
     conn = get_connection()
     capa_number = data.get("capa_number") or generate_capa_number()
     cur = conn.execute(
         """INSERT INTO qms_capas
            (capa_number, title, capa_source, source_reference, department, project_id,
             problem_statement, root_cause, initiated_by, date_initiated, target_closure_date,
-            status, qa_reviewer, approver, form_data, company_id)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            status, qa_reviewer, approver, form_data, company_id,
+            created_by_user_id, created_by_display_name)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             capa_number,
             data.get("title", "Untitled CAPA").strip() or "Untitled CAPA",
@@ -49,6 +54,8 @@ def create_capa(data: dict, *, company_id: str) -> dict:
             data.get("approver", ""),
             json.dumps(data.get("form_data", {})),
             company_id,
+            created_by_user_id,
+            created_by_display_name,
         ),
     )
     conn.commit()
@@ -101,7 +108,26 @@ def get_all_capas(company_id: str | None = None, filters: dict | None = None) ->
     return result
 
 
-def update_capa(capa_id: int, data: dict) -> dict | None:
+# CRIT-01 (Security Audit remediation): these fields must only change via
+# this CAPA's workflow/approval lifecycle (services/workflow_engine.py's
+# STATUS_APPLIERS, and routes/qms_capa.py::submit_approval's own e-signed
+# writes) — never via a raw client-supplied update. update_capa() below
+# refuses to write any of these unless the caller explicitly passes
+# allow_controlled_fields=True, which only those already-authorized internal
+# call sites do. This is the primary security boundary; the matching 400
+# check in routes/qms_capa.py::update_capa is defense-in-depth, not the only
+# protection — a future route calling this function directly is still safe.
+CAPA_CONTROLLED_FIELDS = frozenset({"status", "qa_reviewer", "approver", "closure_date"})
+
+
+def update_capa(capa_id: int, data: dict, *, allow_controlled_fields: bool = False) -> dict | None:
+    if not allow_controlled_fields:
+        blocked = CAPA_CONTROLLED_FIELDS & data.keys()
+        if blocked:
+            raise ValueError(
+                "workflow-controlled field(s) cannot be set via a generic update: "
+                + ", ".join(sorted(blocked))
+            )
     conn = get_connection()
     fields = [
         "title", "capa_source", "source_reference", "department", "project_id",

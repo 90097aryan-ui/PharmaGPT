@@ -12,26 +12,34 @@ import pytest
 from pharmagpt import qms_workflow_database as wfdb
 from pharmagpt.services import workflow_registry
 
-_FIXED_USER_ID = "00000000-0000-0000-0000-000000000001"  # tests/conftest.py::_TEST_TENANT.user_id
+_FIXED_USER_ID = "00000000-0000-0000-0000-000000000001"  # tests/conftest.py::_TEST_TENANT.user_id — the
+# creator of every deviation in this file (CRIT-02: never a valid approver).
+_FIXED_APPROVER_ID = "00000000-0000-0000-0000-000000000002"  # a distinct, non-creator identity — the
+# default approver for this file's deviation tests (CRIT-02, Security Audit
+# remediation: a creator can no longer be assigned as their own approver).
 _ASSIGN = {"approvers": [{"user_id": _FIXED_USER_ID, "display_name": "Test User"}]}
 
 
 @pytest.fixture(autouse=True)
 def _active_approver_directory(monkeypatch):
-    """/workflow/start validates every configured approver against the
-    company's active users (routes/qms_deviations.py::
-    _missing_or_inactive_approvers) — a real Supabase call in production.
-    Autouse-patched here so this file's deviation-workflow tests keep
-    passing without per-test boilerplate."""
+    """/workflow-builder (CRIT-02) and /workflow/start both validate every
+    configured approver against the company's active users
+    (routes/qms_deviations.py's shared tenancy.missing_or_inactive_users
+    check, and _missing_or_inactive_approvers respectively) — a real
+    Supabase call in production. Autouse-patched here so this file's
+    deviation-workflow tests keep passing without per-test boilerplate."""
     from tests.test_assume_company_context import FakeSupabaseClient
     from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID
-    store = {"users": [{"id": _FIXED_USER_ID, "company_id": BOOTSTRAP_COMPANY_ID, "status": "active"}]}
+    store = {"users": [
+        {"id": _FIXED_USER_ID, "company_id": BOOTSTRAP_COMPANY_ID, "status": "active"},
+        {"id": _FIXED_APPROVER_ID, "company_id": BOOTSTRAP_COMPANY_ID, "status": "active"},
+    ]}
     monkeypatch.setattr(
         "pharmagpt.routes.qms_deviations.get_service_role_client", lambda: FakeSupabaseClient(store)
     )
 
 
-def _dev_configure_all_approvers(client, did, user_id=_FIXED_USER_ID, display_name="Test User"):
+def _dev_configure_all_approvers(client, did, user_id=_FIXED_APPROVER_ID, display_name="Approver User"):
     """The Workflow Builder is the only place a deviation's approvers are
     configured — there is no runtime "Assign Approver" action. Fill in the
     Review chain plus both fixed CAPA-phase steps (QA Review, Final
@@ -59,7 +67,7 @@ def test_inbox_empty_when_nothing_pending(client):
     assert stats["recent_decisions"] == []
 
 
-def test_inbox_lists_pending_deviation_approval_step_once_workflow_starts(client):
+def test_inbox_lists_pending_deviation_approval_step_once_workflow_starts(client, monkeypatch):
     # DEVIATION_LIFECYCLE_V2's step 2 ("initiator_mgr_review") is an
     # approval step — it only appears in the Inbox once someone is named as
     # its approver. There is no runtime "Assign Approver" action for
@@ -67,6 +75,11 @@ def test_inbox_lists_pending_deviation_approval_step_once_workflow_starts(client
     # the Workflow Builder is the only place to configure approvers, and
     # /workflow/start auto-assigns everyone configured, so the step is
     # already in the Inbox the moment submission succeeds.
+    #
+    # CRIT-02: the Inbox is scoped to the calling identity ("my" pending
+    # steps), and the creator (_FIXED_USER_ID) can no longer be the
+    # approver of their own deviation — the acting identity switches to
+    # _FIXED_APPROVER_ID (the actual named approver) before checking it.
     dev = client.post("/qms/deviations", json={"title": "Temp excursion"}).get_json()
     did = dev["id"]
     assert client.get("/workflow/inbox").get_json() == []
@@ -74,6 +87,12 @@ def test_inbox_lists_pending_deviation_approval_step_once_workflow_starts(client
     _dev_configure_all_approvers(client, did)
     r = client.post(f"/qms/deviations/{did}/workflow/start")
     assert r.status_code == 201
+
+    from pharmagpt.auth.context import TenantContext
+    import tests.conftest as conftest_module
+    monkeypatch.setattr(conftest_module, "_TEST_TENANT", TenantContext(
+        user_id=_FIXED_APPROVER_ID, email="approver@example.com", display_name="Approver User",
+        role="reviewer_qa", company_id=conftest_module._TEST_TENANT.company_id))
 
     items = client.get("/workflow/inbox").get_json()
     assert len(items) == 1
@@ -83,12 +102,12 @@ def test_inbox_lists_pending_deviation_approval_step_once_workflow_starts(client
     assert row["title"] == "Temp excursion"
     assert row["current_step_order"] == 2
     assert row["step_type"] == "approval"
-    assert row["assigned_to"] == ["Test User"]
+    assert row["assigned_to"] == ["Approver User"]
     assert row["due_date"] is None
     assert row["priority"] == "Normal"
 
 
-def test_first_approver_sees_deviation_in_inbox_immediately_after_submit(client):
+def test_first_approver_sees_deviation_in_inbox_immediately_after_submit(client, monkeypatch):
     """Regression test for the reported bug: "Lifecycle shows an assigned
     approver but the deviation never appears in Workflow Inbox." Root cause
     was NOT the Inbox depending on any legacy assignment model — the Inbox
@@ -102,7 +121,12 @@ def test_first_approver_sees_deviation_in_inbox_immediately_after_submit(client)
     echoes back display_name) but can never match the Inbox's
     `a.user_id = <the querying user's real id>` filter. This test pins down
     the correct-configuration path: a real approver, correctly identified,
-    must see the record in their Inbox the instant submission succeeds."""
+    must see the record in their Inbox the instant submission succeeds.
+
+    CRIT-02: the approver (_FIXED_APPROVER_ID) is now necessarily distinct
+    from the creator (_FIXED_USER_ID) — the acting identity switches to it
+    before checking the Inbox, since the Inbox is scoped to "my" pending
+    steps."""
     dev = client.post("/qms/deviations", json={"title": "Temp excursion"}).get_json()
     did = dev["id"]
     _dev_configure_all_approvers(client, did)
@@ -111,11 +135,16 @@ def test_first_approver_sees_deviation_in_inbox_immediately_after_submit(client)
 
     # Lifecycle already shows the auto-assigned approver...
     wf = client.get(f"/qms/deviations/{did}/workflow").get_json()
-    assert wf["assigned_to"] == ["Test User"]
+    assert wf["assigned_to"] == ["Approver User"]
 
-    # ...and the SAME approver (the fixture's logged-in tenant user,
-    # _FIXED_USER_ID) sees it in their Inbox right away — no runtime "Assign
-    # Approver" call, no separate inbox-population step.
+    # ...and the SAME approver sees it in their Inbox right away — no
+    # runtime "Assign Approver" call, no separate inbox-population step.
+    from pharmagpt.auth.context import TenantContext
+    import tests.conftest as conftest_module
+    monkeypatch.setattr(conftest_module, "_TEST_TENANT", TenantContext(
+        user_id=_FIXED_APPROVER_ID, email="approver@example.com", display_name="Approver User",
+        role="reviewer_qa", company_id=conftest_module._TEST_TENANT.company_id))
+
     items = client.get("/workflow/inbox").get_json()
     assert len(items) == 1
     assert items[0]["record_id"] == did
@@ -136,15 +165,25 @@ def test_submit_blocked_when_configured_approver_id_does_not_match_a_real_user(c
     this can no longer reach a live workflow instance at all: submission is
     blocked, with the record staying in Draft, before Lifecycle or the Inbox
     ever see a phantom assignment."""
+    # CRIT-02 (Security Audit remediation) added the same active-user
+    # validation one step earlier too — at the Workflow Builder PUT itself
+    # (routes/qms_deviations.py::update_workflow_builder, via
+    # tenancy.missing_or_inactive_users) — so this exact misconfiguration is
+    # now caught at configuration time (400), before /workflow/start is
+    # even reachable with a saved invalid approver. A stronger form of the
+    # same guarantee this test already asserted, just one step earlier.
     dev = client.post("/qms/deviations", json={"title": "Temp excursion"}).get_json()
     did = dev["id"]
     # "production-head" is not in this file's autouse-mocked active-user
-    # roster (only _FIXED_USER_ID is) — simulates exactly the reported
-    # misconfiguration: a role label typed where a real user id belongs.
-    _dev_configure_all_approvers(client, did, user_id="production-head", display_name="Production Head")
-
-    r = client.post(f"/qms/deviations/{did}/workflow/start")
-    assert r.status_code == 409
+    # roster (only _FIXED_USER_ID/_FIXED_APPROVER_ID are) — simulates
+    # exactly the reported misconfiguration: a role label typed where a
+    # real user id belongs.
+    steps = client.get(f"/qms/deviations/{did}/workflow-builder").get_json()["steps"]
+    for s in steps:
+        s["approver_user_id"] = "production-head"
+        s["approver_display_name"] = "Production Head"
+    r = client.put(f"/qms/deviations/{did}/workflow-builder", json={"steps": steps, "capa_phase": {}})
+    assert r.status_code == 400
     assert "production-head" in r.get_json()["error"]
 
     assert client.get(f"/qms/deviations/{did}").get_json()["status"] == "Draft"
@@ -213,13 +252,24 @@ def test_inbox_lists_pending_document_once_assigned(client, monkeypatch):
     assert items[0]["title"] == "Doc one"
 
 
-def test_inbox_stats_awaiting_my_decision_counts_approval_steps_only(client):
+def test_inbox_stats_awaiting_my_decision_counts_approval_steps_only(client, monkeypatch):
     dev = client.post("/qms/deviations", json={"title": "Dev"}).get_json()
     _dev_configure_all_approvers(client, dev["id"])
     client.post(f"/qms/deviations/{dev['id']}/workflow/start")  # approval step, already assigned
 
     capa = client.post("/qms/capa", json={"title": "CAPA"}).get_json()
     client.post(f"/qms/capa/{capa['id']}/workflow/start")  # current step is activity, no assignment needed
+
+    # CRIT-02: the deviation's approval step is now assigned to
+    # _FIXED_APPROVER_ID (distinct from the creator) — switch to it so
+    # stats are counted from the actual named approver's perspective. Its
+    # role=reviewer_qa is also eligible for CAPA's activity step, so both
+    # items still count.
+    from pharmagpt.auth.context import TenantContext
+    import tests.conftest as conftest_module
+    monkeypatch.setattr(conftest_module, "_TEST_TENANT", TenantContext(
+        user_id=_FIXED_APPROVER_ID, email="approver@example.com", display_name="Approver User",
+        role="reviewer_qa", company_id=conftest_module._TEST_TENANT.company_id))
 
     stats = client.get("/workflow/inbox/stats").get_json()
     assert stats["my_pending_count"] == 2

@@ -39,6 +39,14 @@ REVIEWER_A = TenantContext(
     user_id="reviewer-a", email="reviewer-a@example.com", display_name="Rita Reviewer",
     role="reviewer_qa", company_id=COMPANY_A,
 )
+APPROVER_A = TenantContext(
+    user_id="approver-a", email="approver-a@example.com", display_name="Amy Approver",
+    role="reviewer_qa", company_id=COMPANY_A,
+)  # CRIT-02 (Security Audit remediation): a record's creator can no longer be
+# its own approver — this file's deviation-workflow tests create records as
+# ADMIN_A, so a distinct identity is needed wherever a test needs a real,
+# valid named approver (as opposed to REVIEWER_A, deliberately used
+# elsewhere as an *unnamed* caller who should be rejected).
 USER_A = TenantContext(
     user_id="user-a", email="user-a@example.com", display_name="Uma User",
     role="user", company_id=COMPANY_A,
@@ -64,6 +72,7 @@ def _active_approver_directory(monkeypatch):
     store = {"users": [
         {"id": ADMIN_A.user_id, "company_id": COMPANY_A, "status": "active"},
         {"id": REVIEWER_A.user_id, "company_id": COMPANY_A, "status": "active"},
+        {"id": APPROVER_A.user_id, "company_id": COMPANY_A, "status": "active"},
     ]}
     monkeypatch.setattr(
         "pharmagpt.routes.qms_deviations.get_service_role_client", lambda: FakeSupabaseClient(store)
@@ -412,7 +421,7 @@ def _reach_qa_approval(client, deviation_id, approver_tenant):
 
 def test_user_role_cannot_advance_workflow_activity_step(client):
     deviation = _create_deviation(client, ADMIN_A)
-    _reach_qa_approval(client, deviation["id"], ADMIN_A)
+    _reach_qa_approval(client, deviation["id"], APPROVER_A)
 
     # Step 5 (Investigation Open) is an activity step eligible to
     # reviewer_qa/company_admin only — a plain 'user' may not advance it.
@@ -427,7 +436,7 @@ def test_user_role_cannot_advance_workflow_activity_step(client):
 
 def test_reviewer_qa_can_advance_eligible_workflow_activity_step(client):
     deviation = _create_deviation(client, ADMIN_A)
-    _reach_qa_approval(client, deviation["id"], ADMIN_A)
+    _reach_qa_approval(client, deviation["id"], APPROVER_A)
 
     with _as(REVIEWER_A):
         resp = client.post(
@@ -445,7 +454,7 @@ def test_reviewer_qa_not_named_as_approver_cannot_decide_approval_step(client):
     action->status map; the redesign requires being the *assigned* approver."""
     deviation = _create_deviation(client, ADMIN_A)
     with _as(ADMIN_A):
-        _dev_configure_all_approvers(client, deviation["id"], ADMIN_A)
+        _dev_configure_all_approvers(client, deviation["id"], APPROVER_A)
         client.post(f"/qms/deviations/{deviation['id']}/workflow/start", headers=AUTH_HEADERS)
 
     with _as(REVIEWER_A):

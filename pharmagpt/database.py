@@ -486,6 +486,22 @@ def init_db() -> None:
     # fully supported and untouched either way.
     _add_column_if_missing(conn, "qms_workflow_template_steps", "department_code", "TEXT DEFAULT NULL")
     _add_column_if_missing(conn, "qms_workflow_template_steps", "functional_role_name", "TEXT DEFAULT NULL")
+    # CRIT-02 (Security Audit remediation): record creator identity, so
+    # segregation-of-duties enforcement (services/workflow_engine.py::
+    # reject_creator_as_approver) can refuse a record's own creator being
+    # named as one of its approvers. Documents already captures this on
+    # qms_document_versions.created_by_user_id (above) — CAPA/Change
+    # Control/Deviation have no per-version concept, so it lives directly on
+    # the main record instead. Authenticated-only, stamped once at creation
+    # by routes/qms_*.py's create_* handlers from g.tenant, never taken from
+    # client-supplied `data` — same convention as company_id (see
+    # pharmagpt/tenancy.py). Blank for every record created before this fix;
+    # the segregation-of-duties check is a documented no-op wherever no
+    # creator identity was captured, matching qms_documents.py's existing
+    # precedent for legacy records with no author on file.
+    for _crit02_table in ("qms_capas", "qms_change_controls", "qms_deviations"):
+        _add_column_if_missing(conn, _crit02_table, "created_by_user_id", "TEXT DEFAULT ''")
+        _add_column_if_missing(conn, _crit02_table, "created_by_display_name", "TEXT DEFAULT ''")
     # Moved out of QMS_SCHEMA (qms_database.py): that script runs via
     # executescript() above, before the quorum_eligible ALTERs directly
     # above this line — so on a database that already had
