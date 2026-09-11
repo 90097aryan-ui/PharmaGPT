@@ -241,7 +241,7 @@ async function qmsMcOpenDetail(id) {
       </div>
       <div class="qms-body">
         <div class="qms-tabs" id="qms-mc-tabs">
-          ${["overview", "lifecycle", "attachments", "comments", "audit"]
+          ${["overview", "lifecycle", "investigation", "attachments", "comments", "audit"]
             .map(t => `<button class="qms-tab ${t === qmsMcActiveTab ? "active" : ""}" onclick="qmsMcSwitchTab('${t}')">${qmsMcTabLabel(t)}</button>`).join("")}
         </div>
         <div id="qms-mc-tab-body"></div>
@@ -267,14 +267,14 @@ function qmsMcMetaHTML(c) {
 
 function qmsMcTabLabel(t) {
   return {
-    overview: "Overview", lifecycle: "Lifecycle", attachments: "Attachments",
-    comments: "Comments", audit: "Audit Trail",
+    overview: "Overview", lifecycle: "Lifecycle", investigation: "Investigation Case",
+    attachments: "Attachments", comments: "Comments", audit: "Audit Trail",
   }[t] || t;
 }
 
 async function qmsMcSwitchTab(tab) {
   qmsMcActiveTab = tab;
-  const order = ["overview", "lifecycle", "attachments", "comments", "audit"];
+  const order = ["overview", "lifecycle", "investigation", "attachments", "comments", "audit"];
   document.querySelectorAll("#qms-mc-tabs .qms-tab").forEach((b, i) => b.classList.toggle("active", order[i] === tab));
   const complaint = await qmsFetch(`/qms/market-complaints/${qmsMcCurrentId}`);
   qmsMcRenderTab(complaint);
@@ -316,14 +316,31 @@ function qmsMcRenderTab(complaint) {
           <button class="btn-primary" onclick="qmsMcSaveOverview(${id})">Save</button>
         </div>
         <p style="font-size:11.5px;color:var(--text-muted);margin-top:8px">
-          Investigation Engine integration (evidence, root cause, AI Assistant/Report) is a future
-          release — Investigation Required/Rationale are captured here for that phase.
+          Setting Investigation Required to "Yes" and completing Initial Triage & Quality-Risk
+          Assessment on the Lifecycle tab unlocks the Investigation Case tab (evidence, root cause,
+          AI Assistant/Report).
         </p>
       </div>
     `;
   } else if (qmsMcActiveTab === "lifecycle") {
     el.innerHTML = `<div id="qms-workflow-mc-${id}"></div>`;
     renderWorkflowPanel(`qms-workflow-mc-${id}`, "market_complaint", "/qms/market-complaints", id);
+  } else if (qmsMcActiveTab === "investigation") {
+    if (!complaint.investigation_unlocked) {
+      el.innerHTML = `
+        <div class="qms-section-card" style="text-align:center;padding:40px 20px">
+          <div style="font-size:32px;margin-bottom:8px">🔒</div>
+          <h3>Investigation Case Locked</h3>
+          <p style="font-size:12.5px;color:var(--text-muted)">Reason: ${complaint.lock_reason || "Investigation is not available yet"}</p>
+          <p style="font-size:12px;color:var(--text-muted);margin-top:8px">
+            Set Investigation Required to "Yes" on the <a href="#" onclick="qmsMcSwitchTab('overview');return false;">Overview</a> tab
+            and complete Initial Triage &amp; Quality-Risk Assessment on the
+            <a href="#" onclick="qmsMcSwitchTab('lifecycle');return false;">Lifecycle</a> tab to unlock this tab.
+          </p>
+        </div>`;
+    } else {
+      qmsMcRenderInvestigationCase(id);
+    }
   } else if (qmsMcActiveTab === "attachments") {
     el.innerHTML = `<div id="qms-attachments-market_complaint-${id}"></div>`;
     qmsRenderAttachments(`qms-attachments-market_complaint-${id}`, "market_complaint", id);
@@ -333,6 +350,21 @@ function qmsMcRenderTab(complaint) {
   } else if (qmsMcActiveTab === "audit") {
     el.innerHTML = `<div id="qms-audit-market_complaint-${id}"></div>`;
     qmsRenderAuditTrail(`qms-audit-market_complaint-${id}`, "market_complaint", id);
+  }
+}
+
+// ── Investigation Case tab: mounts the reusable investigation_case.js component ──
+// Same pattern as qms_deviations.js::qmsDevRenderInvestigationCase — this
+// module owns no investigation UI of its own, only mounts the shared,
+// record-type-agnostic component once unlocked (see qmsMcRenderTab above
+// for the locked-state message).
+function qmsMcRenderInvestigationCase(id) {
+  const el = document.getElementById("qms-mc-tab-body");
+  el.innerHTML = `<div id="qms-investigation-case-market_complaint-${id}"></div>`;
+  if (window.InvestigationCase) {
+    window.InvestigationCase.mount(`qms-investigation-case-market_complaint-${id}`, "market_complaint", id, "/qms/market-complaints");
+  } else {
+    el.innerHTML = `<div class="qms-empty"><p>Investigation Case component failed to load.</p></div>`;
   }
 }
 

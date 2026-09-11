@@ -1,6 +1,6 @@
 """
 routes/qms_market_complaint.py — Market Complaint Management module API
-endpoints (P0).
+endpoints (P0 + P1-A).
 
 Attachments/comments/audit-trail/e-signature-trail reads are served by
 routes/qms_common.py (record_type='market_complaint') — see that module's
@@ -11,18 +11,25 @@ Control/Deviations use — no engine change.
 
 P0 workflow: Draft (pre-workflow) -> Submitted -> Initial Triage &
 Quality-Risk Assessment -> QA Review -> Closed, with a Rejected side path.
-Investigation (Investigation Engine), CAPA/Deviation/Risk linkage, AI
-Assistant/Report, regulatory notification, and effectiveness-check are P1/P2
-and are NOT implemented here — see docs/plan (Market Complaint P0
-implementation). `regulatory_profile` is captured at intake as a plain
-classification only; no regulator-specific branching exists in this module
-(P0 instruction: universal workflow, regulatory detail conditional/future).
+`regulatory_profile` is captured at intake as a plain classification only;
+no regulator-specific branching exists in this module (P0 instruction:
+universal workflow, regulatory detail conditional/future).
+
+P1-A adds the Investigation Case (evidence, SOP review, interviews,
+timeline, AI Assistant/Report, root cause, investigation summary, tasks,
+Evidence Dashboard) — thin wrappers delegating to the existing, generic
+services/investigation_engine.py with record_type='market_complaint', the
+exact same pattern routes/qms_deviations.py's own `/investigation/*`
+sub-routes already use (no new Investigation table, no engine change).
+CAPA/Deviation/Risk/Change Control linkage, Impact/Scope, Effectiveness
+Check, regulatory notification, and Market Action/Recall are still P1-B+
+and are NOT implemented here.
 
 Routes
 ------
 GET    /qms/market-complaints                       list complaints (filterable, keyword search)
 POST   /qms/market-complaints                        create complaint (auto complaint_number)
-GET    /qms/market-complaints/<id>                   get one complaint
+GET    /qms/market-complaints/<id>                   get one complaint (includes investigation_unlocked/lock_reason)
 PUT    /qms/market-complaints/<id>                   update complaint fields
 DELETE /qms/market-complaints/<id>                   delete complaint
 
@@ -32,6 +39,19 @@ POST   /qms/market-complaints/<id>/workflow/steps/<order>/assign   assign a name
 POST   /qms/market-complaints/<id>/workflow/assign-all             assign named approver(s) to MULTIPLE approval
                                                                      steps in one atomic call (upfront-assignment UX)
 POST   /qms/market-complaints/<id>/workflow/steps/<order>/decide   approve / reject / advance the current step
+
+GET/POST /qms/market-complaints/<id>/investigation/evidence            Investigation Case — evidence/documents
+GET/POST /qms/market-complaints/<id>/investigation/sop-review          Investigation Case — applicable SOP review
+GET/POST /qms/market-complaints/<id>/investigation/interviews          Investigation Case — personnel interviews
+GET/POST /qms/market-complaints/<id>/investigation/timeline            Investigation Case — timeline builder
+POST     /qms/market-complaints/<id>/investigation/ai/assistant        Investigation Case — AI Assistant (interactive)
+POST     /qms/market-complaints/<id>/investigation/ai/report           Investigation Case — AI Report Generation
+GET      /qms/market-complaints/<id>/investigation/ai/history          Investigation Case — every AI run, both modes
+GET/PUT  /qms/market-complaints/<id>/investigation/root-cause          Investigation Case — Possible/Probable/Confirmed root cause
+GET/PUT  /qms/market-complaints/<id>/investigation/summary             Investigation Case — finalized handoff summary
+GET      /qms/market-complaints/<id>/investigation/dashboard           Investigation Case — rules-based Evidence Dashboard
+GET/POST /qms/market-complaints/<id>/investigation/tasks               Investigation Case — investigation tasks
+PUT      /qms/market-complaints/<id>/investigation/tasks/<task_id>     Investigation Case — update a task
 """
 
 import logging
@@ -44,6 +64,7 @@ from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
 from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.services import esignature_service
+from pharmagpt.services import investigation_engine as inv
 from pharmagpt.services import workflow_engine as wfe
 from pharmagpt.services.supabase_client import get_service_role_client
 
@@ -51,6 +72,12 @@ bp = Blueprint("qms_market_complaint", __name__, url_prefix="/qms/market-complai
 logger = logging.getLogger(__name__)
 RECORD_TYPE = "market_complaint"
 WORKFLOW_KEY = "MARKET_COMPLAINT_WORKFLOW_V1"
+# P1-A: the Investigation Case unlocks once Triage & Risk Assessment is
+# approved — same role this constant plays as routes/qms_deviations.py's
+# own UNLOCK_STEP_KEY = "qa_approval" (see _investigation_lock below for
+# the one extra Market-Complaint-specific precondition Deviation doesn't
+# need: investigation_required == "Yes").
+INVESTIGATION_UNLOCK_STEP_KEY = "triage_risk_assessment"
 
 
 @bp.before_request
@@ -98,11 +125,33 @@ def _record_scoped_or_404(cid):
     return tenancy.scoped_or_none(mcdb.get_complaint(cid), g.tenant.company_id)
 
 
+def _investigation_lock(complaint: dict) -> tuple[bool, str]:
+    """Investigation Case unlock gate (P1-A) — server-side, mirrors
+    routes/qms_deviations.py::_investigation_lock's wfe.is_unlocked() call
+    exactly, plus one Market-Complaint-specific precondition Deviation
+    doesn't need: investigation_required must be "Yes" (P0's own intake
+    field — see qms_database.py's "Investigation gate (P1 wires the
+    Investigation Engine to these)" comment). All three preconditions —
+    record exists (caller's _record_scoped_or_404), Triage & Risk
+    Assessment approved, investigation_required == "Yes" — are enforced
+    here, not just hidden in the UI: every investigation route below
+    computes this and passes it straight into
+    services/investigation_engine.py, which itself refuses any write when
+    unlocked=False (raises InvestigationLockedError) — so a future route
+    added to this file can't accidentally skip the check."""
+    if (complaint.get("investigation_required") or "") != "Yes":
+        return False, "Investigation is not required for this complaint"
+    return wfe.is_unlocked(RECORD_TYPE, complaint["id"], INVESTIGATION_UNLOCK_STEP_KEY)
+
+
 @bp.route("/<int:cid>", methods=["GET"])
 def get_complaint(cid):
     c = _record_scoped_or_404(cid)
     if not c:
         return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(c)
+    c["investigation_unlocked"] = unlocked
+    c["lock_reason"] = reason
     return jsonify(c)
 
 
@@ -303,3 +352,260 @@ def decide_workflow_step(cid, step_order):
     }.get(decision, evt.COMPLAINT_WORKFLOW_TRANSITION)
     audit.log("market_complaint", cid, event, detail=f"decision={decision}")
     return jsonify(state)
+
+
+# ── Investigation Case (P1-A; services/investigation_engine.py) ─────────────
+# Thin wrappers only, same pattern as routes/qms_deviations.py's own
+# `/investigation/*` sub-routes: check the record exists + resolve the
+# lock, then delegate to the engine with record_type="market_complaint".
+# Every mutating engine call gets `unlocked` explicitly — the engine itself
+# refuses to write if False, so this check can't be silently skipped by a
+# future route. GET routes are never lock-gated (same as Deviation): there
+# is nothing to read until something has been written, and writes are
+# gated — matching the established, already-tested precedent exactly
+# (tests/test_qms_routes.py::test_deviation_investigation_case_locked_until_qa_approval).
+
+def _investigation_context(complaint: dict) -> dict:
+    """Generic context dict handed to the record-type-agnostic AI prompts —
+    see prompts/investigation_prompt.py."""
+    return {
+        "Complaint Number": complaint.get("complaint_number", ""),
+        "Title": complaint.get("title", ""),
+        "Product": complaint.get("product", ""),
+        "Batch/Lot": complaint.get("batch_lot", ""),
+        "Market/Country": complaint.get("market_country", ""),
+        "Classification": complaint.get("initial_classification", ""),
+        "Severity": complaint.get("severity", ""),
+        "Description": complaint.get("description", ""),
+        "Initial Impact Assessment": complaint.get("initial_impact_assessment", ""),
+        "Immediate Containment Action": complaint.get("immediate_containment_action", ""),
+    }
+
+
+@bp.route("/<int:cid>/investigation/evidence", methods=["GET"])
+def list_investigation_evidence(cid):
+    if not _record_scoped_or_404(cid):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(inv.get_evidence(RECORD_TYPE, cid))
+
+
+@bp.route("/<int:cid>/investigation/evidence", methods=["POST"])
+def add_investigation_evidence(cid):
+    complaint = _record_scoped_or_404(cid)
+    if not complaint:
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(complaint)
+    try:
+        entry = inv.add_evidence(RECORD_TYPE, cid, request.get_json() or {}, unlocked=unlocked)
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("market_complaint", cid, "Investigation evidence added", detail=entry.get("category", ""))
+    return jsonify(entry), 201
+
+
+@bp.route("/<int:cid>/investigation/sop-review", methods=["GET"])
+def list_investigation_sop_reviews(cid):
+    if not _record_scoped_or_404(cid):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(inv.get_sop_reviews(RECORD_TYPE, cid))
+
+
+@bp.route("/<int:cid>/investigation/sop-review", methods=["POST"])
+def add_investigation_sop_review(cid):
+    complaint = _record_scoped_or_404(cid)
+    if not complaint:
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(complaint)
+    try:
+        entry = inv.add_sop_review(RECORD_TYPE, cid, request.get_json() or {}, unlocked=unlocked)
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("market_complaint", cid, "SOP review entry added", detail=entry.get("doc_reference", ""))
+    return jsonify(entry), 201
+
+
+@bp.route("/<int:cid>/investigation/interviews", methods=["GET"])
+def list_investigation_interviews(cid):
+    if not _record_scoped_or_404(cid):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(inv.get_interviews(RECORD_TYPE, cid))
+
+
+@bp.route("/<int:cid>/investigation/interviews", methods=["POST"])
+def add_investigation_interview(cid):
+    complaint = _record_scoped_or_404(cid)
+    if not complaint:
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(complaint)
+    try:
+        entry = inv.add_interview(RECORD_TYPE, cid, request.get_json() or {}, unlocked=unlocked)
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("market_complaint", cid, "Interview recorded", detail=entry.get("interviewee_name", ""))
+    return jsonify(entry), 201
+
+
+@bp.route("/<int:cid>/investigation/timeline", methods=["GET"])
+def list_investigation_timeline(cid):
+    if not _record_scoped_or_404(cid):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(inv.get_timeline_events(RECORD_TYPE, cid))
+
+
+@bp.route("/<int:cid>/investigation/timeline", methods=["POST"])
+def add_investigation_timeline_event(cid):
+    complaint = _record_scoped_or_404(cid)
+    if not complaint:
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(complaint)
+    try:
+        entry = inv.add_timeline_event(RECORD_TYPE, cid, request.get_json() or {}, unlocked=unlocked)
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("market_complaint", cid, "Timeline event added", detail=entry.get("event_type", ""))
+    return jsonify(entry), 201
+
+
+@bp.route("/<int:cid>/investigation/ai/assistant", methods=["POST"])
+def run_investigation_ai_assistant(cid):
+    complaint = _record_scoped_or_404(cid)
+    if not complaint:
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(complaint)
+    sig = tenancy.signing_identity(g.tenant)
+    data = request.get_json() or {}
+    try:
+        run = inv.run_ai_assistant(
+            RECORD_TYPE, cid, _investigation_context(complaint), question=data.get("question", ""),
+            generated_by=sig["performed_by"], unlocked=unlocked,
+        )
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("market_complaint", cid, "AI Investigation Assistant run")
+    return jsonify(run), 201
+
+
+@bp.route("/<int:cid>/investigation/ai/report", methods=["POST"])
+def run_investigation_ai_report(cid):
+    complaint = _record_scoped_or_404(cid)
+    if not complaint:
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(complaint)
+    sig = tenancy.signing_identity(g.tenant)
+    investigation_data = {
+        "interviews": inv.get_interviews(RECORD_TYPE, cid),
+        "timeline": inv.get_timeline_events(RECORD_TYPE, cid),
+        "root_cause": inv.get_root_cause(RECORD_TYPE, cid),
+    }
+    try:
+        run = inv.run_ai_report(
+            RECORD_TYPE, cid, _investigation_context(complaint), investigation_data,
+            generated_by=sig["performed_by"], unlocked=unlocked,
+        )
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("market_complaint", cid, "AI Investigation Report generated")
+    return jsonify(run), 201
+
+
+@bp.route("/<int:cid>/investigation/ai/history", methods=["GET"])
+def get_investigation_ai_history(cid):
+    if not _record_scoped_or_404(cid):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(inv.get_ai_history(RECORD_TYPE, cid, request.args.get("mode")))
+
+
+@bp.route("/<int:cid>/investigation/root-cause", methods=["GET"])
+def get_investigation_root_cause(cid):
+    if not _record_scoped_or_404(cid):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(inv.get_root_cause(RECORD_TYPE, cid) or {})
+
+
+@bp.route("/<int:cid>/investigation/root-cause", methods=["PUT"])
+def save_investigation_root_cause(cid):
+    complaint = _record_scoped_or_404(cid)
+    if not complaint:
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(complaint)
+    try:
+        entry = inv.save_root_cause(RECORD_TYPE, cid, request.get_json() or {}, unlocked=unlocked)
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("market_complaint", cid, "Root cause updated")
+    return jsonify(entry)
+
+
+@bp.route("/<int:cid>/investigation/summary", methods=["GET"])
+def get_investigation_summary(cid):
+    if not _record_scoped_or_404(cid):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(inv.get_summary(RECORD_TYPE, cid) or {})
+
+
+@bp.route("/<int:cid>/investigation/summary", methods=["PUT"])
+def save_investigation_summary(cid):
+    complaint = _record_scoped_or_404(cid)
+    if not complaint:
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(complaint)
+    sig = tenancy.signing_identity(g.tenant)
+    try:
+        entry = inv.finalize_summary(
+            RECORD_TYPE, cid, request.get_json() or {}, finalized_by=sig["performed_by"], unlocked=unlocked,
+        )
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("market_complaint", cid, "Investigation Summary finalized")
+    return jsonify(entry)
+
+
+@bp.route("/<int:cid>/investigation/dashboard", methods=["GET"])
+def get_investigation_dashboard(cid):
+    if not _record_scoped_or_404(cid):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(inv.get_dashboard(RECORD_TYPE, cid))
+
+
+# ── Investigation Tasks ───────────────────────────────────────────────────────
+# Investigative activities, not Workflow steps — same lock/423 + audit-trail
+# pattern as every other investigation sub-route above.
+
+@bp.route("/<int:cid>/investigation/tasks", methods=["GET"])
+def list_investigation_tasks(cid):
+    if not _record_scoped_or_404(cid):
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(inv.get_tasks(RECORD_TYPE, cid))
+
+
+@bp.route("/<int:cid>/investigation/tasks", methods=["POST"])
+def add_investigation_task(cid):
+    complaint = _record_scoped_or_404(cid)
+    if not complaint:
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(complaint)
+    data = request.get_json() or {}
+    data["created_by"] = tenancy.signing_identity(g.tenant)["performed_by"]
+    try:
+        entry = inv.add_task(RECORD_TYPE, cid, data, unlocked=unlocked)
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("market_complaint", cid, "Investigation task added", detail=entry.get("title", ""))
+    return jsonify(entry), 201
+
+
+@bp.route("/<int:cid>/investigation/tasks/<int:task_id>", methods=["PUT"])
+def update_investigation_task(cid, task_id):
+    complaint = _record_scoped_or_404(cid)
+    if not complaint:
+        return jsonify({"error": "Not found"}), 404
+    existing = inv.get_task_scoped(task_id, RECORD_TYPE, cid)
+    if not existing:
+        return jsonify({"error": "Not found"}), 404
+    unlocked, reason = _investigation_lock(complaint)
+    try:
+        entry = inv.update_task(task_id, request.get_json() or {}, unlocked=unlocked)
+    except inv.InvestigationLockedError:
+        return jsonify({"error": f"Investigation Case Locked — {reason}"}), 423
+    audit.log("market_complaint", cid, "Investigation task updated", old=existing, new=entry)
+    return jsonify(entry)

@@ -623,3 +623,246 @@ def test_esignature_invalid_meaning_blocks_decision(client, monkeypatch):
     r = client.post(f"/qms/market-complaints/{cid}/workflow/steps/2/decide",
                      json={"decision": "approve", "meaning": "NotARealMeaning", "reason": "x"})
     assert r.status_code == 400
+
+
+# ── Investigation Case (P1-A; services/investigation_engine.py) ─────────────
+# Same generic engine/tables Deviation's own `/investigation/*` routes use
+# (tests/test_investigation_engine.py, tests/test_qms_routes.py's
+# test_deviation_investigation_*) — these tests only need to prove the
+# Market Complaint wiring (lock gate, tenant scoping, audit) is correct;
+# the engine's own CRUD/lock-refusal behavior is already covered there.
+
+def _mc_reach_investigation_unlock(client, cid, monkeypatch, investigation_required="Yes"):
+    """Drive a complaint to 'Triage & Risk Assessment approved' — the state
+    that (combined with investigation_required == 'Yes') unlocks the
+    Investigation Case. Pass investigation_required=None to leave the field
+    untouched (e.g. to prove the lock still holds even once Triage is
+    approved, if the field was never set to "Yes")."""
+    if investigation_required is not None:
+        r = client.put(f"/qms/market-complaints/{cid}", json={"investigation_required": investigation_required})
+        assert r.status_code == 200, r.get_json()
+    r = client.post(f"/qms/market-complaints/{cid}/workflow/start")
+    assert r.status_code == 201, r.get_json()
+    r = client.post(f"/qms/market-complaints/{cid}/workflow/steps/2/assign",
+                     json={"approvers": [{"user_id": _APPROVER_ID, "display_name": "Approver User"}]})
+    assert r.status_code == 200, r.get_json()
+    _as_approver(monkeypatch)
+    r = client.post(f"/qms/market-complaints/{cid}/workflow/steps/2/decide",
+                     json={"decision": "approve", "meaning": "Approved", "reason": "Reviewed"})
+    assert r.status_code == 200, r.get_json()
+
+
+def test_investigation_locked_before_workflow_started(client):
+    """investigation_required == 'Yes' alone is not enough — Triage & Risk
+    Assessment must also be approved. A brand-new (Draft) complaint has
+    neither."""
+    complaint = _create(client)
+    cid = complaint["id"]
+    client.put(f"/qms/market-complaints/{cid}", json={"investigation_required": "Yes"})
+
+    r = client.post(f"/qms/market-complaints/{cid}/investigation/evidence", json={"category": "BMR"})
+    assert r.status_code == 423
+    assert "locked" in r.get_json()["error"].lower()
+    assert client.get(f"/qms/market-complaints/{cid}").get_json()["investigation_unlocked"] is False
+
+
+def test_investigation_locked_when_investigation_required_not_yes(client, monkeypatch):
+    """Triage approved, but investigation_required was never set to 'Yes' —
+    the Investigation Case must stay locked (the second, Market-Complaint-
+    specific precondition Deviation doesn't have)."""
+    complaint = _create(client)
+    cid = complaint["id"]
+    _mc_reach_investigation_unlock(client, cid, monkeypatch, investigation_required=None)
+
+    assert client.get(f"/qms/market-complaints/{cid}").get_json()["investigation_unlocked"] is False
+    r = client.post(f"/qms/market-complaints/{cid}/investigation/evidence", json={"category": "BMR"})
+    assert r.status_code == 423
+    assert "not required" in r.get_json()["error"].lower()
+
+
+def test_investigation_locked_when_investigation_required_explicitly_no(client, monkeypatch):
+    complaint = _create(client)
+    cid = complaint["id"]
+    _mc_reach_investigation_unlock(client, cid, monkeypatch, investigation_required="No")
+    r = client.put(f"/qms/market-complaints/{cid}/investigation/root-cause",
+                    json={"probable_cause": "x"})
+    assert r.status_code == 423
+
+
+def test_investigation_unlocks_after_triage_approval_and_required_yes(client, monkeypatch):
+    complaint = _create(client)
+    cid = complaint["id"]
+    _mc_reach_investigation_unlock(client, cid, monkeypatch)
+
+    updated = client.get(f"/qms/market-complaints/{cid}").get_json()
+    assert updated["investigation_unlocked"] is True
+    assert updated["status"] == "QA Review"  # step 2 approved -> record now sits at step 3's gate
+
+    r = client.post(f"/qms/market-complaints/{cid}/investigation/evidence", json={"category": "BMR"})
+    assert r.status_code == 201
+    assert r.get_json()["category"] == "BMR"
+
+
+def test_investigation_evidence_sop_interviews_timeline_tasks_crud(client, monkeypatch):
+    complaint = _create(client)
+    cid = complaint["id"]
+    _mc_reach_investigation_unlock(client, cid, monkeypatch)
+
+    ev = client.post(f"/qms/market-complaints/{cid}/investigation/evidence",
+                      json={"category": "BMR", "description": "Batch record"}).get_json()
+    assert ev["category"] == "BMR"
+    assert len(client.get(f"/qms/market-complaints/{cid}/investigation/evidence").get_json()) == 1
+
+    sop = client.post(f"/qms/market-complaints/{cid}/investigation/sop-review",
+                       json={"doc_reference": "SOP-QA-014"}).get_json()
+    assert sop["doc_reference"] == "SOP-QA-014"
+    assert len(client.get(f"/qms/market-complaints/{cid}/investigation/sop-review").get_json()) == 1
+
+    iv = client.post(f"/qms/market-complaints/{cid}/investigation/interviews",
+                      json={"interviewee_name": "Jane Doe"}).get_json()
+    assert iv["interviewee_name"] == "Jane Doe"
+    assert len(client.get(f"/qms/market-complaints/{cid}/investigation/interviews").get_json()) == 1
+
+    tl = client.post(f"/qms/market-complaints/{cid}/investigation/timeline",
+                      json={"event_type": "Batch", "description": "Batch released"}).get_json()
+    assert tl["event_type"] == "Batch"
+    assert len(client.get(f"/qms/market-complaints/{cid}/investigation/timeline").get_json()) == 1
+
+    task = client.post(f"/qms/market-complaints/{cid}/investigation/tasks",
+                        json={"title": "Pull batch record"}).get_json()
+    assert task["title"] == "Pull batch record"
+    r = client.put(f"/qms/market-complaints/{cid}/investigation/tasks/{task['id']}",
+                    json={"status": "Completed"})
+    assert r.status_code == 200
+    assert r.get_json()["status"] == "Completed"
+    assert r.get_json()["completion_date"]
+
+    dash = client.get(f"/qms/market-complaints/{cid}/investigation/dashboard").get_json()
+    assert dash["evidence_score"] >= 0
+    assert dash["outstanding_tasks"] == 0  # the one task above was just completed
+
+
+def test_investigation_root_cause_persists_via_generic_engine(client, monkeypatch):
+    """Root Cause must use the existing Investigation Engine implementation
+    (no second model) — verified two ways: through the route, and directly
+    against qms_investigation_database's generic, record-type-agnostic table."""
+    complaint = _create(client)
+    cid = complaint["id"]
+    _mc_reach_investigation_unlock(client, cid, monkeypatch)
+
+    r = client.put(f"/qms/market-complaints/{cid}/investigation/root-cause",
+                    json={"possible_cause": "Seal defect", "probable_cause": "Supplier seal batch variance"})
+    assert r.status_code == 200
+    assert r.get_json()["probable_cause"] == "Supplier seal batch variance"
+
+    fetched = client.get(f"/qms/market-complaints/{cid}/investigation/root-cause").get_json()
+    assert fetched["possible_cause"] == "Seal defect"
+    assert fetched["probable_cause"] == "Supplier seal batch variance"
+
+    from pharmagpt import qms_investigation_database as idb
+    direct = idb.get_root_cause("market_complaint", cid)
+    assert direct["probable_cause"] == "Supplier seal batch variance"
+
+
+def test_investigation_summary_finalization(client, monkeypatch):
+    complaint = _create(client)
+    cid = complaint["id"]
+    _mc_reach_investigation_unlock(client, cid, monkeypatch)
+
+    r = client.put(f"/qms/market-complaints/{cid}/investigation/summary",
+                    json={"summary_text": "Root cause confirmed", "key_findings": ["Seal batch defect"]})
+    assert r.status_code == 200
+    entry = r.get_json()
+    assert entry["summary_text"] == "Root cause confirmed"
+    assert entry["finalized_by"]
+    assert entry["finalized_at"]
+
+
+def test_investigation_ai_assistant_locked_until_unlocked(client, monkeypatch):
+    complaint = _create(client)
+    cid = complaint["id"]
+    r = client.post(f"/qms/market-complaints/{cid}/investigation/ai/assistant", json={})
+    assert r.status_code == 423
+
+
+def test_investigation_ai_assistant_runs_once_unlocked(client, monkeypatch):
+    import pharmagpt.services.investigation_engine as inv_engine
+    import json as json_module
+    canned = json_module.dumps({
+        "analysis": "Evidence points to a supplier seal defect", "possible_causes": [{"cause": "Seal batch", "confidence": 0.6}],
+    })
+    monkeypatch.setattr(inv_engine, "call_gemini", lambda prompt, temperature=0.3: canned)
+
+    complaint = _create(client)
+    cid = complaint["id"]
+    _mc_reach_investigation_unlock(client, cid, monkeypatch)
+
+    r = client.post(f"/qms/market-complaints/{cid}/investigation/ai/assistant", json={"question": "What happened?"})
+    assert r.status_code == 201
+    run = r.get_json()
+    assert run["mode"] == "assistant"
+    assert run["output"]["analysis"] == "Evidence points to a supplier seal defect"
+
+    history = client.get(f"/qms/market-complaints/{cid}/investigation/ai/history").get_json()
+    assert len(history) == 1
+
+
+def test_investigation_cross_tenant_rejected(client, monkeypatch):
+    """Every investigation route must be tenant-scoped — a different
+    company gets 404, never a look at another tenant's investigation data."""
+    complaint = _create(client)
+    cid = complaint["id"]
+    _mc_reach_investigation_unlock(client, cid, monkeypatch)
+    client.post(f"/qms/market-complaints/{cid}/investigation/evidence", json={"category": "BMR"})
+
+    _as_other_company(monkeypatch)
+    assert client.get(f"/qms/market-complaints/{cid}/investigation/evidence").status_code == 404
+    assert client.post(f"/qms/market-complaints/{cid}/investigation/evidence",
+                        json={"category": "BPR"}).status_code == 404
+    assert client.get(f"/qms/market-complaints/{cid}/investigation/root-cause").status_code == 404
+    assert client.put(f"/qms/market-complaints/{cid}/investigation/root-cause", json={}).status_code == 404
+    assert client.get(f"/qms/market-complaints/{cid}/investigation/dashboard").status_code == 404
+    assert client.get(f"/qms/market-complaints/999999/investigation/tasks").status_code == 404
+
+
+def test_investigation_task_cross_record_scoping(client, monkeypatch):
+    """A task belonging to complaint A must not be updatable through
+    complaint B's URL, even within the SAME company (mirrors
+    tests/test_qms_routes.py::test_deviation_investigation_tasks_tenant_and_record_scoping's
+    record-scoping half)."""
+    c1 = _create(client, title="Complaint One")
+    c2 = _create(client, title="Complaint Two")
+    _mc_reach_investigation_unlock(client, c1["id"], monkeypatch)
+    _mc_reach_investigation_unlock(client, c2["id"], monkeypatch)
+
+    task = client.post(f"/qms/market-complaints/{c1['id']}/investigation/tasks",
+                        json={"title": "Task for complaint 1"}).get_json()
+    r = client.put(f"/qms/market-complaints/{c2['id']}/investigation/tasks/{task['id']}",
+                    json={"status": "Completed"})
+    assert r.status_code == 404
+
+
+def test_investigation_does_not_alter_p0_workflow_lifecycle(client, monkeypatch):
+    """Adding the Investigation Case must not change the P0 workflow's own
+    behavior — full lifecycle still runs Submitted -> Triage -> QA Review ->
+    Closed exactly as before, including while investigation data exists."""
+    complaint = _create(client)
+    cid = complaint["id"]
+    _mc_reach_investigation_unlock(client, cid, monkeypatch)
+    client.post(f"/qms/market-complaints/{cid}/investigation/evidence", json={"category": "BMR"})
+
+    r = client.post(f"/qms/market-complaints/{cid}/workflow/steps/3/assign",
+                     json={"approvers": [{"user_id": _APPROVER_ID, "display_name": "Approver User"}]})
+    assert r.status_code == 200, r.get_json()
+    r = client.post(f"/qms/market-complaints/{cid}/workflow/steps/3/decide",
+                     json={"decision": "approve", "meaning": "Approved", "reason": "Reviewed"})
+    assert r.status_code == 200, r.get_json()
+
+    r = client.post(f"/qms/market-complaints/{cid}/workflow/steps/4/assign",
+                     json={"approvers": [{"user_id": _APPROVER_ID, "display_name": "Approver User"}]})
+    assert r.status_code == 200, r.get_json()
+    r = client.post(f"/qms/market-complaints/{cid}/workflow/steps/4/decide",
+                     json={"decision": "approve", "meaning": "Approved", "reason": "Reviewed"})
+    assert r.status_code == 200, r.get_json()
+
+    assert client.get(f"/qms/market-complaints/{cid}").get_json()["status"] == "Closed"
