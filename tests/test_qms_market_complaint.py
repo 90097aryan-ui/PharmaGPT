@@ -22,6 +22,10 @@ from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID
 _CREATOR_ID = "00000000-0000-0000-0000-000000000001"  # tests/conftest.py::_TEST_TENANT.user_id
 _APPROVER_ID = "00000000-0000-0000-0000-000000000002"  # distinct, non-creator, same company
 _OTHER_COMPANY_ID = "11111111-1111-1111-1111-111111111111"
+_CROSS_COMPANY_USER_ID = "00000000-0000-0000-0000-000000000004"  # real, active, but a DIFFERENT company
+_INACTIVE_SAME_COMPANY_USER_ID = "00000000-0000-0000-0000-000000000005"  # same company, deactivated
+_APPROVER_ID_2 = "00000000-0000-0000-0000-000000000006"  # distinct, non-creator, same company
+_APPROVER_ID_3 = "00000000-0000-0000-0000-000000000007"  # distinct, non-creator, same company
 
 
 def _as_approver(monkeypatch):
@@ -62,6 +66,10 @@ def _company_directory(monkeypatch):
     store = {"users": [
         {"id": _CREATOR_ID, "company_id": BOOTSTRAP_COMPANY_ID, "status": "active"},
         {"id": _APPROVER_ID, "company_id": BOOTSTRAP_COMPANY_ID, "status": "active"},
+        {"id": _CROSS_COMPANY_USER_ID, "company_id": _OTHER_COMPANY_ID, "status": "active"},
+        {"id": _INACTIVE_SAME_COMPANY_USER_ID, "company_id": BOOTSTRAP_COMPANY_ID, "status": "deactivated"},
+        {"id": _APPROVER_ID_2, "company_id": BOOTSTRAP_COMPANY_ID, "status": "active"},
+        {"id": _APPROVER_ID_3, "company_id": BOOTSTRAP_COMPANY_ID, "status": "active"},
     ]}
     fake = lambda: FakeSupabaseClient(store)
     monkeypatch.setattr("pharmagpt.routes.qms_market_complaint.get_service_role_client", fake)
@@ -284,6 +292,216 @@ def test_creator_cannot_self_assign_as_approver(client):
                      json={"approvers": [{"user_id": _CREATOR_ID, "display_name": "Creator"}]})
     assert r.status_code == 409
     assert "segregation of duties" in r.get_json()["error"].lower()
+
+
+def test_forged_cross_company_approver_rejected(client):
+    """Approver-dropdown UX fix (Yuktav): the frontend now sources approver
+    choices from GET /users/directory (company-scoped) instead of a free-typed
+    Supabase user id, but the assign endpoint itself is the actual security
+    boundary — it must independently reject a user id belonging to a
+    different company even though that id is real and active, exactly as if
+    someone bypassed the dropdown and forged the browser request."""
+    complaint = _create(client)
+    client.post(f"/qms/market-complaints/{complaint['id']}/workflow/start")
+    r = client.post(f"/qms/market-complaints/{complaint['id']}/workflow/steps/2/assign",
+                     json={"approvers": [{"user_id": _CROSS_COMPANY_USER_ID, "display_name": "Cross Company"}]})
+    assert r.status_code == 400
+    assert "not a valid, active user" in r.get_json()["error"].lower()
+    state = client.get(f"/qms/market-complaints/{complaint['id']}/workflow").get_json()
+    assert not state["steps"][1]["approvers"]
+
+
+def test_forged_inactive_approver_rejected(client):
+    """Same as above, for a real same-company user who has since been
+    deactivated — GET /users/directory already excludes them from the
+    dropdown, but the assign endpoint must refuse them independently too."""
+    complaint = _create(client)
+    client.post(f"/qms/market-complaints/{complaint['id']}/workflow/start")
+    r = client.post(f"/qms/market-complaints/{complaint['id']}/workflow/steps/2/assign",
+                     json={"approvers": [{"user_id": _INACTIVE_SAME_COMPANY_USER_ID, "display_name": "Inactive User"}]})
+    assert r.status_code == 400
+    assert "not a valid, active user" in r.get_json()["error"].lower()
+    state = client.get(f"/qms/market-complaints/{complaint['id']}/workflow").get_json()
+    assert not state["steps"][1]["approvers"]
+
+
+# ── Workflow: upfront/bulk approver assignment (assign-all) ──────────────────
+
+def _assign_all(client, cid, *, step2=_APPROVER_ID, step3=_APPROVER_ID_2, step4=_APPROVER_ID_3):
+    return client.post(f"/qms/market-complaints/{cid}/workflow/assign-all", json={"assignments": [
+        {"step_order": 2, "approvers": [{"user_id": step2, "display_name": "Step 2 Approver"}]},
+        {"step_order": 3, "approvers": [{"user_id": step3, "display_name": "Step 3 Approver"}]},
+        {"step_order": 4, "approvers": [{"user_id": step4, "display_name": "Step 4 Approver"}]},
+    ]})
+
+
+def test_assign_all_approvers_in_one_call(client):
+    complaint = _create(client)
+    cid = complaint["id"]
+    client.post(f"/qms/market-complaints/{cid}/workflow/start")
+    r = _assign_all(client, cid)
+    assert r.status_code == 200, r.get_json()
+    state = r.get_json()
+    steps_by_order = {s["step_order"]: s for s in state["steps"]}
+    assert steps_by_order[2]["approvers"][0]["user_id"] == _APPROVER_ID
+    assert steps_by_order[3]["approvers"][0]["user_id"] == _APPROVER_ID_2
+    assert steps_by_order[4]["approvers"][0]["user_id"] == _APPROVER_ID_3
+    # Assignment alone must not advance the lifecycle.
+    assert state["instance"]["current_step_order"] == 2
+
+
+def test_assign_all_persists_all_three_assignments(client):
+    complaint = _create(client)
+    cid = complaint["id"]
+    client.post(f"/qms/market-complaints/{cid}/workflow/start")
+    _assign_all(client, cid)
+    state = client.get(f"/qms/market-complaints/{cid}/workflow").get_json()
+    steps_by_order = {s["step_order"]: s for s in state["steps"]}
+    assert steps_by_order[2]["approvers"][0]["display_name"] == "Step 2 Approver"
+    assert steps_by_order[3]["approvers"][0]["display_name"] == "Step 3 Approver"
+    assert steps_by_order[4]["approvers"][0]["display_name"] == "Step 4 Approver"
+
+
+def test_assign_all_invalid_step2_approver_blocks_entire_request(client):
+    complaint = _create(client)
+    cid = complaint["id"]
+    client.post(f"/qms/market-complaints/{cid}/workflow/start")
+    r = _assign_all(client, cid, step2=_CROSS_COMPANY_USER_ID)
+    assert r.status_code == 400, r.get_json()
+    state = client.get(f"/qms/market-complaints/{cid}/workflow").get_json()
+    # Atomicity: steps 3/4's otherwise-valid approvers must NOT have been persisted either.
+    assert all(not s["approvers"] for s in state["steps"] if s["step_type"] == "approval")
+
+
+def test_assign_all_invalid_step3_approver_blocks_entire_request(client):
+    complaint = _create(client)
+    cid = complaint["id"]
+    client.post(f"/qms/market-complaints/{cid}/workflow/start")
+    r = _assign_all(client, cid, step3=_INACTIVE_SAME_COMPANY_USER_ID)
+    assert r.status_code == 400, r.get_json()
+    state = client.get(f"/qms/market-complaints/{cid}/workflow").get_json()
+    assert all(not s["approvers"] for s in state["steps"] if s["step_type"] == "approval")
+
+
+def test_assign_all_invalid_step4_approver_blocks_entire_request(client):
+    complaint = _create(client)
+    cid = complaint["id"]
+    client.post(f"/qms/market-complaints/{cid}/workflow/start")
+    r = _assign_all(client, cid, step4="totally-fake-nonexistent-user-id")
+    assert r.status_code == 400, r.get_json()
+    state = client.get(f"/qms/market-complaints/{cid}/workflow").get_json()
+    assert all(not s["approvers"] for s in state["steps"] if s["step_type"] == "approval")
+
+
+def test_assign_all_cross_company_approver_rejected(client):
+    complaint = _create(client)
+    cid = complaint["id"]
+    client.post(f"/qms/market-complaints/{cid}/workflow/start")
+    r = _assign_all(client, cid, step3=_CROSS_COMPANY_USER_ID)
+    assert r.status_code == 400
+    assert "not a valid, active user" in r.get_json()["error"].lower()
+
+
+def test_assign_all_inactive_approver_rejected(client):
+    complaint = _create(client)
+    cid = complaint["id"]
+    client.post(f"/qms/market-complaints/{cid}/workflow/start")
+    r = _assign_all(client, cid, step4=_INACTIVE_SAME_COMPANY_USER_ID)
+    assert r.status_code == 400
+    assert "not a valid, active user" in r.get_json()["error"].lower()
+
+
+def test_assign_all_creator_cannot_be_assigned_to_any_step(client):
+    """Segregation-of-duties must be enforced for EVERY step in the batch,
+    not just the first one checked."""
+    complaint = _create(client)
+    cid = complaint["id"]
+    client.post(f"/qms/market-complaints/{cid}/workflow/start")
+
+    for kwargs in ({"step2": _CREATOR_ID}, {"step3": _CREATOR_ID}, {"step4": _CREATOR_ID}):
+        r = _assign_all(client, cid, **kwargs)
+        assert r.status_code == 409, r.get_json()
+        assert "segregation of duties" in r.get_json()["error"].lower()
+        state = client.get(f"/qms/market-complaints/{cid}/workflow").get_json()
+        assert all(not s["approvers"] for s in state["steps"] if s["step_type"] == "approval")
+
+
+def test_assign_all_requires_non_empty_assignments_list(client):
+    complaint = _create(client)
+    cid = complaint["id"]
+    client.post(f"/qms/market-complaints/{cid}/workflow/start")
+    r = client.post(f"/qms/market-complaints/{cid}/workflow/assign-all", json={"assignments": []})
+    assert r.status_code == 400
+
+
+def test_assign_all_does_not_require_esignature(client, monkeypatch):
+    """Assigning approvers is not an approval decision — no e-signature
+    fields are expected or required, only when a step is later decided."""
+    import pharmagpt.services.esignature_service as esignature_service
+
+    def _fail(*a, **k):
+        raise esignature_service.ReauthenticationError("should not be called for assignment")
+    monkeypatch.setattr("pharmagpt.routes.qms_market_complaint.esignature_service.require_esignature", _fail)
+
+    complaint = _create(client)
+    cid = complaint["id"]
+    client.post(f"/qms/market-complaints/{cid}/workflow/start")
+    r = _assign_all(client, cid)
+    assert r.status_code == 200, r.get_json()
+
+
+def test_assign_all_upfront_then_sequential_lifecycle_enforced(client, monkeypatch):
+    """The core requirement: assign all three approvers upfront in ONE call,
+    then prove the lifecycle still executes strictly sequentially — a
+    pre-assigned future-step approver can never decide early, and each step
+    only unlocks once its predecessor is actually approved."""
+    complaint = _create(client)
+    cid = complaint["id"]
+    client.post(f"/qms/market-complaints/{cid}/workflow/start")
+    assert _assign_all(client, cid).status_code == 200
+
+    # Only step 2 is actionable initially — steps 3/4 cannot be decided early
+    # even though they already have an assigned approver.
+    _as_approver(monkeypatch)
+    for step_order in (3, 4):
+        r = client.post(f"/qms/market-complaints/{cid}/workflow/steps/{step_order}/decide",
+                         json={"decision": "approve", "meaning": "Approved", "reason": "x"})
+        assert r.status_code == 409
+        assert "not the current step" in r.get_json()["error"].lower()
+
+    # Step 2's assigned approver (_APPROVER_ID) decides step 2 -> unlocks step 3.
+    r = client.post(f"/qms/market-complaints/{cid}/workflow/steps/2/decide",
+                     json={"decision": "approve", "meaning": "Approved", "reason": "x"})
+    assert r.status_code == 200, r.get_json()
+    assert client.get(f"/qms/market-complaints/{cid}/workflow").get_json()["instance"]["current_step_order"] == 3
+
+    # Step 4 still cannot be decided before step 3.
+    r = client.post(f"/qms/market-complaints/{cid}/workflow/steps/4/decide",
+                     json={"decision": "approve", "meaning": "Approved", "reason": "x"})
+    assert r.status_code == 409
+    assert "not the current step" in r.get_json()["error"].lower()
+
+    # Step 3's assigned approver (_APPROVER_ID_2) decides step 3 -> unlocks step 4.
+    from pharmagpt.auth.context import TenantContext
+    import tests.conftest as conftest_module
+    monkeypatch.setattr(conftest_module, "_TEST_TENANT", TenantContext(
+        user_id=_APPROVER_ID_2, email="approver2@example.com", display_name="Approver Two",
+        role="reviewer_qa", company_id=conftest_module._TEST_TENANT.company_id,
+    ))
+    r = client.post(f"/qms/market-complaints/{cid}/workflow/steps/3/decide",
+                     json={"decision": "approve", "meaning": "Approved", "reason": "x"})
+    assert r.status_code == 200, r.get_json()
+    assert client.get(f"/qms/market-complaints/{cid}/workflow").get_json()["instance"]["current_step_order"] == 4
+
+    # Step 4's assigned approver (_APPROVER_ID_3) decides step 4 -> Closed.
+    monkeypatch.setattr(conftest_module, "_TEST_TENANT", TenantContext(
+        user_id=_APPROVER_ID_3, email="approver3@example.com", display_name="Approver Three",
+        role="reviewer_qa", company_id=conftest_module._TEST_TENANT.company_id,
+    ))
+    r = client.post(f"/qms/market-complaints/{cid}/workflow/steps/4/decide",
+                     json={"decision": "approve", "meaning": "Approved", "reason": "x"})
+    assert r.status_code == 200, r.get_json()
+    assert client.get(f"/qms/market-complaints/{cid}").get_json()["status"] == "Closed"
 
 
 def test_decide_without_assigned_approver_blocked(client, monkeypatch):

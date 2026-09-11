@@ -17,6 +17,14 @@
  * Reject and Request Changes. Delegate reassigns the step's named
  * approver(s) via the existing generic assign_approvers endpoint (no new
  * decision type).
+ *
+ * Market Complaint exception (upfront-assignment UX): every approval step's
+ * approver may be chosen at once, in the "Workflow Approvers" panel
+ * (wfPanelMcApproversPanelHTML/wfPanelMcAssignAll) rendered above the
+ * stepper instead of the per-current-step manual-entry form every other
+ * module keeps. This only batches WHEN approvers are chosen — decide_step's
+ * current_step_order gate (services/workflow_engine.py, untouched) still
+ * enforces that only the current step is ever actionable.
  */
 
 async function renderWorkflowPanel(containerId, recordType, routePrefix, recordId) {
@@ -53,10 +61,33 @@ async function renderWorkflowPanel(containerId, recordType, routePrefix, recordI
   // prerequisite) — fetched only when actually needed (a pool_summary step
   // with nothing assigned yet is current), so CAPA/Deviation/Change
   // Control — which never set pool_summary — never make this call.
+  //
+  // Market Complaint (upfront-assignment UX): loads the directory for the
+  // WHOLE workflow, not just the current step, because the "Workflow
+  // Approvers" panel below (wfPanelMcApproversPanelHTML) lets every
+  // approval step's approver be chosen at once — see that function.
   const currentStep = steps.find(s => s.step_order === instance.current_step_order);
-  const needsDirectory = instance.status === "in_progress" && currentStep
-    && currentStep.step_type === "approval" && !(currentStep.approvers || []).length && currentStep.pool_summary;
-  const directory = (needsDirectory && window.UserPicker) ? await window.UserPicker.loadDirectory() : [];
+  const needsDirectory = instance.status === "in_progress" && (
+    (currentStep && currentStep.step_type === "approval" && !(currentStep.approvers || []).length && currentStep.pool_summary)
+    || recordType === "market_complaint"
+  );
+  let directory = (needsDirectory && window.UserPicker) ? await window.UserPicker.loadDirectory() : [];
+
+  // Segregation of duties (services/workflow_engine.py::reject_creator_as_approver
+  // already refuses this server-side regardless): for Market Complaint, drop
+  // the record's own creator from the picker so the UI doesn't offer a choice
+  // the backend will reject. No further role-based filtering is applied —
+  // approval steps have no eligible_roles concept by design (see
+  // assign_approvers()'s docstring and docs/LESSONS_LEARNED.md §5: exact
+  // designation/role-string filtering has previously hidden legitimate
+  // approvers, so the full active-company directory is the source of truth).
+  if (needsDirectory && recordType === "market_complaint" && directory.length) {
+    try {
+      const record = await qmsFetch(`${routePrefix}/${recordId}`);
+      const creatorId = record.created_by_user_id || "";
+      if (creatorId) directory = directory.filter(e => e.user_id !== creatorId);
+    } catch (e) { /* keep the unfiltered directory; the backend still enforces creator exclusion */ }
+  }
 
   el.innerHTML = `
     <div class="qms-section-card">
@@ -66,6 +97,7 @@ async function renderWorkflowPanel(containerId, recordType, routePrefix, recordI
         <span>Step ${instance.current_step_order} of ${steps.length}</span>
       </div>
     </div>
+    ${recordType === "market_complaint" ? wfPanelMcApproversPanelHTML(containerId, recordType, routePrefix, recordId, instance, steps, directory) : ""}
     <div class="qms-workflow-stepper">
       ${steps.map(s => wfPanelStepHTML(containerId, recordType, routePrefix, recordId, s, instance, user, directory)).join("")}
     </div>
@@ -95,6 +127,66 @@ function wfPanelStepHTML(containerId, recordType, routePrefix, recordId, step, i
       </div>
       ${body}
       ${wfPanelPoolSummaryHTML(step)}
+    </div>
+  `;
+}
+
+// Market Complaint upfront-assignment UX: lets every approval step's
+// approver be chosen in ONE panel / one "Assign All Approvers" submit,
+// instead of returning to the Lifecycle tab once per step as each becomes
+// current (the old behavior every other module still has, unchanged, in
+// wfPanelActionHTML below). Purely a front-end batching convenience over
+// the existing engine — POST .../workflow/assign-all
+// (routes/qms_market_complaint.py -> services/workflow_engine.py::
+// assign_approvers_bulk) validates and persists every step atomically, and
+// decide_step()'s current_step_order check (completely untouched) still
+// refuses to let a pre-assigned future-step approver decide early — this
+// panel never writes step status or advances the instance, only approvers.
+// Market-Complaint-only: gated by the caller (renderWorkflowPanel) so every
+// other module's stepper is unaffected.
+function wfPanelMcApproversPanelHTML(containerId, recordType, routePrefix, recordId, instance, steps, directory) {
+  if (instance.status !== "in_progress") return "";
+  const approvalSteps = steps.filter(s => s.step_type === "approval");
+  if (!approvalSteps.length) return "";
+
+  const rows = approvalSteps.map(step => {
+    const approvers = step.approvers || [];
+    if (approvers.length) {
+      // Already assigned (and, once decided, also unavailable for
+      // reassignment — assign_approvers_bulk refuses a non-pending/
+      // in_progress step server-side): show a clean read-only label, no
+      // control to change it, matching every other module's precedent of
+      // never exposing an in-UI reassignment path for an already-assigned step.
+      const label = approvers.map(a => a.display_name || a.user_id).join(", ");
+      return `
+        <div class="form-field" style="margin-top:6px">
+          <label>${step.step_name}</label>
+          <div class="qms-panel-item-meta">Approver: ${label}</div>
+        </div>`;
+    }
+    const selectId = `wf-panel-mc-assign-all-${recordId}-${step.step_order}`;
+    return `
+      <div class="form-field" style="max-width:320px;margin-top:6px" data-mc-step-order="${step.step_order}">
+        <label>${step.step_name}</label>
+        ${window.UserPicker ? window.UserPicker.selectHTML(selectId, directory, "", "Select approver")
+                             : `<input type="text" id="${selectId}" placeholder="Select approver" />`}
+      </div>`;
+  }).join("");
+
+  const anyUnassigned = approvalSteps.some(s => !(s.approvers || []).length);
+
+  return `
+    <div class="qms-section-card">
+      <h3>Workflow Approvers</h3>
+      <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:4px">
+        Assign every approval step's approver up front. The lifecycle still moves one step at a
+        time — an approver can only act once their step actually becomes current.
+      </p>
+      ${rows}
+      ${anyUnassigned ? `
+        <div class="qms-form-actions" style="margin-top:10px">
+          <button class="btn-primary" onclick="wfPanelMcAssignAll('${containerId}','${recordType}','${routePrefix}',${recordId})">Assign All Approvers</button>
+        </div>` : ""}
     </div>
   `;
 }
@@ -235,6 +327,15 @@ function wfPanelActionHTML(containerId, recordType, routePrefix, recordId, step,
         </div>
       `;
     }
+    // Market Complaint upfront-assignment UX: this module's approver
+    // assignment now happens up front, for every approval step at once, in
+    // the "Workflow Approvers" panel above the stepper
+    // (wfPanelMcApproversPanelHTML) — this per-current-step manual-entry
+    // form (below) is CAPA/Change Control's, unchanged; Market Complaint
+    // just points here instead of duplicating an assignment control.
+    if (recordType === "market_complaint") {
+      return `<div class="qms-panel-item-meta">Assign this step's approver from the <strong>Workflow Approvers</strong> panel above.</div>`;
+    }
     return `
       <div class="form-grid" style="margin-top:8px">
         <div class="form-field"><label>Approver User ID</label><input type="text" id="${formId}-uid" placeholder="Supabase user id" /></div>
@@ -289,6 +390,44 @@ async function wfPanelAssign(containerId, recordType, routePrefix, recordId, ste
   }
 }
 window.wfPanelAssign = wfPanelAssign;
+
+// Market Complaint upfront-assignment UX: submits every still-unassigned
+// approval step's selected approver in ONE call to
+// POST .../workflow/assign-all (routes/qms_market_complaint.py ->
+// services/workflow_engine.py::assign_approvers_bulk). Atomic server-side:
+// every step/approver is validated before anything is written, so an
+// invalid selection anywhere rejects the whole batch and nothing changes.
+// The frontend never collects or submits a raw user_id typed by the
+// operator — only the value the browser already populated from
+// GET /users/directory (window.UserPicker.selectHTML).
+async function wfPanelMcAssignAll(containerId, recordType, routePrefix, recordId) {
+  const fields = Array.from(document.querySelectorAll(`#${containerId} [data-mc-step-order]`));
+  const assignments = [];
+  for (const field of fields) {
+    const stepOrder = parseInt(field.dataset.mcStepOrder, 10);
+    const sel = field.querySelector("select");
+    const userId = sel ? sel.value : "";
+    if (!userId) {
+      qmsToast("Please select an approver for every step before assigning");
+      return;
+    }
+    // selectHTML's option text is "display_name (department / designation)"
+    // or bare "display_name" with neither — strip the "(...)" suffix either
+    // way, same convention as wfPanelAssignFromPool.
+    const opt = sel.options[sel.selectedIndex];
+    const displayName = opt ? opt.textContent.split(" (")[0] : "";
+    assignments.push({ step_order: stepOrder, approvers: [{ user_id: userId, display_name: displayName }] });
+  }
+  if (!assignments.length) { qmsToast("Nothing to assign"); return; }
+  try {
+    await qmsPostJSON(`${routePrefix}/${recordId}/workflow/assign-all`, { assignments });
+    qmsToast("Approvers assigned");
+    renderWorkflowPanel(containerId, recordType, routePrefix, recordId);
+  } catch (e) {
+    qmsToast("Failed to assign approvers: " + e.message);
+  }
+}
+window.wfPanelMcAssignAll = wfPanelMcAssignAll;
 
 // Document Control final correction pass: submits every picked role
 // (Reviewer alone for 'under_review'; Department Head/Quality Head/

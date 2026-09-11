@@ -29,6 +29,8 @@ DELETE /qms/market-complaints/<id>                   delete complaint
 GET    /qms/market-complaints/<id>/workflow                        lifecycle state: instance + steps
 POST   /qms/market-complaints/<id>/workflow/start                  submit for review
 POST   /qms/market-complaints/<id>/workflow/steps/<order>/assign   assign a named approver to an approval step
+POST   /qms/market-complaints/<id>/workflow/assign-all             assign named approver(s) to MULTIPLE approval
+                                                                     steps in one atomic call (upfront-assignment UX)
 POST   /qms/market-complaints/<id>/workflow/steps/<order>/decide   approve / reject / advance the current step
 """
 
@@ -197,6 +199,54 @@ def assign_workflow_step(cid, step_order):
         return jsonify({"error": f"Not a valid, active user of this company: {', '.join(sorted(invalid))}"}), 400
     try:
         state = wfe.assign_approvers(RECORD_TYPE, cid, step_order, approvers)
+    except wfe.WorkflowError as e:
+        return jsonify({"error": str(e)}), 409
+    return jsonify(state)
+
+
+@bp.route("/<int:cid>/workflow/assign-all", methods=["POST"])
+def assign_all_workflow_steps(cid):
+    """Upfront-assignment UX: assign named approver(s) to several approval
+    steps in ONE request instead of one call per step (see
+    workflow_panel.js's Market-Complaint-only "Workflow Approvers" panel).
+    Body: {"assignments": [{"step_order": 2, "approvers": [...]}, ...]} —
+    same per-entry shape as .../steps/<order>/assign, just batched.
+
+    Atomicity: every proposed user_id across every step is validated in ONE
+    tenancy.missing_or_inactive_users() pass, and wfe.assign_approvers_bulk()
+    validates every step (existence/type/status/creator) before writing
+    any of them — a single invalid step or approver rejects the WHOLE
+    request with nothing persisted, never a partial assignment."""
+    if not _record_scoped_or_404(cid):
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json() or {}
+    assignments = data.get("assignments")
+    if not isinstance(assignments, list) or not assignments:
+        return jsonify({"error": "assignments must be a non-empty list of {step_order, approvers}"}), 400
+
+    step_assignments = {}
+    all_user_ids = set()
+    for entry in assignments:
+        step_order = entry.get("step_order")
+        approvers = entry.get("approvers") or []
+        if not isinstance(step_order, int):
+            return jsonify({"error": "each assignment requires an integer step_order"}), 400
+        if not isinstance(approvers, list) or not all(a.get("user_id") for a in approvers):
+            return jsonify({
+                "error": f"step {step_order}: approvers must be a non-empty list of {{user_id, display_name}}",
+            }), 400
+        step_assignments[step_order] = approvers
+        all_user_ids.update(a["user_id"] for a in approvers)
+
+    # CRIT-02 parity (same check as the single-step endpoint below), applied
+    # once to the UNION of every requested user_id so an invalid id anywhere
+    # in the batch blocks the whole request before anything is persisted.
+    invalid = tenancy.missing_or_inactive_users(get_service_role_client(), g.tenant.company_id, all_user_ids)
+    if invalid:
+        return jsonify({"error": f"Not a valid, active user of this company: {', '.join(sorted(invalid))}"}), 400
+
+    try:
+        state = wfe.assign_approvers_bulk(RECORD_TYPE, cid, step_assignments)
     except wfe.WorkflowError as e:
         return jsonify({"error": str(e)}), 409
     return jsonify(state)

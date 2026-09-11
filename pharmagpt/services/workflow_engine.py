@@ -592,6 +592,57 @@ def assign_approvers(record_type: str, record_id: int, step_order: int,
     return get_instance_state(record_type, record_id)
 
 
+def assign_approvers_bulk(record_type: str, record_id: int, step_assignments: dict[int, list[dict]]) -> dict:
+    """Atomically set named approver(s) for MULTIPLE approval steps of the
+    same active instance in one call (Market Complaint's upfront "Assign All
+    Approvers" UX — approvers for every approval step may be chosen at once,
+    while the lifecycle itself stays exactly as sequential as
+    decide_step()'s current_step_order check already makes it; this function
+    never touches step status or instance.current_step_order, so a
+    pre-assigned future-step approver still cannot act until their step
+    actually becomes current).
+
+    `step_assignments` is {step_order: [{"user_id": ..., "display_name": ...},
+    ...], ...} — same per-step approver shape as assign_approvers() above.
+
+    Every step_order is validated (exists, is an 'approval' step, not
+    already decided, has a non-empty approver list, no creator among them)
+    BEFORE any write happens — one invalid step aborts the WHOLE call with
+    nothing persisted, same atomicity technique already used for Document
+    Control's assign-chain endpoint (validate everything first, write only
+    once everything has passed — see
+    tests/test_wave3a_finding_a_assign_chain_validation.py)."""
+    instance = wfdb.get_active_instance(record_type, record_id)
+    if not instance:
+        raise WorkflowError("No active workflow instance for this record")
+    if not step_assignments:
+        raise WorkflowError("At least one step assignment is required")
+
+    validated_steps: dict[int, dict] = {}
+    for step_order, approvers in step_assignments.items():
+        step = wfdb.get_instance_step(instance["id"], step_order)
+        if not step:
+            raise WorkflowError(f"Unknown workflow step {step_order}")
+        if step["step_type"] != "approval":
+            raise WorkflowError(f"'{step['step_name']}' does not take named approvers")
+        if step["status"] not in ("pending", "in_progress"):
+            raise WorkflowError(f"'{step['step_name']}' is already {step['status']}")
+        if not approvers:
+            raise WorkflowError(f"At least one approver is required for '{step['step_name']}'")
+        # CRIT-02, layer B — see reject_creator_as_approver()'s docstring
+        # above; applied to every step's approver list, not just one.
+        reject_creator_as_approver(record_type, record_id, approvers)
+        validated_steps[step_order] = step
+
+    for step_order, step in validated_steps.items():
+        approvers = step_assignments[step_order]
+        wfdb.set_step_approvers(step["id"], approvers)
+        names = ", ".join(a.get("display_name") or a["user_id"] for a in approvers)
+        audit.log(record_type, record_id, f"Approver(s) assigned for {step['step_name']}", detail=names)
+
+    return get_instance_state(record_type, record_id)
+
+
 def _check_business_permission(tenant, record_type: str, decision: str) -> None:
     """Yuktav org/RBAC/workflow authorization task: the ADDITIONAL fine-
     grained business-permission check, called only AFTER the caller has
