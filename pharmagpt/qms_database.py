@@ -498,6 +498,67 @@ QMS_SCHEMA = """
         FOREIGN KEY (cc_id) REFERENCES qms_change_controls(id) ON DELETE CASCADE
     );
 
+    -- ── Market Complaint Management (P0) ─────────────────────────────────────
+    -- Master record for the Market Complaint Investigation module. Mirrors
+    -- qms_deviations/qms_capas in shape (company_id + created_by_user_id/
+    -- created_by_display_name included directly here, not via a later ALTER
+    -- — unlike those two tables, this one is created fresh in an
+    -- already-multi-tenant codebase, so there is no pre-tenancy state to
+    -- retrofit; see pharmagpt/tenancy.py and database.py::init_db()'s
+    -- CRIT-02 schema comment for why those columns exist). Attachments/
+    -- comments/audit trail/e-signatures are served by the existing shared
+    -- polymorphic tables via routes/qms_common.py (record_type=
+    -- 'market_complaint') — no dedicated tables for those here. P1 will add
+    -- a qms_market_complaint_links table (Change Control's qms_
+    -- change_control_links shape) for CAPA/Deviation/Risk linkage — not
+    -- created in this P0 migration.
+    CREATE TABLE IF NOT EXISTS qms_market_complaints (
+        id                            INTEGER PRIMARY KEY AUTOINCREMENT,
+        complaint_number              TEXT    NOT NULL DEFAULT '',
+        title                         TEXT    NOT NULL DEFAULT 'Untitled Complaint',
+        status                        TEXT    NOT NULL DEFAULT 'Draft',  -- see QMS_META.market_complaint_statuses
+        -- Intake / registration
+        received_date                 TEXT    DEFAULT '',
+        received_via                  TEXT    DEFAULT '',    -- Phone, Email, Letter, Portal, Field Rep, Regulatory Authority, Other
+        complainant_name               TEXT    DEFAULT '',
+        complainant_contact            TEXT    DEFAULT '',
+        complainant_type               TEXT    DEFAULT '',    -- Consumer, Healthcare Professional, Distributor, Regulator, Internal, Other
+        product                       TEXT    DEFAULT '',
+        batch_lot                     TEXT    DEFAULT '',
+        manufacturing_site             TEXT    DEFAULT '',
+        market_country                 TEXT    DEFAULT '',
+        regulatory_profile             TEXT    DEFAULT '',    -- FSSAI, CDSCO, US_FDA, EU_GMP, WHO_GMP, PICS, Other — captured only, no branching in P0
+        description                   TEXT    DEFAULT '',
+        -- Initial Triage & Quality-Risk Assessment
+        initial_classification         TEXT    DEFAULT '',
+        potential_quality_defect       INTEGER NOT NULL DEFAULT 0,
+        potential_adverse_event        INTEGER NOT NULL DEFAULT 0,
+        severity                     TEXT    DEFAULT '',
+        risk_level                   TEXT    DEFAULT '',
+        initial_impact_assessment      TEXT    DEFAULT '',
+        -- Immediate containment — plain fields, never a workflow gate (P0 spec)
+        immediate_containment_action   TEXT    DEFAULT '',
+        immediate_containment_date     TEXT    DEFAULT '',
+        -- Investigation gate (P1 wires the Investigation Engine to these)
+        investigation_required        TEXT    DEFAULT '',    -- Yes / No
+        investigation_rationale        TEXT    DEFAULT '',
+        -- Governance columns — same shape as qms_deviations/qms_capas
+        department                   TEXT    DEFAULT '',
+        project_id                   INTEGER DEFAULT NULL,
+        qa_reviewer                  TEXT    DEFAULT '',
+        approver                     TEXT    DEFAULT '',
+        closure_date                  TEXT    DEFAULT '',
+        form_data                    TEXT    DEFAULT '{}',
+        ai_narratives                  TEXT    DEFAULT '{}',
+        company_id                   TEXT    DEFAULT NULL,
+        created_by_user_id            TEXT    DEFAULT '',
+        created_by_display_name        TEXT    DEFAULT '',
+        created_at                   TEXT    DEFAULT (datetime('now')),
+        updated_at                   TEXT    DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_market_complaints_company ON qms_market_complaints(company_id);
+
     -- ── Feature Requests (v1: CRUD only — no workflow/approvals/dual-write) ──
 
     CREATE TABLE IF NOT EXISTS feature_requests (
@@ -777,6 +838,31 @@ QMS_SCHEMA = """
         UNION ALL SELECT 8, 'closed',              'CAPA Closure',             'approval', 'company_admin',                  'Closed'
     ) s
     WHERE t.workflow_key = 'CAPA_WORKFLOW_V1';
+
+    -- Market Complaint Management (P0): the same Workflow Engine adoption
+    -- pattern as CAPA/Change Control above — no engine change, only this
+    -- template + step rows plus one STATUS_APPLIERS/CREATOR_LOOKUP entry
+    -- each in services/workflow_engine.py. P0 scope only (draft -> submitted
+    -- -> triage_risk_assessment -> qa_review -> closed); Investigation,
+    -- CAPA/Deviation/Risk linkage, regulatory notification, and
+    -- effectiveness-check steps are P1/P2 and intentionally not in this
+    -- template yet — adding them later is exactly the same additive
+    -- template-step-row change CAPA's own Effectiveness Verification step
+    -- was.
+    INSERT OR IGNORE INTO qms_workflow_templates (workflow_key, name, module)
+        VALUES ('MARKET_COMPLAINT_WORKFLOW_V1', 'Market Complaint Workflow', 'market_complaint');
+
+    INSERT OR IGNORE INTO qms_workflow_template_steps
+        (template_id, step_order, step_key, step_name, step_type, eligible_roles, gate_status)
+    SELECT t.id, s.step_order, s.step_key, s.step_name, s.step_type, s.eligible_roles, s.gate_status
+    FROM qms_workflow_templates t
+    JOIN (
+        SELECT 1 AS step_order, 'submitted'                AS step_key, 'Submitted'                            AS step_name, 'activity' AS step_type, 'user,reviewer_qa,company_admin' AS eligible_roles, 'Submitted'                AS gate_status
+        UNION ALL SELECT 2, 'triage_risk_assessment', 'Initial Triage & Quality-Risk Assessment', 'approval', 'reviewer_qa,company_admin', 'Triage & Risk Assessment'
+        UNION ALL SELECT 3, 'qa_review',              'QA Review',                                'approval', 'reviewer_qa,company_admin', 'QA Review'
+        UNION ALL SELECT 4, 'closed',                 'Complaint Closure',                         'approval', 'company_admin',             'Closed'
+    ) s
+    WHERE t.workflow_key = 'MARKET_COMPLAINT_WORKFLOW_V1';
 
     INSERT OR IGNORE INTO qms_workflow_templates (workflow_key, name, module)
         VALUES ('CHANGE_CONTROL_WORKFLOW_V1', 'Change Control Workflow', 'change_control');
@@ -1142,6 +1228,10 @@ def generate_feature_request_number() -> str:
     return _next_sequence("feature_requests", "fr_number", "FR")
 
 
+def generate_complaint_number() -> str:
+    return _next_sequence("qms_market_complaints", "complaint_number", "MC")
+
+
 # ── Attachments (shared) ──────────────────────────────────────────────────────
 
 def add_attachment(record_type: str, record_id: int, filename: str, original_name: str,
@@ -1374,4 +1464,26 @@ QMS_META = {
     ],
     "feature_request_priorities": ["Low", "Medium", "High", "Critical"],
     "feature_request_statuses": ["New", "Review", "Approved", "Development", "Testing", "Released", "Closed"],
+    # Market Complaint Management (P0) — see MARKET_COMPLAINT_WORKFLOW_V1
+    # above for the 4-step workflow these statuses come from. "Submitted" is
+    # included for vocabulary completeness/UI filters even though — same as
+    # deviation_statuses' "Submitted" — the record's status column jumps
+    # straight from "Draft" to the second step's gate_status the moment the
+    # workflow starts (services/workflow_engine.py::_status_after_completing).
+    "market_complaint_statuses": [
+        "Draft", "Submitted", "Triage & Risk Assessment", "QA Review", "Closed", "Rejected",
+    ],
+    "market_complaint_received_via": [
+        "Phone", "Email", "Letter", "Portal", "Field Representative", "Regulatory Authority", "Other",
+    ],
+    "market_complaint_complainant_types": [
+        "Consumer", "Healthcare Professional", "Distributor", "Regulator", "Internal", "Other",
+    ],
+    "market_complaint_classifications": ["Quality Defect", "Adverse Event", "Both", "Service/Other"],
+    "market_complaint_severities": ["Minor", "Major", "Critical"],
+    # Captured classification only in P0 — no regulator-specific workflow
+    # branching (see routes/qms_market_complaint.py module docstring).
+    "market_complaint_regulatory_profiles": [
+        "FSSAI", "CDSCO", "US_FDA", "EU_GMP", "WHO_GMP", "PICS", "Other",
+    ],
 }

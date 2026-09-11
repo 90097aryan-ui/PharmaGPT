@@ -44,6 +44,7 @@ from pharmagpt import qms_deviation_database as qdevdb
 from pharmagpt import qms_capa_database as qcapadb
 from pharmagpt import qms_change_control_database as qccdb
 from pharmagpt import qms_feature_request_database as qfrdb
+from pharmagpt import qms_market_complaint_database as qmcdb
 from pharmagpt import qual_database as qualdb
 from pharmagpt import report_database as reportdb
 from pharmagpt import risk_database as riskdb
@@ -87,6 +88,10 @@ VALID_RECORD_TYPES = {
     # Feature Requests (v1: CRUD only) — reuses the shared attachments/
     # comments/audit-trail endpoints instead of a module-specific upload route.
     "feature_request",
+    # Market Complaint Management (P0) — same additive registration as every
+    # module above; unlocks attachments/comments/audit-trail/esignatures-read
+    # for record_type='market_complaint' with no other qms_common.py change.
+    "market_complaint",
 }
 
 _GETTERS = {
@@ -101,6 +106,7 @@ _GETTERS = {
     "urs": ursdb.get_urs,
     "kb_document": db.get_kb_document,
     "feature_request": qfrdb.get_feature_request,
+    "market_complaint": qmcdb.get_complaint,
 }
 
 # "equipment" is scoped by joining through its owning Project

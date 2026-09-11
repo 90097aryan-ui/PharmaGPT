@@ -98,6 +98,16 @@ def _apply_change_control_status(record_id: int, status: str) -> None:
     ccdb.update_change_control(record_id, {"status": mapped})
 
 
+def _apply_market_complaint_status(record_id: int, status: str) -> None:
+    from pharmagpt import qms_market_complaint_database as mcdb
+    # No status remap needed: MARKET_COMPLAINT_WORKFLOW_V1 (qms_database.py)
+    # never runs "Rejected" through a status vocabulary that doesn't already
+    # contain it — same as Deviation. allow_controlled_fields=True: this is
+    # the workflow engine itself, the one trusted authority for writing
+    # `status` on the record it governs.
+    mcdb.update_complaint(record_id, {"status": status}, allow_controlled_fields=True)
+
+
 def _apply_document_status(record_id: int, status: str) -> None:
     from pharmagpt import qms_document_database as qdb
     mapped = "Draft" if status == "Rejected" else status
@@ -126,6 +136,7 @@ STATUS_APPLIERS: dict[str, Callable[[int, str], None]] = {
     "capa": _apply_capa_status,
     "change_control": _apply_change_control_status,
     "document": _apply_document_status,
+    "market_complaint": _apply_market_complaint_status,
 }
 
 
@@ -167,11 +178,17 @@ def _creator_user_id_for_document(record_id: int) -> str:
     return (qdb.get_document(record_id) or {}).get("created_by_user_id", "")
 
 
+def _creator_user_id_for_market_complaint(record_id: int) -> str:
+    from pharmagpt import qms_market_complaint_database as mcdb
+    return (mcdb.get_complaint(record_id) or {}).get("created_by_user_id", "")
+
+
 CREATOR_LOOKUP: dict[str, Callable[[int], str]] = {
     "deviation": _creator_user_id_for_deviation,
     "capa": _creator_user_id_for_capa,
     "change_control": _creator_user_id_for_change_control,
     "document": _creator_user_id_for_document,
+    "market_complaint": _creator_user_id_for_market_complaint,
 }
 
 

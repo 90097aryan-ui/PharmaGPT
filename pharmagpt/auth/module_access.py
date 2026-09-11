@@ -149,6 +149,7 @@ RECORD_TYPE_MAJOR_MODULE: dict[str, str] = {
     "qualification": "Validation",
     "val_report": "Validation",
     "risk_assessment": "Validation",
+    "market_complaint": "QMS",
 }
 
 # workflow_engine.decide_step()'s `decision` argument -> the business action

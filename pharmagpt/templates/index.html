@@ -331,6 +331,9 @@
         <div class="sidebar-item module-tab" id="nav-qms-change-control" data-view="view-qms-change-control" data-workspace="quality">
           <span class='icon' data-lucide='git-pull-request'></span> Change Control
         </div>
+        <div class="sidebar-item module-tab" id="nav-qms-market-complaint" data-view="view-qms-market-complaint" data-workspace="quality">
+          <span class='icon' data-lucide='megaphone'></span> Market Complaints
+        </div>
         <div class="sidebar-item module-tab" id="risk-nav-dashboard" data-workspace="validation" onclick="window.initRisk && window.initRisk()">
           <span class='icon' data-lucide='shield-alert'></span> Risk Management
         </div>
@@ -2533,6 +2536,10 @@
     <div id="qms-cc-body"></div>
   </main>
 
+  <main class="qms-view" id="view-qms-market-complaint">
+    <div id="qms-mc-body"></div>
+  </main>
+
   <!-- ══ End Quality Management Suite ══════════════════════════════════════ -->
 
   <main class="qms-view" id="view-feature-requests">
@@ -2600,6 +2607,7 @@
   <script src="{{ url_for('static', filename='js/workflow_panel.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_capa.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_change_control.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/qms_market_complaint.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_feature_requests.js') }}"></script>
   <script src="{{ url_for('static', filename='js/workflow_inbox.js') }}"></script>
   <script src="{{ url_for('static', filename='js/validation_dashboard.js') }}"></script>
@@ -2722,6 +2730,10 @@
 
         if (targetId === "view-qms-change-control") {
           if (window.initQMSChangeControl) window.initQMSChangeControl();
+        }
+
+        if (targetId === "view-qms-market-complaint") {
+          if (window.initQMSMarketComplaint) window.initQMSMarketComplaint();
         }
 
         if (targetId === "view-feature-requests") {
@@ -2936,6 +2948,7 @@
       "view-qms-deviations":       { module: "qms", tab: "nav-qms-deviations" },
       "view-qms-capa":             { module: "qms", tab: "nav-qms-capa" },
       "view-qms-change-control":   { module: "qms", tab: "nav-qms-change-control" },
+      "view-qms-market-complaint": { module: "qms", tab: "nav-qms-market-complaint" },
       "view-risk-dashboard":       { module: "qms", tab: "risk-nav-dashboard", risk: true },
       "view-risk-new":             { module: "qms", tab: "risk-nav-dashboard", risk: true },
       "view-risk-library":         { module: "qms", tab: "risk-nav-dashboard", risk: true },

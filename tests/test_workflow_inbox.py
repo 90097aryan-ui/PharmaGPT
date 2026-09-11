@@ -257,9 +257,12 @@ def test_inbox_tenant_isolation(client):
 def test_registry_only_addition_requires_no_new_ui_code():
     """Proves the Inbox is generic: a hypothetical future module needs only
     a ModuleDescriptor entry (already the case for capa/change_control/
-    document — none of which existed when routes/workflow_inbox.py or
-    services/workflow_registry.py were written against just 'deviation')."""
-    assert set(workflow_registry.MODULE_REGISTRY) == {"deviation", "capa", "change_control", "document"}
+    document/market_complaint — none of which existed when
+    routes/workflow_inbox.py or services/workflow_registry.py were written
+    against just 'deviation')."""
+    assert set(workflow_registry.MODULE_REGISTRY) == {
+        "deviation", "capa", "change_control", "document", "market_complaint",
+    }
     for descriptor in workflow_registry.MODULE_REGISTRY.values():
         assert callable(descriptor.get_record)
         assert descriptor.route_prefix.startswith("/qms/")
