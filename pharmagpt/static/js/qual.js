@@ -408,7 +408,7 @@ async function qualWireApproverPickers() {
 
 async function saveQualification(qualId) {
   const name = document.getElementById('qf-equipment-name')?.value?.trim();
-  if (!name) { alert('Equipment name is required'); return; }
+  if (!name) { qmsToast('Equipment name is required'); return; }
 
   const payload = {
     qual_number:        document.getElementById('qf-qual-number')?.value?.trim(),
@@ -448,7 +448,7 @@ async function saveQualification(qualId) {
     const qual = await res.json();
     qualShowDetail(qual.id);
   } catch (e) {
-    alert('Save failed: ' + e.message);
+    qmsToast('Save failed: ' + e.message);
   }
 }
 
@@ -646,7 +646,7 @@ async function createProtocol(qualId, ptype) {
     const prot = await res.json();
     openProtocol(qualId, prot.id, ptype);
   } catch (e) {
-    alert('Failed to create protocol: ' + e.message);
+    qmsToast('Failed to create protocol: ' + e.message);
   }
 }
 
@@ -822,9 +822,9 @@ async function saveExecution(qualId, protocolId, tcId) {
     if (badge) badge.innerHTML = `${icon} ${result.toUpperCase()}`;
     const item = document.getElementById(`tc-item-${tcId}`);
     if (item) item.querySelector('.qual-tc-header').style.background = result === 'pass' ? '#E8F2EA' : result === 'fail' ? '#F7E8E7' : '';
- alert(result === 'pass' ? ' Test passed and saved!' : result === 'fail' ? ' Test failed. Deviation created.' : ' Result saved.');
+ qmsToast(result === 'pass' ? ' Test passed and saved!' : result === 'fail' ? ' Test failed. Deviation created.' : ' Result saved.');
   } catch (e) {
-    alert('Save failed: ' + e.message);
+    qmsToast('Save failed: ' + e.message);
   }
 }
 
@@ -882,13 +882,13 @@ async function generateTestCases(qualId, protocolId, ptype) {
             await new Promise(r => setTimeout(r, 800));
           }
           if (ev.error) {
-            alert('Generation error: ' + ev.error);
+            qmsToast('Generation error: ' + ev.error);
           }
         } catch {}
       }
     }
   } catch (e) {
-    alert('Generation failed: ' + e.message);
+    qmsToast('Generation failed: ' + e.message);
   } finally {
     QualState.generating = false;
     overlay.remove();
@@ -1047,7 +1047,7 @@ async function createDeviationForm(qualId) {
     const dev = await res.json();
     loadDeviationsPane(qualId);
   } catch (e) {
-    alert('Failed: ' + e.message);
+    qmsToast('Failed: ' + e.message);
   }
 }
 
@@ -1141,7 +1141,7 @@ async function addApprovalForm(qualId) {
   const action = prompt('Action:', 'Submitted for Review');
   if (!action) return;
   const comments = prompt('Comments:', '') || '';
-  if (!window.PharmaESign) { alert('Electronic Signature dialog failed to load'); return; }
+  if (!window.PharmaESign) { qmsToast('Electronic Signature dialog failed to load'); return; }
 
   // 21 CFR Part 11 / EU GMP Annex 11: this GMP decision requires a fresh
   // Electronic Signature (password re-confirmation + meaning + reason) —
@@ -1210,7 +1210,7 @@ async function deleteQualification(qualId) {
     await fetch(`/qual/${qualId}`, { method: 'DELETE' });
     qualShowList();
   } catch (e) {
-    alert('Delete failed: ' + e.message);
+    qmsToast('Delete failed: ' + e.message);
   }
 }
 
@@ -1242,7 +1242,7 @@ async function addTestCaseManual(qualId, protocolId, ptype) {
       list.appendChild(item.firstElementChild);
     }
   } catch (e) {
-    alert('Failed: ' + e.message);
+    qmsToast('Failed: ' + e.message);
   }
 }
 

@@ -77,6 +77,68 @@
   // Views with no meaningful workspace/project chip (selector + auth screens).
   const HIDE_CHIPS_FOR_VIEW = new Set(["view-workspace-selector"]);
 
+  // View id -> specific screen title for the header breadcrumb (#header-
+  // breadcrumb). Deliberately more granular than WORKSPACE_FOR_VIEW above —
+  // e.g. every Quality Workspace view shares one workspace chip label, but
+  // each gets its own breadcrumb ("Deviations" vs "CAPA" vs "Change
+  // Control"), which is the whole point of a "where am I" indicator.
+  const BREADCRUMB_FOR_VIEW = {
+    "view-dashboard": "Dashboard",
+    "view-error-403": "Access Denied",
+    "view-error-404": "Not Found",
+    "view-error-500": "Server Error",
+    "view-error-network": "Connection Lost",
+    "view-error-permission": "Permission Required",
+    "view-validation-projects": "Validation Projects",
+    "view-validation-dashboard": "Validation Dashboard",
+    "view-pharmapilot": "PharmaPilot",
+    "view-chat": "Chat",
+    "view-project-workspace": "Project Workspace",
+    "view-equipment-profile": "Equipment Profile",
+    "view-kb": "Knowledge Base",
+    "view-equipment-library": "Equipment Library",
+    "view-admin-companies": "Companies",
+    "view-admin-users": "Users",
+    "view-admin-departments": "Departments",
+    "view-admin-roles": "Roles & Permissions",
+    "view-validation": "Validation",
+    "view-risk-dashboard": "Risk Assessment",
+    "view-risk-new": "New Risk Assessment",
+    "view-risk-library": "Risk Library",
+    "view-risk-templates": "Risk Templates",
+    "view-risk-reports": "Risk Reports",
+    "view-risk-approval": "Risk Approvals",
+    "view-risk-approval-detail": "Risk Approval Detail",
+    "view-risk-assistant": "Risk Assistant",
+    "view-urs-dashboard": "URS",
+    "view-urs-list": "URS",
+    "view-urs-new": "New URS",
+    "view-urs-detail": "URS Detail",
+    "view-qual": "Qualification",
+    "view-report": "Validation Report",
+    "view-qms-dashboard": "QMS Dashboard",
+    "view-qms-documents": "Document Control",
+    "view-qms-deviations": "Deviations",
+    "view-qms-capa": "CAPA",
+    "view-qms-change-control": "Change Control",
+    "view-qms-market-complaint": "Market Complaints",
+    "view-feature-requests": "Feature Requests",
+  };
+
+  // Graceful fallback for any view id not listed above (e.g. a future view),
+  // so the breadcrumb degrades to a readable guess instead of going stale.
+  function breadcrumbLabel(viewId) {
+    if (BREADCRUMB_FOR_VIEW[viewId]) return BREADCRUMB_FOR_VIEW[viewId];
+    return viewId.replace(/^view-/, "").replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  function renderBreadcrumb() {
+    const el = document.getElementById("header-breadcrumb");
+    if (!el) return;
+    const viewId = currentVisibleViewId();
+    el.textContent = (!viewId || HIDE_CHIPS_FOR_VIEW.has(viewId)) ? "" : breadcrumbLabel(viewId);
+  }
+
   function setChip(id, text) {
     const chip = document.getElementById(id);
     if (!chip) return;
@@ -127,6 +189,7 @@
 
   function renderAll() {
     renderWorkspaceAndProjectChips();
+    renderBreadcrumb();
     renderUserChips();
   }
   window.PharmaHeader = { render: renderAll };
@@ -138,7 +201,10 @@
     const target = document.querySelector(".app-body") || document.body;
     const observer = new MutationObserver(muts => {
       const relevant = muts.some(m => m.type === "attributes" && m.target.id && m.target.id.startsWith("view-"));
-      if (relevant) renderWorkspaceAndProjectChips();
+      if (relevant) {
+        renderWorkspaceAndProjectChips();
+        renderBreadcrumb();
+      }
     });
     document.querySelectorAll("main[id^='view-']").forEach(v => {
       observer.observe(v, { attributes: true, attributeFilter: ["style"] });

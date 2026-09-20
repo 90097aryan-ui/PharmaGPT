@@ -85,7 +85,7 @@ async function eqImportLegacy() {
     if (!res.ok) throw new Error();
     await eqLoadList();
   } catch {
-    alert("Could not import legacy equipment info. Please try again.");
+    qmsToast("Could not import legacy equipment info. Please try again.");
   }
 }
 
@@ -214,7 +214,7 @@ async function eqOpenModal(equipmentId) {
         if (input) input.value = eq[key] ?? "";
       });
     } catch {
-      alert("Could not load equipment details.");
+      qmsToast("Could not load equipment details.");
       return;
     }
   }
@@ -275,7 +275,7 @@ async function eqSubmitForm(e) {
     await eqLoadList();
     if (eqActiveProfileId && eqActiveProfileId === eqCurrentEquipmentId) await eqRenderProfile();
   } catch {
-    alert("Could not save equipment. Please try again.");
+    qmsToast("Could not save equipment. Please try again.");
   } finally {
     saveBtn.disabled = false;
     saveBtn.textContent = eqCurrentEquipmentId ? "Save Changes" : "Add Equipment";
@@ -289,7 +289,7 @@ async function eqConfirmDelete(equipmentId, name) {
     if (!res.ok) throw new Error();
     await eqLoadList();
   } catch {
-    alert("Could not delete equipment. Please try again.");
+    qmsToast("Could not delete equipment. Please try again.");
   }
 }
 
@@ -625,7 +625,7 @@ async function eqSubmitLinkDoc(e) {
     source_type: document.getElementById("eq-link-source-type").value,
     source_id: parseInt(document.getElementById("eq-link-source-id").value, 10),
   };
-  if (!payload.source_id) { alert("Please select a document."); return; }
+  if (!payload.source_id) { qmsToast("Please select a document."); return; }
 
   try {
     const res = await fetch(`/equipment/${equipmentId}/documents`, {
@@ -635,7 +635,7 @@ async function eqSubmitLinkDoc(e) {
     eqCloseLinkDocModal();
     eqRenderDocumentationTab({ id: equipmentId });
   } catch (err) {
-    alert(err.message || "Could not link document. Please try again.");
+    qmsToast(err.message || "Could not link document. Please try again.");
   }
 }
 

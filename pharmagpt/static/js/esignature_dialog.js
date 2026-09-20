@@ -58,7 +58,7 @@
           <label for="esign-password">Password (re-authentication) *</label>
           <input type="password" id="esign-password" required autocomplete="current-password" />
         </div>
-        <p id="esign-error" style="color:var(--danger,#c0392b);font-size:13px;display:none"></p>
+        <p id="esign-error" role="alert" style="color:var(--danger,#c0392b);font-size:13px;display:none"></p>
         <div class="modal-footer">
           <button type="button" class="btn-secondary" id="esign-modal-cancel">Cancel</button>
           <button type="submit" class="btn-primary" id="esign-modal-submit">Sign</button>

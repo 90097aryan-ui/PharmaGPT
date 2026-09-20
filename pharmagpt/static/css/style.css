@@ -3656,3 +3656,24 @@ select.gd-input { cursor: pointer; }
 }
 .gd-error-toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
 .gd-error-toast.success { background: #5F8A61; }
+
+/* ── Motion accessibility ─────────────────────────────────────────────────
+   header/.app-body's own entrance animation (app-shell-enter) is already
+   covered by login.css's app-wide prefers-reduced-motion block (loaded on
+   every view, not just the login screen). This covers this file's other
+   decorative entrance animations and the one transform-based (non-opacity)
+   continuous loop; pulse/blink stay untouched since they are opacity-only
+   status indicators (online dot, streaming cursor) that keep conveying
+   real state without vestibular motion. ─────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .message-row,
+  .error-bubble,
+  .doc-status,
+  .sources-strip {
+    animation: none;
+  }
+  .thinking-dots span,
+  .val-gen-dots span {
+    animation: none;
+  }
+}

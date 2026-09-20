@@ -430,12 +430,12 @@ window.selectMethodology = function (key) {
 window.riskWizardNext = function () {
   const step = RiskState.wizardStep;
   if (step === 1) {
-    if (!RiskState.selectedType) { alert("Please select a risk type."); return; }
+    if (!RiskState.selectedType) { showToast("Please select a risk type."); return; }
     riskRenderWizardStep(2);
   } else if (step === 2) {
     riskRenderWizardStep(3);
   } else if (step === 3) {
-    if (!RiskState.selectedMethodology) { alert("Please select a methodology."); return; }
+    if (!RiskState.selectedMethodology) { showToast("Please select a methodology."); return; }
     riskRenderWizardStep(4);
   } else if (step === 4) {
     riskRenderWizardStep(5);
@@ -480,18 +480,18 @@ window.createAndOpenAssessment = async function () {
     });
     if (!res.ok) {
       const err = await res.json();
-      alert("Error: " + (err.error || "Failed to create assessment"));
+      showToast("Error: " + (err.error || "Failed to create assessment"));
       return;
     }
     const assessment = await res.json();
     if (!assessment || assessment.id == null) {
-      alert("Error: server did not return a saved assessment id.");
+      showToast("Error: server did not return a saved assessment id.");
       return;
     }
     RiskState.currentAssessment = assessment;
     openAssessmentEditor(assessment);
   } catch (e) {
-    alert("Network error: " + e.message);
+    showToast("Network error: " + e.message);
   }
 };
 
@@ -511,7 +511,7 @@ async function openAssessment(id) {
     if (window.PharmaRecent) window.PharmaRecent.recordOpened("risk", assessment.id, assessment.title, assessment.assessment_type || "");
     openAssessmentEditor(assessment, items);
   } catch (e) {
-    alert("Error loading assessment: " + e.message);
+    showToast("Error loading assessment: " + e.message);
   }
 }
 window.openAssessment = openAssessment;
@@ -845,7 +845,7 @@ window.recalcRating = function (el) {
 window.deleteRow = function (btn) {
   const row = btn.closest("tr");
   if (!row) return;
-  if (document.querySelectorAll("tbody tr").length <= 1) { alert("Keep at least one row."); return; }
+  if (document.querySelectorAll("tbody tr").length <= 1) { showToast("Keep at least one row."); return; }
   row.remove();
   // Renumber
   const tbody = row.closest("tbody");
@@ -934,7 +934,7 @@ window.saveItems = async function (aid) {
     RiskState.currentItems = saved;
  showToast(`Saved ${saved.length} risk items`);
   } catch (e) {
-    alert("Error saving: " + e.message);
+    showToast("Error saving: " + e.message);
   }
 };
 
@@ -950,7 +950,7 @@ window.aiGenerateItems = async function (aid) {
     const msg = "Please save the assessment before using AI generation.";
     const statusEl = document.getElementById(`ai-status-${aid}`);
     if (statusEl) statusEl.innerHTML = `<span style="color:var(--risk-critical)">${msg}</span>`;
-    else alert(msg);
+    else showToast(msg);
     return;
   }
 
@@ -1128,7 +1128,7 @@ window.generateReport = async function (aid) {
 window.exportDocx = async function (aid) {
   try {
     const res = await fetch(`/risk/assessments/${aid}/export/docx`, { method: "POST" });
-    if (!res.ok) { alert("Export failed"); return; }
+    if (!res.ok) { showToast("Export failed"); return; }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1137,7 +1137,7 @@ window.exportDocx = async function (aid) {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   } catch (e) {
-    alert("Export error: " + e.message);
+    showToast("Export error: " + e.message);
   }
 };
 
@@ -1255,9 +1255,9 @@ function approvalEntryHtml(e) {
 
 window.submitApproval = async function (aid) {
   const action = document.getElementById("approval-action")?.value;
-  if (!action) { alert("Select an action."); return; }
+  if (!action) { showToast("Select an action."); return; }
   const comments = document.getElementById("approval-comments")?.value || "";
-  if (!window.PharmaESign) { alert("Electronic Signature dialog failed to load"); return; }
+  if (!window.PharmaESign) { showToast("Electronic Signature dialog failed to load"); return; }
 
   // 21 CFR Part 11 / EU GMP Annex 11: this GMP decision requires a fresh
   // Electronic Signature (password re-confirmation + meaning + reason) —
@@ -1405,19 +1405,19 @@ window.useTemplate = async function (t) {
     });
     if (!res.ok) {
       const err = await res.json();
-      alert("Error: " + (err.error || "Failed to create assessment"));
+      showToast("Error: " + (err.error || "Failed to create assessment"));
       return;
     }
     const assessment = await res.json();
     if (!assessment || assessment.id == null) {
-      alert("Error: server did not return a saved assessment id.");
+      showToast("Error: server did not return a saved assessment id.");
       return;
     }
     RiskState.currentAssessment = assessment;
     openAssessmentEditor(assessment, []);
  showToast(`Assessment created from template: ${t.name}`);
   } catch (e) {
-    alert("Error: " + e.message);
+    showToast("Error: " + e.message);
   }
 };
 
@@ -1529,7 +1529,7 @@ window.backToList = function () {
 
 function openInfoPanel(aid) {
   // Placeholder — could open a modal with editable info form
-  alert("Info editing coming soon. Use the main assessment form.");
+  showToast("Info editing coming soon. Use the main assessment form.");
 }
 
 
@@ -1566,6 +1566,8 @@ function showToast(msg) {
   toast.style.cssText = `position:fixed;bottom:24px;right:24px;background:var(--navy);color:#FFF;
     padding:12px 20px;border-radius:10px;font-size:13px;z-index:9999;
     box-shadow:0 4px 20px rgba(63,58,54,0.3);animation:fadeInUp 0.3s ease`;
+  toast.setAttribute("role", "status");
+  toast.setAttribute("aria-live", "polite");
   toast.textContent = msg;
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 3000);

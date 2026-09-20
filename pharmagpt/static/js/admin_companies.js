@@ -18,6 +18,9 @@
     const emptyEl = el("admin-companies-empty");
     if (!listEl) return;
 
+    if (emptyEl) emptyEl.style.display = "none";
+    if (window.PharmaUI) window.PharmaUI.skeleton(listEl, { variant: "rows" });
+
     try {
       const res = await window.fetch("/companies");
       const companies = await res.json();
@@ -50,7 +53,11 @@
       listEl.querySelectorAll(".admin-company-reactivate").forEach(btn =>
         btn.addEventListener("click", () => setCompanyStatus(btn.dataset.id, "reactivate")));
     } catch (err) {
-      listEl.innerHTML = `<p style="padding:16px;color:var(--text-muted)">Could not load companies.</p>`;
+      if (window.PharmaUI) {
+        window.PharmaUI.errorState(listEl, { message: "Could not load companies.", onRetry: loadAdminCompanies });
+      } else {
+        listEl.innerHTML = `<p style="padding:16px;color:var(--text-muted)">Could not load companies.</p>`;
+      }
     }
   }
   window.loadAdminCompanies = loadAdminCompanies;

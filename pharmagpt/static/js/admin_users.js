@@ -31,6 +31,9 @@
         : "Users in your company";
     }
 
+    if (emptyEl) emptyEl.style.display = "none";
+    if (window.PharmaUI) window.PharmaUI.skeleton(listEl, { variant: "rows" });
+
     try {
       const res = await window.fetch("/users");
       const users = await res.json();
@@ -67,7 +70,11 @@
           status: btn.dataset.status === "active" ? "deactivated" : "active",
         })));
     } catch (err) {
-      listEl.innerHTML = `<p style="padding:16px;color:var(--text-muted)">Could not load users.</p>`;
+      if (window.PharmaUI) {
+        window.PharmaUI.errorState(listEl, { message: "Could not load users.", onRetry: loadAdminUsers });
+      } else {
+        listEl.innerHTML = `<p style="padding:16px;color:var(--text-muted)">Could not load users.</p>`;
+      }
     }
   }
   window.loadAdminUsers = loadAdminUsers;

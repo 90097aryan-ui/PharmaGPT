@@ -27,12 +27,22 @@
   async function loadDepartments() {
     const listEl = el("admin-departments-list");
     if (!listEl) return;
+    if (window.PharmaUI) window.PharmaUI.skeleton(listEl, { variant: "rows" });
     try {
       const res = await window.fetch("/org/departments");
       const rows = await res.json();
       if (!res.ok) throw new Error((rows && rows.error) || "Could not load departments");
 
-      listEl.innerHTML = (rows || []).map(d => `
+      if (!(rows || []).length) {
+        if (window.PharmaUI) {
+          window.PharmaUI.emptyState(listEl, { icon: "building-2", title: "No departments yet" });
+        } else {
+          listEl.innerHTML = `<p style="padding:16px;color:var(--text-muted)">No departments yet.</p>`;
+        }
+        return;
+      }
+
+      listEl.innerHTML = rows.map(d => `
         <div class="eq-row" data-id="${d.id}" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border)">
           <div><strong>${escapeHtml(d.name)}</strong>
             <span style="color:var(--text-muted);font-size:12px;margin-left:8px">${escapeHtml(d.department_code)} &middot; ${escapeHtml(d.status)}</span>
@@ -41,12 +51,16 @@
             ${d.status === "active" ? "Disable" : "Enable"}
           </button>
         </div>
-      `).join("") || `<p style="padding:16px;color:var(--text-muted)">No departments yet.</p>`;
+      `).join("");
 
       listEl.querySelectorAll(".dept-toggle-status").forEach(btn =>
         btn.addEventListener("click", () => toggleDepartmentStatus(btn.dataset.id, btn.dataset.status)));
     } catch (err) {
-      listEl.innerHTML = `<p style="padding:16px;color:var(--text-muted)">Could not load departments.</p>`;
+      if (window.PharmaUI) {
+        window.PharmaUI.errorState(listEl, { message: "Could not load departments.", onRetry: loadDepartments });
+      } else {
+        listEl.innerHTML = `<p style="padding:16px;color:var(--text-muted)">Could not load departments.</p>`;
+      }
     }
   }
 
@@ -68,12 +82,22 @@
   async function loadDesignations() {
     const listEl = el("admin-designations-list");
     if (!listEl) return;
+    if (window.PharmaUI) window.PharmaUI.skeleton(listEl, { variant: "rows" });
     try {
       const res = await window.fetch("/org/designations");
       const rows = await res.json();
       if (!res.ok) throw new Error((rows && rows.error) || "Could not load designations");
 
-      listEl.innerHTML = (rows || []).map(d => `
+      if (!(rows || []).length) {
+        if (window.PharmaUI) {
+          window.PharmaUI.emptyState(listEl, { icon: "users", title: "No designations yet" });
+        } else {
+          listEl.innerHTML = `<p style="padding:16px;color:var(--text-muted)">No designations yet.</p>`;
+        }
+        return;
+      }
+
+      listEl.innerHTML = rows.map(d => `
         <div class="eq-row" data-id="${d.id}" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border)">
           <strong>${escapeHtml(d.name)}</strong>
           <div style="display:flex;align-items:center;gap:8px">
@@ -83,12 +107,16 @@
             </button>
           </div>
         </div>
-      `).join("") || `<p style="padding:16px;color:var(--text-muted)">No designations yet.</p>`;
+      `).join("");
 
       listEl.querySelectorAll(".desig-toggle-status").forEach(btn =>
         btn.addEventListener("click", () => toggleDesignationStatus(btn.dataset.id, btn.dataset.status)));
     } catch (err) {
-      listEl.innerHTML = `<p style="padding:16px;color:var(--text-muted)">Could not load designations.</p>`;
+      if (window.PharmaUI) {
+        window.PharmaUI.errorState(listEl, { message: "Could not load designations.", onRetry: loadDesignations });
+      } else {
+        listEl.innerHTML = `<p style="padding:16px;color:var(--text-muted)">Could not load designations.</p>`;
+      }
     }
   }
 

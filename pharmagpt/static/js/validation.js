@@ -276,7 +276,7 @@ function valNext() {
       if (el) valFormData[id] = el.value.trim();
     });
     if (!valFormData.equipment_name) {
-      alert("Equipment Name is required.");
+      qmsToast("Equipment Name is required.");
       return;
     }
   }
@@ -295,7 +295,7 @@ function valNext() {
       }
     });
     if (missingRequired) {
-      alert(`"${missingRequired}" is required.`);
+      qmsToast(`"${missingRequired}" is required.`);
       return;
     }
     valFormData.details = details;
@@ -313,7 +313,7 @@ function valBack() {
 async function startGeneration() {
   if (valIsGenerating) return;
   if (!window.activeProject) {
-    alert("Please select a project first.");
+    qmsToast("Please select a project first.");
     return;
   }
 
@@ -553,7 +553,7 @@ async function exportDocx() {
     URL.revokeObjectURL(url);
 
   } catch (err) {
-    alert(`DOCX export failed: ${err.message}`);
+    qmsToast(`DOCX export failed: ${err.message}`);
   }
 }
 
@@ -621,7 +621,7 @@ async function saveToProject() {
  if (btn) { btn.textContent = "Saved"; btn.style.background = "#5F8A61"; }
   } catch (err) {
  if (btn) { btn.disabled = false; btn.textContent = "Save to Project"; }
-    alert(`Save failed: ${err.message}`);
+    qmsToast(`Save failed: ${err.message}`);
   }
 }
 

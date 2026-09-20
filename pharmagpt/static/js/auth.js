@@ -57,6 +57,8 @@
     toast.style.cssText = `position:fixed;bottom:24px;right:24px;background:#3F3A36;color:#FFF;
       padding:12px 20px;border-radius:10px;font-size:13px;z-index:9999;max-width:360px;
       box-shadow:0 4px 20px rgba(0,0,0,0.3)`;
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
     toast.textContent = message;
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 4000);
