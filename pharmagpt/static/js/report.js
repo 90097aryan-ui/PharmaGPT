@@ -303,17 +303,33 @@ async function loadReportList() {
 
 async function initNewReportWizard() {
   ReportState.wizardStep = 1;
-  // Load available quals, URS, risk assessments for linking
+  // Load available quals, URS, risk assessments for linking.
+  // Each fetch is resolved defensively (ok-check + array-check) so a single
+  // module's failure can't leave this wizard stuck on its loading state or
+  // crash renderNewReportWizard()'s .map() calls on a non-array JSON body
+  // (e.g. Flask's {"error": "..."} 404 payload).
+  const safeList = async (url) => {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) return [];
+      const data = await r.json();
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [];
+    }
+  };
   try {
     const [quals, urs, risks] = await Promise.all([
-      fetch('/qual/').then(r => r.json()),
-      fetch('/urs/').then(r => r.json()),
-      fetch('/risk/assessments/').then(r => r.json()),
+      safeList('/qual/'),
+      safeList('/urs/'),
+      safeList('/risk/assessments'),
     ]);
-    ReportState.qualList = quals || [];
-    ReportState.ursList  = urs  || [];
-    ReportState.riskList = risks || [];
-  } catch { }
+    ReportState.qualList = quals;
+    ReportState.ursList  = urs;
+    ReportState.riskList = risks;
+  } catch (e) {
+    if (window.qmsToast) qmsToast(`Could not load linked records: ${e.message}`);
+  }
   renderNewReportWizard();
 }
 
