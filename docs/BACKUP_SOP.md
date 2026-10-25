@@ -23,26 +23,32 @@ Applies to the production Render deployment of PharmaGPT. Covers backup creation
 | Super Admin (application role) | Monitors `/admin/backup` dashboard; triggers on-demand backups/drills when needed. |
 | QA | Owns `docs/BACKUP_VALIDATION_PROTOCOL.md` execution cadence and sign-off on Backup Test Reports. |
 
-## 4. One-time setup (must be completed before the first scheduled run)
+## 4. One-time setup (must be completed before enabling scheduled backups)
 
-- [ ] **Generate the encryption key:** `python scripts/generate_backup_key.py`. Store the output in your secrets vault. Set it as `BACKUP_ENCRYPTION_KEY` in Render (Environment tab, `sync: false` — see `render.yaml`). Never commit it, never store it inside `BACKUP_DIR`.
-- [ ] **Decide on an offsite location.** Options, in order of preference:
-  - A second Render persistent disk (or any mounted network path) — set `BACKUP_OFFSITE_DIR` to its mount path. Zero new dependencies; `backup_service.py` copies the encrypted archive there automatically after every successful run.
-  - A cloud object store (S3-compatible, Backblaze B2, etc.) — **not built into the application** (would require adding a cloud SDK dependency, which this task's scope explicitly avoided as an unjustified redesign for a first cut). Instead, wire an `rclone`/`aws s3 sync` command as a post-step in your cron/CI after `scripts/run_backup.py` exits 0, pointed at `BACKUP_DIR/snapshots/` and `BACKUP_DIR/daily/`.
-  - **Until one of the above is configured, backups exist only on the primary disk** — `run_full_backup()` logs a `CRITICAL` warning on every single run to keep this visible, not just documented here.
-- [ ] **Decide on an alert destination.** Set `BACKUP_ALERT_WEBHOOK_URL` to a Slack/Teams/PagerDuty/Opsgenie incoming-webhook URL (or any endpoint that accepts a JSON POST with a `text` field). Without this, failures still log at `CRITICAL` and appear on the dashboard, but no one is proactively paged.
-- [ ] **Confirm Supabase managed backups.** Log into the Supabase dashboard → Settings → Database → Backups. Confirm Point-in-Time-Recovery is enabled if your plan supports it. This framework's Postgres export (§6 below) is a supplementary safeguard, not a replacement for Supabase's own backup.
-- [ ] **Schedule `scripts/run_backup.py`.** See §5.
+**Why the scheduler runs inside the web service:** only the web service can read the persistent disk holding the SQLite database and uploads. A Render cron job cannot mount another service's disk, so the former cron job was removed. Do not re-add one.
+
+- [ ] **Generate the encryption key** locally: `python scripts/generate_backup_key.py`. Store it in your secrets vault and set it as `BACKUP_ENCRYPTION_KEY` in the Render **web service** environment (`sync: false`). Never commit it or store it inside `BACKUP_DIR`.
+- [ ] **Create the independent off-site bucket.** Use a *separate* Supabase project from production (so losing production does not lose the backups). Create a **private** bucket (e.g. `yuktav-backups`) and a key limited to it. Check the plan's maximum object size against your archive size (Supabase Storage enforces a per-file limit; raise it or choose a plan that fits).
+- [ ] **Set on the Render web service** (all three together; a partial set makes every run fail):
+  - `BACKUP_OFFSITE_STORAGE_URL` — project URL
+  - `BACKUP_OFFSITE_STORAGE_KEY` — the bucket-scoped key (not the production service-role key)
+  - `BACKUP_OFFSITE_STORAGE_BUCKET` — bucket name
+  - optional `BACKUP_OFFSITE_STORAGE_PREFIX` (default `pharmagpt/`)
+  `BACKUP_OFFSITE_DIR` is only an extra *local* directory and is not independent storage.
+- [ ] **Set an alert destination:** `BACKUP_ALERT_WEBHOOK_URL`. Without it, failures only log and show on the dashboard.
+- [ ] **Confirm Supabase managed backups** for the production identity database (Settings -> Database -> Backups; PITR if available). This framework's Postgres JSON export is supplementary.
+- [ ] **Run one manual backup** from `/admin/backup` ("Run Backup Now"). Pass criteria: run status `success` and `object_storage.status` = `ok` in the run details.
+- [ ] **Run a verification drill and the restore test** from the same page, and keep the report off the web disk (see section 11).
+- [ ] **Only then** set `BACKUP_SCHEDULER_ENABLED=true` and redeploy (section 5).
 
 ## 5. Scheduling
 
-`render.yaml` documents (but, per this implementation's explicit scope, does not activate) a Render Cron Job service running `python scripts/run_backup.py` on the schedule matching `BACKUP_FREQUENCY_HOURS` (default: every 6 hours). To activate:
-- [ ] Review the commented Cron Job block in `render.yaml`.
-- [ ] Uncomment it (or create the equivalent service directly in the Render dashboard).
-- [ ] Push/deploy — **outside the scope of this implementation task; a human operator with deploy authority must do this.**
-- [ ] Set `BACKUP_SCHEDULER_ENABLED=true` on the web service once the scheduler is confirmed actually running — this is what flips the dashboard's Scheduler check from ⚠ to ✅ and enables the "Next Scheduled Backup" estimate. Do not set it before the scheduler is real; PharmaGPT cannot independently verify an external cron process is calling in, so this flag is only as honest as the operator setting it.
+`pharmagpt/services/backup_scheduler.py` starts a daemon thread in each web worker when `BACKUP_SCHEDULER_ENABLED=true` **and** a valid `BACKUP_ENCRYPTION_KEY` and complete (or no) off-site storage configuration exist. Every minute it writes a heartbeat file (`BACKUP_DIR/scheduler_heartbeat.json`) and starts a backup when no successful backup is newer than `BACKUP_FREQUENCY_HOURS` (default 6). After a failed run it waits 30 minutes before retrying. The shared lock prevents two workers from running at once.
 
-If not using Render's Cron Jobs, any scheduler capable of running a shell command on an interval (OS cron, a separate always-on worker, etc.) works — the script is a plain CLI entrypoint with no Render-specific dependency.
+- The dashboard reports the scheduler healthy **only while the heartbeat is fresh** (written within the last 5 minutes). Setting the flag without a running scheduler shows as failed/critical, never healthy.
+- A run whose off-site upload fails is recorded as **failed** (the local archive is kept and verified, but the run never counts as a successful off-site backup, and failure alerts fire).
+- `scripts/run_backup.py` remains for manual use from a shell *inside the web service* (it needs the same disk); it cannot be run from a Render cron job or one-off job.
+- A backup runs inside the web process: watch memory and CPU on the first runs, particularly with large `uploads/`.
 
 ## 6. What each run does (reference — see `docs/BACKUP_ARCHITECTURE.md` for full design)
 
@@ -54,7 +60,7 @@ If not using Render's Cron Jobs, any scheduler capable of running a shell comman
 6. Exports the live Postgres tables (`config.POSTGRES_BACKUP_TABLES`) as JSON via the existing service-role Supabase client.
 7. Bundles everything, encrypts with Fernet, computes a SHA-256 checksum.
 8. Self-verifies via a decrypt round-trip.
-9. Copies to `BACKUP_OFFSITE_DIR` if configured.
+9. Copies to `BACKUP_OFFSITE_DIR` if configured, then uploads the encrypted archive to the independent object store (if configured) and confirms it by listing the object and comparing its size. A failed or unconfirmed upload fails the run.
 10. Prunes backups older than `BACKUP_SNAPSHOT_RETENTION_DAYS` (7 days default) from `snapshots/`, and older than `BACKUP_DAILY_RETENTION_DAYS` (365 days default) from `daily/`.
 11. Records the run (success or failure) to `BACKUP_DIR/backup_state.json`.
 12. Alerts (log + optional webhook) on failure.
@@ -77,6 +83,7 @@ If not using Render's Cron Jobs, any scheduler capable of running a shell comman
 |---|---|---|---|
 | Short-term (every run) | `BACKUP_DIR/snapshots/` | 7 days (default) | Auto-pruned by the backup service on each run. |
 | Long-term (first success/day) | `BACKUP_DIR/daily/` | 365 days (default) | Auto-pruned by the backup service on each run. |
+| Off-site object store | Bucket `BACKUP_OFFSITE_STORAGE_BUCKET`, prefix `BACKUP_OFFSITE_STORAGE_PREFIX` | **Never deleted by the application** | Set a lifecycle/retention rule or delete manually in the storage provider, matching your retention policy. |
 
 **Override `BACKUP_DAILY_RETENTION_DAYS` to match your customer's actual regulatory record-retention requirement** — the 365-day default is a working-retention assumption, not a validated regulatory figure, and is very likely shorter than what many GMP customers require. Confirm before relying on it.
 
@@ -88,4 +95,34 @@ If not using Render's Cron Jobs, any scheduler capable of running a shell comman
 
 ## 10. Remaining risk this SOP does not close
 
-Same-disk-only backup until `BACKUP_OFFSITE_DIR` (or an external sync step) is actually configured — see step 2 of §4. This is called out here, in `docs/BACKUP_ARCHITECTURE.md` §10, and in the implementation's final report; it is the one open item that most directly limits how much this framework currently reduces the original Critical finding's risk.
+- Until the off-site object store is configured, backups exist only on the primary disk (the dashboard shows Offsite as missing, and every run logs a warning).
+- The object store holds encrypted archives; losing `BACKUP_ENCRYPTION_KEY` makes all of them unreadable (section 9).
+- The upload path has been tested with a fake bucket, not against a live Supabase Storage project: the first real run (section 4) is the acceptance test.
+- The scheduler lives in the web process. If the service is down, no backup runs; the staleness alert (2x `BACKUP_FREQUENCY_HOURS`) is the signal.
+
+## 11. Recovery steps and safe verification
+
+Follow `docs/DISASTER_RECOVERY_SOP.md` for a real incident. For a safe drill that cannot overwrite live data:
+
+1. **Dashboard:** "Run Verification Drill" and "Restore (Test Location Only)" decrypt/extract into temp or `BACKUP_DIR/restore_staging/` only.
+2. **Off-site retrieval:** download an archive from the bucket (private, with your storage credentials), then restore it **into a new empty directory**:
+   `python scripts/restore_from_backup.py --archive <file>.bak.enc --target ./restore_test`
+   The key must be in `BACKUP_ENCRYPTION_KEY` in the shell used. Never pass `--confirm-live` for a drill.
+3. **Check the result:** open `restore_test/db/pharmagpt.db` and run `PRAGMA integrity_check` (expect `ok`); confirm `manifest.json` row counts.
+4. **Verification reports:** `python scripts/verify_backup.py --out-dir <durable-path>`. Its default output folder is inside the repo checkout, which is not durable on Render.
+5. **Real recovery** (service stopped, after a fresh backup of the damaged state if possible): `restore_from_backup.py --target /var/data --confirm-live`, then type the confirmation phrase.
+
+## 12. Required Render configuration (web service)
+
+| Variable | Required | Notes |
+|---|---|---|
+| `BACKUP_ENCRYPTION_KEY` | Yes | Fernet key; `sync: false`. |
+| `BACKUP_DIR` | Yes | `/var/data/backups` (on the persistent disk). |
+| `BACKUP_OFFSITE_STORAGE_URL` / `_KEY` / `_BUCKET` | Yes for off-site | All three or none. Separate Supabase project recommended. |
+| `BACKUP_OFFSITE_STORAGE_PREFIX` | No | Default `pharmagpt/`. |
+| `BACKUP_SCHEDULER_ENABLED` | After section 4 | `true` starts the in-process scheduler. |
+| `BACKUP_FREQUENCY_HOURS` | No | Default 6. |
+| `BACKUP_ALERT_WEBHOOK_URL` | Recommended | Failure/staleness alerts. |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Already required | Used for the Postgres table export. |
+
+No separate Render service is required. `main` at `367d20f` already has the backup framework and the same web-service variables except the three `BACKUP_OFFSITE_STORAGE_*` ones; it never set `BACKUP_SCHEDULER_ENABLED`, so deploying this change is backward compatible.

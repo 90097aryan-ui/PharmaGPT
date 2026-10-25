@@ -52,11 +52,19 @@ def backup_env(tmp_path, db_path, monkeypatch):
     return {"tmp_path": tmp_path}
 
 
+def _enable_scheduler(monkeypatch):
+    """Scheduling only counts as healthy with a fresh scheduler heartbeat, so a
+    test that wants a healthy scheduler must simulate the running thread."""
+    from pharmagpt.services import backup_scheduler
+    monkeypatch.setattr(config, "BACKUP_SCHEDULER_ENABLED", True)
+    backup_scheduler._write_heartbeat()
+
+
 # ── configuration detection ─────────────────────────────────────────────────
 
 def test_configuration_status_all_configured(backup_env, tmp_path, monkeypatch):
     monkeypatch.setattr(config, "BACKUP_OFFSITE_DIR", str(tmp_path / "offsite"))
-    monkeypatch.setattr(config, "BACKUP_SCHEDULER_ENABLED", True)
+    _enable_scheduler(monkeypatch)
 
     cfg = backup_service.get_configuration_status()
 
@@ -95,8 +103,8 @@ def test_configuration_status_scheduler_missing_by_default(backup_env):
     assert cfg["scheduler"]["status"] == "missing"
 
 
-def test_configuration_status_scheduler_configured_when_flag_set(backup_env, monkeypatch):
-    monkeypatch.setattr(config, "BACKUP_SCHEDULER_ENABLED", True)
+def test_configuration_status_scheduler_configured_when_flag_set_and_heartbeat_fresh(backup_env, monkeypatch):
+    _enable_scheduler(monkeypatch)
     cfg = backup_service.get_configuration_status()
     assert cfg["scheduler"]["status"] == "configured"
 
@@ -310,7 +318,7 @@ def test_health_critical_when_last_run_failed(backup_env, monkeypatch):
 
 def test_health_healthy_when_everything_passes(backup_env, monkeypatch):
     monkeypatch.setattr(config, "BACKUP_OFFSITE_DIR", str(backup_env["tmp_path"] / "offsite"))
-    monkeypatch.setattr(config, "BACKUP_SCHEDULER_ENABLED", True)
+    _enable_scheduler(monkeypatch)
 
     backup_service.run_full_backup()
     backup_service.verify_backup()
@@ -339,7 +347,7 @@ def test_next_scheduled_backup_not_scheduled_when_scheduler_disabled(backup_env)
 
 
 def test_next_scheduled_backup_estimated_when_scheduler_enabled(backup_env, monkeypatch):
-    monkeypatch.setattr(config, "BACKUP_SCHEDULER_ENABLED", True)
+    _enable_scheduler(monkeypatch)
     backup_service.run_full_backup()
 
     result = backup_service.get_next_scheduled_backup()
@@ -348,7 +356,7 @@ def test_next_scheduled_backup_estimated_when_scheduler_enabled(backup_env, monk
 
 
 def test_next_scheduled_backup_pending_when_no_run_yet(backup_env, monkeypatch):
-    monkeypatch.setattr(config, "BACKUP_SCHEDULER_ENABLED", True)
+    _enable_scheduler(monkeypatch)
     result = backup_service.get_next_scheduled_backup()
     assert result["scheduled"] is True
     assert result["estimated_at"] is None

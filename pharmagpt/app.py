@@ -72,6 +72,11 @@ app.config["SESSION_COOKIE_SECURE"]   = not FLASK_DEBUG
 
 db.init_db()
 
+# In-process backup scheduler (no-op unless BACKUP_SCHEDULER_ENABLED=true and a
+# valid backup key/storage config exist) — see services/backup_scheduler.py.
+from pharmagpt.services import backup_scheduler  # noqa: E402
+backup_scheduler.start()
+
 register_auth_middleware(app)
 
 

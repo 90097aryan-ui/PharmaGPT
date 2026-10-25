@@ -282,6 +282,18 @@ BACKUP_DIR = os.getenv("BACKUP_DIR") or os.path.join(os.path.dirname(__file__), 
 # CRITICAL warning on every run while it is unset (see docs/BACKUP_SOP.md).
 BACKUP_OFFSITE_DIR = os.getenv("BACKUP_OFFSITE_DIR")
 
+# Independent object storage for encrypted backup archives (Supabase Storage,
+# via the supabase/storage3 libraries already in requirements.txt). Dedicated
+# variables — deliberately NOT the app's SUPABASE_* keys — so the destination
+# can be a separate Supabase project that survives loss of the production one.
+# All of URL/KEY/BUCKET must be set together; a partial set fails the run
+# (services/backup_service.py::_object_store_settings). The key needs write
+# access to the (private) bucket only. Archives are already Fernet-encrypted.
+BACKUP_OFFSITE_STORAGE_URL = os.getenv("BACKUP_OFFSITE_STORAGE_URL")
+BACKUP_OFFSITE_STORAGE_KEY = os.getenv("BACKUP_OFFSITE_STORAGE_KEY")
+BACKUP_OFFSITE_STORAGE_BUCKET = os.getenv("BACKUP_OFFSITE_STORAGE_BUCKET")
+BACKUP_OFFSITE_STORAGE_PREFIX = os.getenv("BACKUP_OFFSITE_STORAGE_PREFIX", "pharmagpt/")
+
 # Symmetric encryption key (Fernet — cryptography package, already a pinned
 # dependency) protecting backup archives at rest. Deliberately has NO default
 # value — same principle FLASK_SECRET_KEY above now also follows (its dev
@@ -302,13 +314,12 @@ BACKUP_ENCRYPTION_KEY = os.getenv("BACKUP_ENCRYPTION_KEY")
 # interval) independently of whether the scheduler is actually still firing.
 BACKUP_FREQUENCY_HOURS = int(os.getenv("BACKUP_FREQUENCY_HOURS", 6))
 
-# Explicit operator acknowledgement that an external scheduler (Render Cron
-# Job, OS cron, etc.) has actually been wired up to run scripts/run_backup.py
-# — the running Flask process has no way to independently observe an
-# external cron process, so this is a statement of configured intent, not a
-# live health check. Defaults to "false" (fail-safe: the dashboard should
-# never claim scheduling is healthy unless an operator has said so) — see
-# get_configuration_status() in services/backup_service.py.
+# Turns on the in-process backup scheduler (services/backup_scheduler.py),
+# which runs inside the web service because only that service can read the
+# persistent disk (a Render cron job cannot mount it). Defaults to "false".
+# The flag alone never makes the dashboard report scheduling healthy: that
+# also requires a fresh scheduler heartbeat — see _check_scheduler() in
+# services/backup_service.py.
 BACKUP_SCHEDULER_ENABLED = os.getenv("BACKUP_SCHEDULER_ENABLED", "false").lower() == "true"
 
 # Rolling short-term retention (BACKUP_DIR/snapshots/) — every run.

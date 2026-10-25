@@ -67,12 +67,15 @@ services:
       # See docs/BACKUP_SOP.md §4 "One-time setup" before relying on any of this.
       - key: BACKUP_DIR
         value: /var/data/backups
-      # Read by backup_service.py::_check_scheduler() for the security_admin
-      # dashboard's health rollup — this is the web service's own process env,
-      # separate from the cron job below, so both need it set for the
-      # dashboard to correctly report "scheduling enabled" once the cron is live.
+      # In-process backup scheduler (services/backup_scheduler.py). It runs in
+      # THIS web service because only the service that owns the disk can read
+      # the database; a Render cron job cannot mount it. Keep "false" until
+      # BACKUP_ENCRYPTION_KEY and the BACKUP_OFFSITE_STORAGE_* variables below
+      # are set and one manual run from /admin/backup has succeeded, then set
+      # "true". The dashboard only reports scheduling healthy while the
+      # scheduler heartbeat is fresh, whatever this flag says.
       - key: BACKUP_SCHEDULER_ENABLED
-        value: "true"
+        value: "false"
       # No generateValue here on purpose — Render's generated-value format is
       # not guaranteed to be a valid Fernet key, and a security-critical key
       # must never silently take on a plausible-but-wrong value (same
@@ -81,10 +84,18 @@ services:
       # scripts/generate_backup_key.py` and paste the result here by hand.
       - key: BACKUP_ENCRYPTION_KEY
         sync: false
-      # Optional — a second mounted disk/network path backups are also
-      # copied to. Unset by default: backups exist only on the primary disk
-      # until this is configured. See docs/BACKUP_SOP.md §4 and
-      # docs/BACKUP_ARCHITECTURE.md §10 "Remaining risks" #1.
+      # Independent off-site copy of every encrypted archive (Supabase Storage,
+      # private bucket). Set all three together, ideally on a SEPARATE
+      # Supabase project from production; the key must not be the production
+      # service-role key. See docs/BACKUP_SOP.md section 4.
+      - key: BACKUP_OFFSITE_STORAGE_URL
+        sync: false
+      - key: BACKUP_OFFSITE_STORAGE_KEY
+        sync: false
+      - key: BACKUP_OFFSITE_STORAGE_BUCKET
+        sync: false
+      # Optional — a second LOCAL directory the archive is also copied to. It is
+      # not independent storage (same host/disk unless separately mounted).
       - key: BACKUP_OFFSITE_DIR
         sync: false
       # Optional — Slack/Teams/PagerDuty/Opsgenie-compatible incoming
@@ -99,41 +110,3 @@ services:
       # docs/BACKUP_ARCHITECTURE.md §5.
       - key: SUPABASE_DB_URL
         sync: false
-
-  # ── Backup scheduler ──────────────────────────────────────────────────────
-  # Activated per docs/BACKUP_SOP.md §4's one-time setup checklist.
-  # BACKUP_ENCRYPTION_KEY still has no value here (sync: false, same as the
-  # web service above) — it must be set by hand in the Render dashboard
-  # (generate with `python scripts/generate_backup_key.py`); every run fails
-  # cleanly via backup_service.py's BackupConfigError until that is done.
-  - type: cron
-    name: pharmagpt-backup
-    runtime: python
-    plan: starter
-    buildCommand: pip install -r requirements.txt
-    schedule: "0 */6 * * *"   # every 6 hours — keep in sync with BACKUP_FREQUENCY_HOURS
-    startCommand: python scripts/run_backup.py
-    envVars:
-      - key: DB_PATH
-        value: /var/data/pharmagpt.db
-      - key: UPLOAD_FOLDER
-        value: /var/data/uploads
-      - key: GENERATED_DOCS_PATH
-        value: /var/data/generated_documents
-      - key: BACKUP_DIR
-        value: /var/data/backups
-      - key: BACKUP_SCHEDULER_ENABLED
-        value: "true"
-      - key: BACKUP_ENCRYPTION_KEY
-        sync: false
-      - key: BACKUP_OFFSITE_DIR
-        sync: false
-      - key: BACKUP_ALERT_WEBHOOK_URL
-        sync: false
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-    disk:
-      name: pharmagpt-data   # same disk as the web service — a Render Cron
-      mountPath: /var/data   # Job can mount an existing named disk read/write.

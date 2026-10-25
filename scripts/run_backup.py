@@ -1,5 +1,5 @@
 """
-scripts/run_backup.py — Backup entrypoint for cron/Render Cron Job.
+scripts/run_backup.py — Manual backup entrypoint. Run it from a shell INSIDE the web service (it needs that service's disk); a Render cron/one-off job cannot reach it. Scheduled runs use services/backup_scheduler.py.
 
 Usage:
     python scripts/run_backup.py
