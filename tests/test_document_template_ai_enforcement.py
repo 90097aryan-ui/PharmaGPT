@@ -122,10 +122,16 @@ def test_empty_content_reports_all_headings_missing():
 # ── build_draft_prompt: template structure injection ─────────────────────────
 
 def test_prompt_without_template_uses_fixed_default_structure():
-    prompt = qp.build_draft_prompt({"title": "Doc", "doc_type": "SOP"})
+    # SOP without an explicit template now uses the Yuktav Master SOP
+    # structure (DEFAULT_SOP_STRUCTURE); other doc types keep the fixed default.
+    prompt = qp.build_draft_prompt({"title": "Doc", "doc_type": "Specification"})
     assert "## 1. Purpose" in prompt
     assert "## 9. Revision History" in prompt
     assert "APPROVED CONTROLLED TEMPLATE" not in prompt
+
+    sop_prompt = qp.build_draft_prompt({"title": "Doc", "doc_type": "SOP"})
+    assert "2. Purpose" in sop_prompt
+    assert "APPROVED CONTROLLED TEMPLATE" in sop_prompt
 
 
 def test_prompt_with_template_injects_exact_headings_in_order():

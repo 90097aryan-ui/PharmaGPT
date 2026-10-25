@@ -50,7 +50,14 @@ from pharmagpt.services import urs_lifecycle
 # the normal workflow.
 _QMS_DOCUMENT_TRANSITIONS: dict[str, set[str]] = {
     "Draft":             {"Under Review"},
-    "Under Review":      {"Pending Approval", "Approved", "Effective", "Draft"},
+    "Under Review":      {"Pending Approval", "Approved", "Effective", "Draft", "Technical Review"},
+    # DQ review stages (shared Validation approval engine, services/
+    # validation_approval.py — the engine validates the standard transitions;
+    # these entries only make the stage names known to Document Control).
+    "Technical Review":  {"QA Review", "Draft"},
+    "QA Review":         {"Validation Review", "Draft"},
+    "Validation Review": {"Final Approval", "Draft"},
+    "Final Approval":    {"Approved", "Draft"},
     "Pending Approval":  {"Approved", "Effective", "Draft"},
     "Approved":          {"Effective"},
     "Effective":         {"Under Revision", "Obsolete", "Draft"},
@@ -61,13 +68,14 @@ _QMS_DOCUMENT_TRANSITIONS: dict[str, set[str]] = {
 # ── Qualification (IQ/OQ/PQ/DQ) — derived from qual.py::add_approval's
 # status_map (draft / under_review / pending_approval / approved / closed /
 # obsolete). "Rejected" returns Draft from either review stage. ─────────────
+# Standardized Validation lifecycle (services/validation_approval.py), plus the
+# two pre-existing Qualification-only exits (approved/effective -> closed,
+# closed -> obsolete) so existing "Closed" behavior is preserved.
 _QUALIFICATION_TRANSITIONS: dict[str, set[str]] = {
-    "draft":             {"under_review"},
-    "under_review":      {"pending_approval", "approved", "draft"},
-    "pending_approval":  {"approved", "draft"},
-    "approved":          {"closed", "obsolete"},
-    "closed":            {"obsolete"},
-    "obsolete":          set(),
+    **{k: set(v) for k, v in urs_lifecycle.ALLOWED_TRANSITIONS.items()},
+    "approved":  {"effective", "closed", "obsolete", "draft"},
+    "effective": {"closed", "obsolete"},
+    "closed":    {"obsolete"},
 }
 
 # ── Validation Report — derived from report.py::add_approval's status_map

@@ -27,6 +27,7 @@ import logging
 from flask import Blueprint, g, jsonify, request, send_file
 
 from pharmagpt import audit
+from pharmagpt import audit_events as evt
 from pharmagpt import config
 from pharmagpt import database as db
 from pharmagpt import documents as doc_utils
@@ -243,6 +244,8 @@ def kb_download_document(kb_id):
         return jsonify({"error": "File not found on disk"}), 404
 
     file_path = doc_utils.get_kb_file_path(doc["stored_filename"])
+    # Wave 4B: log the download itself (not the file's contents).
+    audit.log("kb_document", kb_id, evt.FILE_DOWNLOADED, detail=doc.get("original_name", ""))
     return send_file(
         file_path,
         mimetype=doc_utils.get_mime_type(doc["file_type"]),

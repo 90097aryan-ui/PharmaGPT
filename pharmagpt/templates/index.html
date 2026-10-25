@@ -160,7 +160,7 @@
   <!-- ── Assume Company Context banner (Phase 3.5) — persistent across every
        view while a Super Admin has an active break_glass_access grant.
        static/js/admin_assume_context.js owns all of its behavior. ──────────── -->
-  <div id="assume-context-banner" style="display:none;background:#B45309;color:#fff;padding:8px 20px;
+  <div id="assume-context-banner" style="display:none;background:var(--warning);color:#fff;padding:8px 20px;
        font-size:13px;align-items:center;justify-content:space-between">
     <span id="assume-context-banner-text"></span>
     <button class="btn-secondary" id="btn-end-assume-context" style="background:transparent;border-color:#fff;color:#fff">End Session</button>
@@ -2600,6 +2600,7 @@
   <script src="{{ url_for('static', filename='js/qual.js') }}"></script>
   <script src="{{ url_for('static', filename='js/report.js') }}"></script>
   <script src="{{ url_for('static', filename='js/esignature_dialog.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/validation_approval_ui.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_common.js') }}"></script>
   <script src="{{ url_for('static', filename='js/investigation_case.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_documents.js') }}"></script>

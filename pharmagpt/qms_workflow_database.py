@@ -197,7 +197,10 @@ def get_instance_step(instance_id: int, step_order: int) -> dict | None:
     return dict(row) if row else None
 
 
-def update_instance_step(step_id: int, data: dict) -> None:
+def update_instance_step(step_id: int, data: dict, *, only_if_open: bool = False) -> bool:
+    """Returns True if a row was updated. `only_if_open` makes the write an
+    atomic claim (status still pending/in_progress), so two concurrent
+    decisions on one step cannot both succeed."""
     fields = ["status", "decided_by", "decided_at", "comments"]
     updates, params = [], []
     for f in fields:
@@ -205,12 +208,15 @@ def update_instance_step(step_id: int, data: dict) -> None:
             updates.append(f"{f} = ?")
             params.append(data[f])
     if not updates:
-        return
+        return False
     params.append(step_id)
+    guard = " AND status IN ('pending', 'in_progress')" if only_if_open else ""
     conn = get_connection()
-    conn.execute(f"UPDATE qms_workflow_instance_steps SET {', '.join(updates)} WHERE id = ?", params)
+    cur = conn.execute(f"UPDATE qms_workflow_instance_steps SET {', '.join(updates)} WHERE id = ?{guard}", params)
     conn.commit()
+    updated = cur.rowcount > 0
     conn.close()
+    return updated
 
 
 # ── Named approvers ──────────────────────────────────────────────────────────

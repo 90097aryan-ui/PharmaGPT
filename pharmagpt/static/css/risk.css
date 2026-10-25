@@ -2,14 +2,14 @@
 
 /* ── Risk colour palette ────────────────────────────────────────────────────── */
 :root {
-  --risk-critical: #C35F5B;
-  --risk-high:     #A97D2E;
-  --risk-medium:   #C59A41;
-  --risk-low:      #5F8A61;
-  --risk-bg:       #F1ECE6;
+  --risk-critical: #DC2626;
+  --risk-high:     #B45309;
+  --risk-medium:   #D97706;
+  --risk-low:      #16A34A;
+  --risk-bg:       #EEF0F3;
   --risk-surface:  #FFFFFF;
-  --risk-border:   #EEE7E1;
-  --risk-accent:   #8A6B52;
+  --risk-border:   #EAEDF1;
+  --risk-accent:   #2563EB;
 }
 
 /* ── Risk main container ─────────────────────────────────────────────────────── */
@@ -29,7 +29,7 @@
 
 /* ── Risk page header ────────────────────────────────────────────────────────── */
 .risk-page-header {
-  background: #5B4C43;
+  background: var(--sidebar-bg);
   color: #FFF;
   padding: 14px 24px;
   display: flex;
@@ -208,15 +208,15 @@
   letter-spacing: 0.3px;
 }
 
-.badge-critical { background: #F7E8E7; color: var(--risk-critical); }
-.badge-high     { background: #FFF4E5; color: var(--risk-high); }
-.badge-medium   { background: #F1ECE6; color: #A97D2E; }
-.badge-low      { background: #E8F2EA; color: var(--risk-low); }
-.badge-draft    { background: #F1ECE6; color: #66615B; }
-.badge-in-review { background: #F1ECE6; color: #8A6B52; }
-.badge-approved { background: #E8F2EA; color: #5F8A61; }
-.badge-closed   { background: #F1ECE6; color: #66615B; }
-.badge-in-progress { background: #FFF4E5; color: #C59A41; }
+.badge-critical { background: #FEF2F2; color: var(--risk-critical); }
+.badge-high     { background: #FFFBEB; color: var(--risk-high); }
+.badge-medium   { background: #EEF0F3; color: #B45309; }
+.badge-low      { background: #F0FDF4; color: var(--risk-low); }
+.badge-draft    { background: #EEF0F3; color: #64748B; }
+.badge-in-review { background: #EEF0F3; color: #2563EB; }
+.badge-approved { background: #F0FDF4; color: #16A34A; }
+.badge-closed   { background: #EEF0F3; color: #64748B; }
+.badge-in-progress { background: #FFFBEB; color: #D97706; }
 
 /* ── Wizard ──────────────────────────────────────────────────────────────────── */
 .risk-wizard {
@@ -389,7 +389,7 @@
 
 .risk-type-card.selected {
   border-color: var(--risk-accent);
-  background: #F1ECE6;
+  background: #EEF0F3;
 }
 
 .risk-type-card .rtc-icon {
@@ -429,12 +429,12 @@
 
 .methodology-card:hover {
   border-color: var(--risk-accent);
-  background: #F1ECE6;
+  background: #EEF0F3;
 }
 
 .methodology-card.selected {
   border-color: var(--risk-accent);
-  background: #F1ECE6;
+  background: #EEF0F3;
 }
 
 .methodology-card .mc-name {
@@ -481,8 +481,8 @@
 .risk-table thead th.narrow { width: 60px; }
 .risk-table thead th.med   { width: 90px; }
 
-.risk-table tbody tr:nth-child(even) { background: #F1ECE6; }
-.risk-table tbody tr:hover { background: #F1ECE6; }
+.risk-table tbody tr:nth-child(even) { background: #EEF0F3; }
+.risk-table tbody tr:hover { background: #EEF0F3; }
 
 .risk-table tbody td {
   padding: 8px 10px;
@@ -528,16 +528,16 @@
   min-width: 40px;
 }
 
-.rpn-critical { background: #F7E8E7; color: var(--risk-critical); }
-.rpn-high     { background: #FFF4E5; color: var(--risk-high); }
-.rpn-medium   { background: #F1ECE6; color: #A97D2E; }
-.rpn-low      { background: #E8F2EA; color: var(--risk-low); }
+.rpn-critical { background: #FEF2F2; color: var(--risk-critical); }
+.rpn-high     { background: #FFFBEB; color: var(--risk-high); }
+.rpn-medium   { background: #EEF0F3; color: #B45309; }
+.rpn-low      { background: #F0FDF4; color: var(--risk-low); }
 
 /* ── AI panel ────────────────────────────────────────────────────────────────── */
 .risk-ai-panel {
-  background: #F1ECE6;
-  border: 1px solid #E6DED6;
-  border-left: 3px solid #8A6B52;
+  background: #EEF0F3;
+  border: 1px solid #E2E5EA;
+  border-left: 3px solid #2563EB;
   border-radius: 12px;
   padding: 20px 24px;
   margin-bottom: 20px;
@@ -602,7 +602,7 @@
 }
 
 .score-excellent { color: var(--risk-low); }
-.score-good      { color: #5F8A61; }
+.score-good      { color: #16A34A; }
 .score-fair      { color: var(--risk-medium); }
 .score-poor      { color: var(--risk-critical); }
 
@@ -629,10 +629,10 @@
 }
 
 .heat-cell:hover { transform: scale(1.1); }
-.heat-low      { background: #E8F2EA; color: #4C7A4E; }
-.heat-medium   { background: #FFF4E5; color: #C59A41; }
-.heat-high     { background: #FFF4E5; color: #8A6B52; }
-.heat-critical { background: #F2D8D6; color: #A8544F; }
+.heat-low      { background: #F0FDF4; color: #15803D; }
+.heat-medium   { background: #FFFBEB; color: #D97706; }
+.heat-high     { background: #FFFBEB; color: #2563EB; }
+.heat-critical { background: #F2D8D6; color: #B91C1C; }
 
 /* ── Library table ───────────────────────────────────────────────────────────── */
 .library-filters {
@@ -813,7 +813,7 @@
 .btn-risk-secondary:hover {
   border-color: var(--risk-accent);
   color: var(--risk-accent);
-  background: #F1ECE6;
+  background: #EEF0F3;
 }
 
 .btn-risk-danger {
@@ -833,7 +833,7 @@
 }
 
 .btn-risk-danger:hover {
-  background: #F7E8E7;
+  background: #FEF2F2;
 }
 
 .btn-risk-icon {
@@ -853,7 +853,7 @@
 
 .btn-risk-icon:hover {
   border-color: var(--risk-accent);
-  background: #F1ECE6;
+  background: #EEF0F3;
 }
 
 /* ── Empty state ─────────────────────────────────────────────────────────────── */

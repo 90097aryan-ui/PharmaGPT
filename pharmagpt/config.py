@@ -366,3 +366,12 @@ POSTGRES_BACKUP_TABLES = [
     "departments", "modules", "workflow_roles", "user_departments",
     "user_module_permissions", "audit_trail",
 ]
+
+# ── Validation approval workflow (services/validation_approval.py) ───────────
+# Department + functional-role enforcement for signatories is ON by default
+# (a signer must hold the designation's department and functional role in
+# user_departments). The switch exists only for a controlled rollout window and
+# for tests; turning it off is a policy change that needs QA authorization.
+VALIDATION_SIGNATORY_DEPARTMENT_ENFORCEMENT = os.getenv(
+    "VALIDATION_SIGNATORY_DEPARTMENT_ENFORCEMENT", "true").strip().lower() != "false"
+# Seven-distinct-signers is NOT configurable: see validation_approval._authorize_signatory.

@@ -74,6 +74,7 @@ import uuid
 from flask import Blueprint, g, jsonify, request, send_file
 
 from pharmagpt import audit
+from pharmagpt import audit_events as evt
 from pharmagpt import config
 from pharmagpt import database as db
 from pharmagpt import equipment_database as equipdb
@@ -633,7 +634,13 @@ def accept_investigation_kb_suggestion(did):
 def suggest_impact(did):
     if not tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
-    return jsonify(svc.ai_suggest_impact(did))
+    try:
+        result = svc.ai_suggest_impact(did)
+    except Exception as exc:
+        audit.log_failure("deviation", did, evt.DEVIATION_AI_ASSIST, reason=f"Impact suggestion failed: {exc}")
+        raise
+    audit.log("deviation", did, evt.DEVIATION_AI_ASSIST, detail="Impact suggestion generated")
+    return jsonify(result)
 
 
 @bp.route("/<int:did>/impact", methods=["GET"])
@@ -658,7 +665,13 @@ def add_impact(did):
 def suggest_capa(did):
     if not tenancy.scoped_or_none(ddb.get_deviation(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
-    return jsonify(svc.ai_suggest_capa(did))
+    try:
+        result = svc.ai_suggest_capa(did)
+    except Exception as exc:
+        audit.log_failure("deviation", did, evt.DEVIATION_AI_ASSIST, reason=f"CAPA suggestion failed: {exc}")
+        raise
+    audit.log("deviation", did, evt.DEVIATION_AI_ASSIST, detail="CAPA suggestion generated")
+    return jsonify(result)
 
 
 @bp.route("/<int:did>/link-capa", methods=["POST"])
@@ -976,6 +989,7 @@ def decide_workflow_step(did, step_order):
         audit.log_failure("deviation", did, f"Workflow decision blocked ({decision}) — e-signature failed", reason=str(exc))
         return jsonify({"error": str(exc)}), 401
     except esignature_service.ESignatureError as exc:
+        audit.log_failure("deviation", did, evt.ESIGNATURE_FAILURE, reason=str(exc))
         return jsonify({"error": str(exc)}), 400
 
     sig = tenancy.signing_identity(g.tenant)
@@ -1026,6 +1040,8 @@ def export_docx(did):
     })
     safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", deviation.get("title", "Deviation"))[:40]
     filename = f"{deviation.get('deviation_number', 'DEV')}_{safe_title}.docx"
+    # Wave 4B: log the export itself (not the file's contents).
+    audit.log("deviation", did, evt.DEVIATION_EXPORTED, detail=filename)
     return send_file(
         io.BytesIO(docx_bytes),
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",

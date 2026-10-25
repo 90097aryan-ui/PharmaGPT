@@ -27,7 +27,7 @@ const VALIDATION_DOCS = {
     label: "Design Qualification",
     short: "DQ",
     icon: "<span class=\'icon\' data-lucide=\'ruler\'></span>",
-    color: "#A97D2E",
+    color: "#B45309",
     step2: [
       { id: "doc_number",  label: "Document Number", placeholder: "DQ-001", required: true },
       { id: "version",     label: "Version",         placeholder: "1.0",    required: true },
@@ -39,7 +39,7 @@ const VALIDATION_DOCS = {
     label: "Factory Acceptance Testing",
     short: "FAT",
     icon: "<span class=\'icon\' data-lucide=\'factory\'></span>",
-    color: "#C59A41",
+    color: "#D97706",
     step2: [
       { id: "doc_number",    label: "Document Number",     placeholder: "FAT-001", required: true },
       { id: "version",       label: "Version",             placeholder: "1.0",     required: true },
@@ -52,7 +52,7 @@ const VALIDATION_DOCS = {
     label: "Site Acceptance Testing",
     short: "SAT",
     icon: "<span class=\'icon\' data-lucide=\'wrench\'></span>",
-    color: "#2D2A28",
+    color: "#1E293B",
     step2: [
       { id: "doc_number",  label: "Document Number",  placeholder: "SAT-001", required: true },
       { id: "version",     label: "Version",          placeholder: "1.0",     required: true },
@@ -65,7 +65,7 @@ const VALIDATION_DOCS = {
     label: "Failure Mode and Effects Analysis",
     short: "FMEA",
     icon: "<span class=\'icon\' data-lucide=\'alert-triangle\'></span>",
-    color: "#A8544F",
+    color: "#B91C1C",
     step2: [
       { id: "doc_number",   label: "FMEA Document Number", placeholder: "FMEA-001", required: true },
       { id: "version",      label: "Version",              placeholder: "1.0",      required: true },
@@ -77,7 +77,7 @@ const VALIDATION_DOCS = {
     label: "Combined Installation & Operational Qualification",
     short: "IQ/OQ",
     icon: "<span class=\'icon\' data-lucide=\'wrench\'></span>",
-    color: "#4C7A4E",
+    color: "#15803D",
     step2: [
       { id: "protocol_number", label: "Protocol Number",        placeholder: "IQ-OQ-001", required: true },
       { id: "version",         label: "Version",                placeholder: "1.0",       required: true },
@@ -90,7 +90,7 @@ const VALIDATION_DOCS = {
     label: "Standard Operating Procedure",
     short: "SOP",
     icon: "<span class=\'icon\' data-lucide=\'file-text\'></span>",
-    color: "#3D6140",
+    color: "#15803D",
     step2: [
       { id: "doc_number",        label: "Document Number",     placeholder: "SOP-001", required: true },
       { id: "version",           label: "Version",             placeholder: "1.0",     required: true },
@@ -103,7 +103,7 @@ const VALIDATION_DOCS = {
     label: "Validation Plan",
     short: "VMP",
     icon: "<span class=\'icon\' data-lucide=\'list-checks\'></span>",
-    color: "#8A6B52",
+    color: "#2563EB",
     step2: [
       { id: "plan_number",       label: "Plan Number",          placeholder: "VMP-001", required: true },
       { id: "version",           label: "Version",              placeholder: "1.0",     required: true },
@@ -116,7 +116,7 @@ const VALIDATION_DOCS = {
     label: "Validation Summary Report",
     short: "VSR",
     icon: "<span class=\'icon\' data-lucide=\'bar-chart-3\'></span>",
-    color: "#5B4C43",
+    color: "var(--sidebar-bg)",
     step2: [
       { id: "report_number",       label: "Report Number",        placeholder: "VSR-001", required: true },
       { id: "version",             label: "Version",              placeholder: "1.0",     required: true },

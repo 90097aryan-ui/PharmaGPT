@@ -193,9 +193,9 @@ function renderHeatMap() {
       <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Probability (<span class=\'icon\' data-lucide=\'arrow-right\'></span>) × Impact (<span class=\'icon\' data-lucide=\'arrow-up\'></span>)</div>
       <div class="risk-heat-map">${cells.join("")}</div>
       <div style="display:flex;gap:12px;margin-top:10px;font-size:11px;flex-wrap:wrap">
-        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#E8F2EA;display:inline-block"></span>Low (1–4)</span>
-        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#FFF4E5;display:inline-block"></span>Medium (5–9)</span>
-        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#FFF4E5;display:inline-block"></span>High (10–14)</span>
+        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#F0FDF4;display:inline-block"></span>Low (1–4)</span>
+        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#FFFBEB;display:inline-block"></span>Medium (5–9)</span>
+        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#FFFBEB;display:inline-block"></span>High (10–14)</span>
         <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:#F2D8D6;display:inline-block"></span>Critical (15–25)</span>
       </div>
     </div>
@@ -205,11 +205,11 @@ function renderHeatMap() {
 function renderTypeBreakdown(byType) {
   const entries = Object.entries(byType);
   const total = entries.reduce((s, [, c]) => s + c, 0) || 1;
-  const colors = { validation: "#8A6B52", manufacturing: "#A97D2E", engineering: "#66615B",
-                   quality: "#5F8A61", warehouse: "#8A6B52", misc: "#66615B" };
+  const colors = { validation: "#2563EB", manufacturing: "#B45309", engineering: "#64748B",
+                   quality: "#16A34A", warehouse: "#2563EB", misc: "#64748B" };
   const rows = entries.map(([type, count]) => {
     const pct = Math.round((count / total) * 100);
-    const color = colors[type] || "#8A6B52";
+    const color = colors[type] || "#2563EB";
     return `<div style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
         <span style="text-transform:capitalize;font-weight:600">${type}</span>
@@ -396,7 +396,7 @@ function renderSubtypeSelector(key) {
     <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.4px">Select Sub-type</div>
     <div style="display:flex;flex-wrap:wrap;gap:8px">
       ${info.subtypes.map(s => `
-        <button class="btn-risk-secondary" style="font-size:12px;padding:6px 14px;${RiskState.selectedSubtype === s ? "border-color:var(--risk-accent);background:#F1ECE6;color:var(--risk-accent)" : ""}"
+        <button class="btn-risk-secondary" style="font-size:12px;padding:6px 14px;${RiskState.selectedSubtype === s ? "border-color:var(--risk-accent);background:#EEF0F3;color:var(--risk-accent)" : ""}"
                 onclick="selectSubtype('${s.replace(/'/g,"\\'")}')">
           ${s}
         </button>
@@ -1063,16 +1063,16 @@ function renderReviewResults(el, r) {
           ${scoreCard(r.overall_score, "Overall Score")}
         </div>
 
-        ${reviewList("<span class='icon' data-lucide='circle'></span> Critical Findings", r.critical_findings, "#F7E8E7", "var(--risk-critical)")}
-        ${reviewList("<span class='icon' data-lucide='alert-triangle'></span> Missing Risks", r.missing_risks, "#FFF4E5", "var(--risk-high)")}
-        ${reviewList("<span class='icon' data-lucide='lightbulb'></span> Suggested Improvements", r.suggested_improvements, "#E8F2EA", "var(--risk-low)")}
+        ${reviewList("<span class='icon' data-lucide='circle'></span> Critical Findings", r.critical_findings, "#FEF2F2", "var(--risk-critical)")}
+        ${reviewList("<span class='icon' data-lucide='alert-triangle'></span> Missing Risks", r.missing_risks, "#FFFBEB", "var(--risk-high)")}
+        ${reviewList("<span class='icon' data-lucide='lightbulb'></span> Suggested Improvements", r.suggested_improvements, "#F0FDF4", "var(--risk-low)")}
 
-        ${r.reviewer_comments ? `<div style="background:#F1ECE6;border-radius:8px;padding:14px;margin-top:12px">
+        ${r.reviewer_comments ? `<div style="background:#EEF0F3;border-radius:8px;padding:14px;margin-top:12px">
           <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:6px"><span class=\'icon\' data-lucide=\'pencil-line\'></span> AI Reviewer Comments</div>
           <p style="font-size:13px;line-height:1.6;color:var(--text)">${esc(r.reviewer_comments)}</p>
         </div>` : ""}
 
-        ${r.final_summary ? `<div style="background:#F1ECE6;border-radius:8px;padding:14px;margin-top:12px;border-left:4px solid var(--risk-accent)">
+        ${r.final_summary ? `<div style="background:#EEF0F3;border-radius:8px;padding:14px;margin-top:12px;border-left:4px solid var(--risk-accent)">
           <div style="font-size:12px;font-weight:700;color:var(--risk-accent);margin-bottom:6px"><span class=\'icon\' data-lucide=\'clipboard-list\'></span> Final Summary</div>
           <p style="font-size:13px;line-height:1.6;color:var(--text)">${esc(r.final_summary)}</p>
         </div>` : ""}
@@ -1147,8 +1147,8 @@ window.printReport = function () {
   const win = window.open("", "_blank");
   win.document.write(`<html><head><title>Risk Assessment Report</title>
     <style>body{font-family:serif;padding:40px;max-width:900px;margin:0 auto}
-    table{border-collapse:collapse;width:100%} th,td{border:1px solid #E6DED6;padding:6px;font-size:11px}
-    th{background:#5B4C43;color:#FFF} h1,h2,h3{color:#5B4C43}</style>
+    table{border-collapse:collapse;width:100%} th,td{border:1px solid #E2E5EA;padding:6px;font-size:11px}
+    th{background:var(--sidebar-bg);color:#FFF} h1,h2,h3{color:var(--sidebar-bg)}</style>
     </head><body>${content.innerHTML}</body></html>`);
   win.document.close();
   win.print();
@@ -1365,7 +1365,7 @@ function loadTemplates() {
   body.innerHTML = `
     <div class="template-grid">
       ${TEMPLATES.map(t => `
-        <div class="template-card" onclick="useTemplate(${JSON.stringify(t).replace(/"/g, '&quot;')})">
+        <div class="template-card" onclick="useTemplate(${JSON.stringify(t).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/'/g,"&#39;").replace(/</g,"&lt;")})">
           <div class="template-card-icon">${t.icon}</div>
           <div class="template-card-name">${t.name}</div>
           <div class="template-card-desc">${t.sub}</div>
@@ -1466,12 +1466,12 @@ window.sendAIQuestion = async function () {
   input.value = "";
 
   msgs.insertAdjacentHTML("beforeend", `
-    <div style="background:#F1ECE6;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px">
+    <div style="background:#EEF0F3;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px">
       <strong>You:</strong> ${esc(q)}
     </div>`);
 
   const aiEl = document.createElement("div");
-  aiEl.style.cssText = "background:#F1ECE6;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px;border-left:3px solid var(--risk-accent)";
+  aiEl.style.cssText = "background:#EEF0F3;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px;border-left:3px solid var(--risk-accent)";
   aiEl.innerHTML = `<strong>AI:</strong> <span class="risk-ai-generating"><span class="spinner" style="width:14px;height:14px;border-width:1px"></span></span>`;
   msgs.appendChild(aiEl);
   msgs.scrollTop = msgs.scrollHeight;
@@ -1541,7 +1541,7 @@ function esc(str) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 function getRPNClass(rpn) {

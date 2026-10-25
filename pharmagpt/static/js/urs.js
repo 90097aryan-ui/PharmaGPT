@@ -412,9 +412,9 @@ function ursErrorStateHTML(title, message, retryExpr) {
 
 function buildDashboardHTML(stats, allURS) {
   const categoryColors = {
-    manufacturing: "#8A6B52", packaging: "#5F8A61", laboratory: "#8A6B52",
-    utilities: "#5F8A61", hvac: "#A97D2E", computerized: "#A8544F",
-    warehouse: "#8A6B52", miscellaneous: "#66615B",
+    manufacturing: "#2563EB", packaging: "#16A34A", laboratory: "#2563EB",
+    utilities: "#16A34A", hvac: "#B45309", computerized: "#B91C1C",
+    warehouse: "#2563EB", miscellaneous: "#64748B",
   };
 
   let html = `
@@ -486,7 +486,7 @@ function buildDashboardHTML(stats, allURS) {
   const byCategory = stats.by_category || {};
   if (Object.keys(byCategory).length) {
     Object.entries(byCategory).forEach(([cat, count]) => {
-      const color = categoryColors[cat] || "#9A948C";
+      const color = categoryColors[cat] || "#94A3B8";
       html += `<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
         <div style="width:12px;height:12px;border-radius:50%;background:${color};flex-shrink:0"></div>
         <div style="flex:1;font-size:13px;color:var(--text)">${cat.replace(/_/g,' ')}</div>
@@ -552,7 +552,7 @@ async function fetchAndRenderURSList(filters = {}) {
         <div class="urs-card-tags">
           <span class="urs-tag urs-tag-status ${u.status}">${formatStatus(u.status)}</span>
           ${u.category ? `<span class="urs-tag urs-tag-category">${u.category}</span>` : ""}
-          ${u.revision ? `<span class="urs-tag" style="background:#F1ECE6;color:#66615B">Rev ${u.revision}</span>` : ""}
+          ${u.revision ? `<span class="urs-tag" style="background:#EEF0F3;color:#64748B">Rev ${u.revision}</span>` : ""}
         </div>
         <div class="urs-card-meta">
           <span><span class=\'icon\' data-lucide=\'user\'></span> ${escHtml(u.prepared_by || "—")}</span>
@@ -1130,7 +1130,7 @@ async function refreshFacilityNodeTree(facilityId) {
         <div class="urs-facility-node-row" style="padding-left:${(n.parent_id ? 20 : 0)}px">
           <span class="urs-tag urs-tag-category">${n.node_type}</span>
           <span>${escHtml(n.name)}</span>
-          ${n.attributes && n.attributes.classification ? `<span class="urs-tag" style="background:#F1ECE6;color:#66615B">${escHtml(n.attributes.classification)}</span>` : ""}
+          ${n.attributes && n.attributes.classification ? `<span class="urs-tag" style="background:#EEF0F3;color:#64748B">${escHtml(n.attributes.classification)}</span>` : ""}
           <button class="req-action-btn delete" title="Delete" onclick="deleteFacilityNode(${n.id}, ${facilityId})" style="margin-left:auto"></button>
         </div>`).join("");
     }
@@ -1408,15 +1408,15 @@ function renderStep3(body) {
     </div>
   </div>
 
-  <div class="urs-ai-panel" style="background:linear-gradient(135deg,#E8F2EA,#E8F2EA);border-color:#E8F2EA">
+  <div class="urs-ai-panel" style="background:linear-gradient(135deg,#F0FDF4,#F0FDF4);border-color:#F0FDF4">
     <div class="urs-ai-panel-header">
-      <div class="urs-ai-icon" style="background:linear-gradient(135deg,#5F8A61,#5F8A61)"><span class=\'icon\' data-lucide=\'book-open\'></span></div>
+      <div class="urs-ai-icon" style="background:linear-gradient(135deg,#16A34A,#16A34A)"><span class=\'icon\' data-lucide=\'book-open\'></span></div>
       <div>
         <div class="urs-ai-panel-title">Requirement Library</div>
         <div class="urs-ai-panel-sub">Load pre-built GMP requirements from the ${isFacility ? "facility" : "equipment"} library (instant, no AI needed)</div>
       </div>
     </div>
-    <button class="btn-urs-outline" style="border-color:#5F8A61;color:#5F8A61" onclick="loadLibraryRequirements()">
+    <button class="btn-urs-outline" style="border-color:#16A34A;color:#16A34A" onclick="loadLibraryRequirements()">
       <span class=\'icon\' data-lucide=\'book-open\'></span> Load Library Requirements for ${escHtml(entityName)}
     </button>
   </div>
@@ -1852,10 +1852,10 @@ function renderStep5(body) {
   body.innerHTML = `
   <div class="urs-section-header"><div class="section-icon"><span class=\'icon\' data-lucide=\'check-circle-2\'></span></div>URS Ready for Submission</div>
 
-  <div style="background:linear-gradient(135deg,#E8F2EA,#E8F2EA);border:1px solid #E8F2EA;border-radius:12px;padding:24px;margin-bottom:24px;text-align:center">
+  <div style="background:linear-gradient(135deg,#F0FDF4,#F0FDF4);border:1px solid #F0FDF4;border-radius:12px;padding:24px;margin-bottom:24px;text-align:center">
     <div style="font-size:48px;margin-bottom:12px"><span class=\'icon\' data-lucide=\'party-popper\'></span></div>
-    <div style="font-size:20px;font-weight:700;color:#5F8A61;margin-bottom:8px">URS Successfully Created!</div>
-    <div style="font-size:14px;color:#5F8A61">${reqCount} requirements captured for <strong>${escHtml(entityName)}</strong></div>
+    <div style="font-size:20px;font-weight:700;color:#16A34A;margin-bottom:8px">URS Successfully Created!</div>
+    <div style="font-size:14px;color:#16A34A">${reqCount} requirements captured for <strong>${escHtml(entityName)}</strong></div>
   </div>
 
   <div class="urs-info-grid">
@@ -1873,7 +1873,7 @@ function renderStep5(body) {
       <div class="urs-info-card-title">Next Steps</div>
       <div style="display:flex;flex-direction:column;gap:10px">
         <div style="display:flex;align-items:center;gap:10px;font-size:13px">
-          <span style="color:#5F8A61;font-weight:700"><span class=\'icon\' data-lucide=\'check\'></span></span> URS draft created
+          <span style="color:#16A34A;font-weight:700"><span class=\'icon\' data-lucide=\'check\'></span></span> URS draft created
         </div>
         <div style="display:flex;align-items:center;gap:10px;font-size:13px">
           <span style="color:var(--blue);font-weight:700"><span class=\'icon\' data-lucide=\'arrow-right\'></span></span> Submit for review
@@ -2338,21 +2338,23 @@ window.runAIReview = async function (uid) {
 // covers the case where the status changed in another tab since this
 // panel was rendered) — this only prevents the *obviously* invalid case.
 const URS_LIFECYCLE_TRANSITIONS = {
-  draft:            ["under_review"],
-  under_review:     ["pending_approval", "approved", "draft"],
-  pending_approval: ["approved", "draft"],
-  approved:         ["effective", "draft"],
-  effective:        ["obsolete"],
-  obsolete:         [],
+  draft:             ["under_review"],
+  under_review:      ["technical_review", "draft"],
+  technical_review:  ["qa_review", "draft"],
+  qa_review:         ["validation_review", "draft"],
+  validation_review: ["final_approval", "draft"],
+  final_approval:    ["approved", "draft"],
+  pending_approval:  ["draft"],
+  approved:          ["effective", "draft"],
+  effective:         ["obsolete"],
+  obsolete:          [],
 };
 const URS_ACTION_STATUS_MAP = {
-  "Submitted for Review":   "under_review",
-  "Review Complete":        "under_review",
-  "Submitted for Approval": "pending_approval",
-  "Approved":               "approved",
-  "Rejected":                "draft",
-  "Make Effective":          "effective",
-  "Obsolete":                 "obsolete",
+  "Submitted for Review": "under_review",
+  "Sign Off":             "technical_review",
+  "Rejected":             "draft",
+  "Make Effective":       "effective",
+  "Obsolete":             "obsolete",
 };
 
 function ursValidActionsFor(status) {
@@ -2388,46 +2390,21 @@ function renderApprovalPanel(panel, urs) {
         <div class="urs-empty" style="padding:20px"><div class="urs-gen-spinner" style="margin:0 auto"></div></div>
       </div>
     </div>
-    <div style="width:280px;flex-shrink:0">
-      <div class="urs-section-header" style="margin-bottom:16px"><div class="section-icon"><span class=\'icon\' data-lucide=\'plus\'></span></div>Add Entry</div>
-      ${noActionsAvailable ? `
-        <div class="urs-lifecycle-hint">This document is <strong>${formatStatus(urs.status)}</strong> — no further lifecycle transitions are available from here.</div>
-      ` : `
-        <div class="urs-field" style="margin-bottom:12px">
-          <label class="urs-label">Action</label>
-          <select class="urs-select" id="approval-action" onchange="updateApprovalActionHint()">
-            ${validActions.map(a => `<option>${a}</option>`).join("")}
-          </select>
-          <div class="urs-lifecycle-hint" id="approval-action-hint"></div>
-        </div>
-        <div class="urs-field" style="margin-bottom:12px">
-          <label class="urs-label">Performed By</label>
-          ${user ? `
-            <div class="urs-identity-chip"><span class=\'icon\' data-lucide=\'user-check\'></span> <strong>${escHtml(user.display_name || user.email || "You")}</strong>${user.role ? ` (${escHtml(user.role)})` : ""}</div>
-          ` : `
-            <input class="urs-input" id="approval-name" placeholder="Your name" style="margin-bottom:8px">
-            <input class="urs-input" id="approval-role" placeholder="e.g. QA Manager">
-          `}
-        </div>
-        <div class="urs-field" style="margin-bottom:12px">
-          <label class="urs-label">Comments</label>
-          <textarea class="urs-textarea" id="approval-comments" placeholder="Optional comments…"></textarea>
-        </div>
-        <button class="btn-urs-primary" style="width:100%" id="approval-submit-btn" onclick="addApprovalEntry(${urs.id})">Add Entry</button>
-      `}
-    </div>
-  </div>`;
+  </div>
+  <div id="urs-va-panel" style="margin-top:20px"></div>`;
+  const vaHost = document.getElementById("urs-va-panel");
+  if (vaHost && window.ValidationApproval) {
+    window.ValidationApproval.render(vaHost, {
+      base: "/urs", id: urs.id,
+      onChanged: async () => {
+        ursState.currentURS = await fetch(`/urs/${urs.id}`).then(r => r.json());
+        refreshDetailStatusBadge();
+        renderApprovalPanel(document.querySelector('.urs-detail-panel[data-tab="approval"]'), ursState.currentURS);
+      },
+    });
+  }
   loadApprovalTrail(urs.id);
-  if (!noActionsAvailable) updateApprovalActionHint();
 }
-
-window.updateApprovalActionHint = function () {
-  const sel = document.getElementById("approval-action");
-  const hint = document.getElementById("approval-action-hint");
-  if (!sel || !hint) return;
-  const target = URS_ACTION_STATUS_MAP[sel.value];
-  hint.textContent = target ? `This will move the document status to: ${formatStatus(target)}` : "";
-};
 
 async function loadApprovalTrail(uid) {
   const timeline = document.getElementById("approval-timeline");
@@ -2466,54 +2443,6 @@ async function loadApprovalTrail(uid) {
     clearTimeout(timeoutId);
   }
 }
-
-window.addApprovalEntry = async function (uid) {
-  const action = document.getElementById("approval-action")?.value;
-  const user = window.PharmaAuth && PharmaAuth.getUser && PharmaAuth.getUser();
-  const name = user ? (user.display_name || user.email || "") : (document.getElementById("approval-name")?.value.trim() || "");
-  const role = user ? (user.role || "") : (document.getElementById("approval-role")?.value.trim() || "");
-  const comments = document.getElementById("approval-comments")?.value.trim();
-  if (!name) { ursToast("Name is required", "error"); return; }
-
-  const btn = document.getElementById("approval-submit-btn");
-  if (btn) { btn.disabled = true; btn.textContent = "Submitting…"; }
-
-  try {
-    const resp = await fetch(`/urs/${uid}/approval`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, performed_by: name, role, comments }),
-    });
-    if (!resp.ok) {
-      const body = await resp.json().catch(() => ({}));
-      if (resp.status === 409) {
-        // Someone else (or another tab) moved the document's status since
-        // this panel was rendered — reload it so the action list reflects
-        // reality instead of leaving the user staring at a now-stale form.
-        ursState.currentURS = await fetch(`/urs/${uid}`).then(r => r.json());
-        refreshDetailStatusBadge();
-        renderApprovalPanel(document.querySelector('.urs-detail-panel[data-tab="approval"]'), ursState.currentURS);
-        ursNotify({
-          type: "warning", title: "Status changed since this page loaded",
-          message: body.error || "This action is no longer valid for the document's current status. The form has been refreshed.",
-          category: "Validation",
-        });
-        return;
-      }
-      throw new Error(body.error || `Server returned HTTP ${resp.status}`);
-    }
-    ursState.currentURS = await fetch(`/urs/${uid}`).then(r => r.json());
-    refreshDetailStatusBadge();
-    renderApprovalPanel(document.querySelector('.urs-detail-panel[data-tab="approval"]'), ursState.currentURS);
-    ursNotify({ type: "success", title: "Approval entry added", message: `"${action}" recorded.` });
-  } catch (e) {
-    ursNotify({
-      type: "error", title: "Couldn't add approval entry", message: e.message,
-      category: "Validation", retry: () => addApprovalEntry(uid),
-    });
-    if (btn) { btn.disabled = false; btn.textContent = "Add Entry"; }
-  }
-};
 
 /* Keeps the detail view's header status badge in sync after any action
    that can change urs.status (approval entries, submit-for-review) — the
@@ -2688,7 +2617,7 @@ window.deleteURS = async function (uid) {
   }
 };
 
-window.submitForReview = async function (uid) {
+window.submitForReview = function (uid) {
   // Prevents an obviously-invalid submit (e.g. re-clicking on an already
   // Under-Review/Approved document) without waiting on a round-trip — the
   // backend still validates independently either way.
@@ -2700,28 +2629,30 @@ window.submitForReview = async function (uid) {
     });
     return;
   }
-  const user = window.PharmaAuth && PharmaAuth.getUser && PharmaAuth.getUser();
-  const name = (user && (user.display_name || user.email)) || prompt("Your name (submitter):", "") || "";
-  if (!name) return;
-  try {
-    const resp = await fetch(`/urs/${uid}/approval`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "Submitted for Review", performed_by: name, role: (user && user.role) || "Author", comments: "" }),
-    });
-    if (!resp.ok) {
-      const body = await resp.json().catch(() => ({}));
-      throw new Error(body.error || `Server returned HTTP ${resp.status}`);
-    }
-    ursState.currentURS = await fetch(`/urs/${uid}`).then(r => r.json());
-    refreshDetailStatusBadge();
-    ursNotify({ type: "success", title: "Submitted for review", message: "This URS has been submitted for review." });
-  } catch (e) {
-    ursNotify({
-      type: "error", title: "Couldn't submit for review", message: e.message,
-      category: "Validation", retry: () => submitForReview(uid),
-    });
+  if (!window.PharmaESign) {
+    ursNotify({ type: "error", title: "Couldn't submit for review",
+                message: "Electronic Signature dialog failed to load", category: "Validation" });
+    return;
   }
+  // Submission is the "Prepared By" signature: a fresh e-signature
+  // (21 CFR Part 11) — identity comes from the session, not from this form.
+  window.PharmaESign.open({
+    meaning: "Created",
+    onConfirm: async ({ password, meaning, reason }) => {
+      const resp = await fetch(`/urs/${uid}/approval`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "Submitted for Review", password, meaning, reason, comments: "" }),
+      });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body.error || `Server returned HTTP ${resp.status}`);
+      }
+      ursState.currentURS = await fetch(`/urs/${uid}`).then(r => r.json());
+      refreshDetailStatusBadge();
+      ursNotify({ type: "success", title: "Submitted for review", message: "This URS has been submitted for review." });
+    },
+  });
 };
 
 window.showURSApprovalQueue = function () {
@@ -2738,13 +2669,14 @@ function escHtml(str) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 function formatStatus(s) {
   const map = {
     draft: "Draft", under_review: "Under Review",
-    pending_approval: "Pending Approval", approved: "Approved", obsolete: "Obsolete",
+    technical_review: "Technical Review", qa_review: "QA Review", validation_review: "Validation Review",
+    final_approval: "Final Approval", pending_approval: "Pending Approval", approved: "Approved", effective: "Effective", obsolete: "Obsolete",
   };
   return map[s] || s || "Draft";
 }

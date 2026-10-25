@@ -826,9 +826,10 @@ def decide_step(record_type: str, record_id: int, step_order: int, decision: str
         _require_comment_on_document_reject(record_type, comments)
 
     if decision in ("approve", "advance"):
-        wfdb.update_instance_step(step["id"], {
+        if not wfdb.update_instance_step(step["id"], {
             "status": "approved", "decided_by": performed_by, "decided_at": now, "comments": comments,
-        })
+        }, only_if_open=True):
+            raise WorkflowError(f"'{step['step_name']}' was already decided")
         if step_order >= last_order:
             wfdb.update_instance(instance["id"], {"status": "completed", "completed_at": now})
         else:
@@ -844,9 +845,10 @@ def decide_step(record_type: str, record_id: int, step_order: int, decision: str
         _maybe_auto_skip_current_step(record_type, record_id, performed_by)
 
     elif decision == "reject":
-        wfdb.update_instance_step(step["id"], {
+        if not wfdb.update_instance_step(step["id"], {
             "status": "rejected", "decided_by": performed_by, "decided_at": now, "comments": comments,
-        })
+        }, only_if_open=True):
+            raise WorkflowError(f"'{step['step_name']}' was already decided")
         wfdb.update_instance(instance["id"], {"status": "rejected", "completed_at": now})
         _apply_gate_status(record_type, record_id, "Rejected")
         version_reject_hook = VERSION_ON_STEP_REJECTED.get(record_type)
@@ -855,9 +857,10 @@ def decide_step(record_type: str, record_id: int, step_order: int, decision: str
         audit.log(record_type, record_id, f"{step['step_name']}: Rejected", reason=comments)
 
     else:  # return
-        wfdb.update_instance_step(step["id"], {
+        if not wfdb.update_instance_step(step["id"], {
             "status": "returned", "decided_by": performed_by, "decided_at": now, "comments": comments,
-        })
+        }, only_if_open=True):
+            raise WorkflowError(f"'{step['step_name']}' was already decided")
         target_key = return_to or "evidence_collection"
         target = next((s for s in template_steps if s["step_key"] == target_key), None)
         if not target:

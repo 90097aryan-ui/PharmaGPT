@@ -35,6 +35,7 @@ import logging
 from flask import Blueprint, g, jsonify, request, Response, stream_with_context, send_file
 
 from pharmagpt import audit
+from pharmagpt import audit_events as evt
 from pharmagpt import report_database as rdb
 from pharmagpt import qual_database as qdb
 from pharmagpt import urs_database as udb
@@ -471,6 +472,7 @@ def add_approval(rid):
         audit.log_failure("val_report", rid, f"Approval action blocked ({action}) — e-signature failed", reason=str(exc))
         return jsonify({"error": str(exc)}), 401
     except esignature_service.ESignatureError as exc:
+        audit.log_failure("val_report", rid, evt.ESIGNATURE_FAILURE, reason=str(exc))
         return jsonify({"error": str(exc)}), 400
 
     # Update report status based on action

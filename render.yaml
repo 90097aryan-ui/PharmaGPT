@@ -67,6 +67,12 @@ services:
       # See docs/BACKUP_SOP.md §4 "One-time setup" before relying on any of this.
       - key: BACKUP_DIR
         value: /var/data/backups
+      # Read by backup_service.py::_check_scheduler() for the security_admin
+      # dashboard's health rollup — this is the web service's own process env,
+      # separate from the cron job below, so both need it set for the
+      # dashboard to correctly report "scheduling enabled" once the cron is live.
+      - key: BACKUP_SCHEDULER_ENABLED
+        value: "true"
       # No generateValue here on purpose — Render's generated-value format is
       # not guaranteed to be a valid Fernet key, and a security-critical key
       # must never silently take on a plausible-but-wrong value (same
@@ -94,40 +100,40 @@ services:
       - key: SUPABASE_DB_URL
         sync: false
 
-  # ── Backup scheduler — DOCUMENTED, NOT ACTIVE ─────────────────────────────
-  # Commented out deliberately: per this feature's explicit "do not deploy"
-  # scope, nothing here has been pushed or activated. Uncomment and deploy
-  # only after completing docs/BACKUP_SOP.md §4's one-time setup checklist
-  # (BACKUP_ENCRYPTION_KEY especially — every run fails cleanly without it,
-  # per backup_service.py's BackupConfigError, but there is no point
-  # scheduling runs that will only ever fail).
-  #
-  # - type: cron
-  #   name: pharmagpt-backup
-  #   runtime: python
-  #   plan: starter
-  #   buildCommand: pip install -r requirements.txt
-  #   schedule: "0 */6 * * *"   # every 6 hours — keep in sync with BACKUP_FREQUENCY_HOURS
-  #   startCommand: python scripts/run_backup.py
-  #   envVars:
-  #     - key: DB_PATH
-  #       value: /var/data/pharmagpt.db
-  #     - key: UPLOAD_FOLDER
-  #       value: /var/data/uploads
-  #     - key: GENERATED_DOCS_PATH
-  #       value: /var/data/generated_documents
-  #     - key: BACKUP_DIR
-  #       value: /var/data/backups
-  #     - key: BACKUP_ENCRYPTION_KEY
-  #       sync: false
-  #     - key: BACKUP_OFFSITE_DIR
-  #       sync: false
-  #     - key: BACKUP_ALERT_WEBHOOK_URL
-  #       sync: false
-  #     - key: SUPABASE_URL
-  #       sync: false
-  #     - key: SUPABASE_SERVICE_ROLE_KEY
-  #       sync: false
-  #   disk:
-  #     name: pharmagpt-data   # same disk as the web service — a Render Cron
-  #     mountPath: /var/data   # Job can mount an existing named disk read/write.
+  # ── Backup scheduler ──────────────────────────────────────────────────────
+  # Activated per docs/BACKUP_SOP.md §4's one-time setup checklist.
+  # BACKUP_ENCRYPTION_KEY still has no value here (sync: false, same as the
+  # web service above) — it must be set by hand in the Render dashboard
+  # (generate with `python scripts/generate_backup_key.py`); every run fails
+  # cleanly via backup_service.py's BackupConfigError until that is done.
+  - type: cron
+    name: pharmagpt-backup
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    schedule: "0 */6 * * *"   # every 6 hours — keep in sync with BACKUP_FREQUENCY_HOURS
+    startCommand: python scripts/run_backup.py
+    envVars:
+      - key: DB_PATH
+        value: /var/data/pharmagpt.db
+      - key: UPLOAD_FOLDER
+        value: /var/data/uploads
+      - key: GENERATED_DOCS_PATH
+        value: /var/data/generated_documents
+      - key: BACKUP_DIR
+        value: /var/data/backups
+      - key: BACKUP_SCHEDULER_ENABLED
+        value: "true"
+      - key: BACKUP_ENCRYPTION_KEY
+        sync: false
+      - key: BACKUP_OFFSITE_DIR
+        sync: false
+      - key: BACKUP_ALERT_WEBHOOK_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+    disk:
+      name: pharmagpt-data   # same disk as the web service — a Render Cron
+      mountPath: /var/data   # Job can mount an existing named disk read/write.

@@ -49,18 +49,24 @@ GET    /qual/<id>/traceability/export/docx           Export traceability matrix 
 import json
 import io
 import logging
+from datetime import date
 from flask import Blueprint, g, jsonify, request, Response, stream_with_context, send_file
 
 from pharmagpt import audit
+from pharmagpt import audit_events as evt
 from pharmagpt import qual_database as qdb
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
+from pharmagpt import validation_approval_database as vadb
 from pharmagpt.auth.decorators import require_role
+from pharmagpt.auth import module_access
 from pharmagpt.auth.module_access import require_business_permission
 from pharmagpt.services import esignature_service
 from pharmagpt.services import kb_sync
 from pharmagpt.services import lifecycle_engine
 from pharmagpt.services import qual_service as svc
+from pharmagpt.services import urs_lifecycle
+from pharmagpt.services import validation_approval
 from pharmagpt.state import gemini_client
 from pharmagpt.config import GEMINI_MODEL
 from pharmagpt.prompts import PHARMA_SYSTEM_PROMPT
@@ -103,6 +109,31 @@ def _missing_prerequisite_protocol(qid: int, protocol_type: str) -> str | None:
     if not any(p.get("status") in _PROTOCOL_COMPLETED_STATUSES for p in siblings):
         return f"{required_type} protocol exists but is not yet completed — {required_type} must be completed before {protocol_type} can begin."
     return None
+
+
+def _approval_blocker_for_execution(protocol: dict) -> str | None:
+    """A protocol must be APPROVED (all seven sign-offs, status approved or
+    effective) before any test is executed or the protocol is completed.
+
+    Execution deliberately does NOT wait for Effective: the existing design
+    (services/approval_engine.py WORKFLOWS["VALIDATION"]) orders the lifecycle
+    Approved -> Execution -> Post Execution Review -> Effective, i.e. Effective
+    is the state AFTER execution evidence exists, so requiring it first would
+    make the protocol impossible to run.
+
+    Grandfathered: a protocol that was already being executed before approval
+    tracking existed (executions recorded, and no sign-off ledger row ever)
+    may continue. A protocol that has been through the new workflow always has
+    ledger rows, so it can never use this exemption."""
+    status = qdb.get_protocol_approval_status(protocol)
+    if status in ("approved", "effective"):
+        return None
+    ledger = vadb.list_signoffs(g.tenant.company_id, protocol["protocol_type"], protocol["id"],
+                                include_superseded=True)
+    if not ledger and qdb.get_executions(protocol["id"]):
+        return None
+    return (f"{protocol['protocol_type']} protocol is '{status}' — it must be approved by all seven "
+            f"signatories before test execution or completion")
 
 
 def _scoped_protocol(qid, pid):
@@ -158,7 +189,10 @@ def create_qualification():
         return jsonify({"error": "Equipment name or title is required"}), 400
     if not data.get("title", "").strip():
         data["title"] = f"Qualification — {data.get('equipment_name', 'New Equipment')}"
-    qual = qdb.create_qualification(data, company_id=g.tenant.company_id)
+    sig_ = tenancy.signing_identity(g.tenant)
+    qual = qdb.create_qualification(data, company_id=g.tenant.company_id,
+                                    created_by_user_id=g.tenant.user_id,
+                                    created_by_display_name=sig_["performed_by"])
     audit.log("qualification", qual["id"], "Created", new=qual)
     return jsonify(qual), 201
 
@@ -228,7 +262,8 @@ def create_protocol(qid):
     # Auto-fill from qualification
     if not data.get("title"):
         data["title"] = f"{protocol_type} Protocol — {qual.get('equipment_name', '')}"
-    protocol = qdb.create_protocol(qid, protocol_type, data)
+    protocol = qdb.create_protocol(qid, protocol_type, data, created_by_user_id=g.tenant.user_id,
+                                   created_by_display_name=tenancy.signing_identity(g.tenant)["performed_by"])
     audit.log("qualification", qid, f"{protocol_type} Protocol created", new=protocol)
     return jsonify(protocol), 201
 
@@ -247,6 +282,11 @@ def update_protocol(qid, pid):
     if not existing:
         return jsonify({"error": "Protocol not found"}), 404
     data = request.get_json() or {}
+    if _protocol_locked(existing) and (set(data) - {"status", "pass_count", "fail_count", "pending_count", "deviation_count"}):
+        audit.log_failure("qualification", qid, "Protocol update blocked (locked by approval status)",
+                          reason=f"approval_status={qdb.get_protocol_approval_status(existing)}")
+        return jsonify({"error": _PROTOCOL_LOCK_MSG.format(status=qdb.get_protocol_approval_status(existing))}), 409
+    data.pop("approval_status", None)
     updated = qdb.update_protocol(pid, data)
     audit.log("qualification", qid, f"{existing.get('protocol_type','')} Protocol updated",
               old=existing, new=updated)
@@ -276,8 +316,11 @@ def get_test_cases(qid, pid):
 
 @bp.route("/<int:qid>/protocols/<int:pid>/test-cases", methods=["POST"])
 def save_test_cases(qid, pid):
-    if not _scoped_protocol(qid, pid):
+    protocol_row = _scoped_protocol(qid, pid)
+    if not protocol_row:
         return jsonify({"error": "Protocol not found"}), 404
+    if _protocol_locked(protocol_row):
+        return jsonify({"error": _PROTOCOL_LOCK_MSG.format(status=qdb.get_protocol_approval_status(protocol_row))}), 409
     tcs = request.get_json() or []
     saved = qdb.save_test_cases(pid, qid, tcs)
     return jsonify(saved)
@@ -285,8 +328,11 @@ def save_test_cases(qid, pid):
 
 @bp.route("/<int:qid>/protocols/<int:pid>/test-cases/add", methods=["POST"])
 def add_test_case(qid, pid):
-    if not _scoped_protocol(qid, pid):
+    protocol_row = _scoped_protocol(qid, pid)
+    if not protocol_row:
         return jsonify({"error": "Protocol not found"}), 404
+    if _protocol_locked(protocol_row):
+        return jsonify({"error": _PROTOCOL_LOCK_MSG.format(status=qdb.get_protocol_approval_status(protocol_row))}), 409
     tc = request.get_json() or {}
     new_tc = qdb.add_test_case(pid, qid, tc)
     return jsonify(new_tc), 201
@@ -294,12 +340,16 @@ def add_test_case(qid, pid):
 
 @bp.route("/<int:qid>/protocols/<int:pid>/test-cases/<int:tcid>", methods=["PUT"])
 def update_test_case(qid, pid, tcid):
-    if not _scoped_protocol(qid, pid):
+    protocol_row = _scoped_protocol(qid, pid)
+    if not protocol_row:
         return jsonify({"error": "Protocol not found"}), 404
     existing_tc = qdb.get_test_case(tcid)
     if not existing_tc or existing_tc.get("protocol_id") != pid:
         return jsonify({"error": "Test case not found"}), 404
     data = request.get_json() or {}
+    # Once the protocol leaves Draft only execution results (status) may change.
+    if _protocol_locked(protocol_row) and (set(data) - {"status"}):
+        return jsonify({"error": _PROTOCOL_LOCK_MSG.format(status=qdb.get_protocol_approval_status(protocol_row))}), 409
     updated = qdb.update_test_case(tcid, data)
     if not updated:
         return jsonify({"error": "Test case not found"}), 404
@@ -310,8 +360,11 @@ def update_test_case(qid, pid, tcid):
 @require_role("company_admin")
 @require_business_permission("Validation", "Delete")
 def delete_test_case(qid, pid, tcid):
-    if not _scoped_protocol(qid, pid):
+    protocol_row = _scoped_protocol(qid, pid)
+    if not protocol_row:
         return jsonify({"error": "Protocol not found"}), 404
+    if _protocol_locked(protocol_row):
+        return jsonify({"error": _PROTOCOL_LOCK_MSG.format(status=qdb.get_protocol_approval_status(protocol_row))}), 409
     existing_tc = qdb.get_test_case(tcid)
     if not existing_tc or existing_tc.get("protocol_id") != pid:
         return jsonify({"error": "Test case not found"}), 404
@@ -330,6 +383,9 @@ def generate_test_cases(qid, pid):
     protocol = qdb.get_protocol(pid)
     if not protocol or protocol.get("qual_id") != qid:
         return jsonify({"error": "Protocol not found"}), 404
+
+    if _protocol_locked(protocol):
+        return jsonify({"error": _PROTOCOL_LOCK_MSG.format(status=qdb.get_protocol_approval_status(protocol))}), 409
 
     protocol_type = protocol.get("protocol_type", "IQ")
 
@@ -483,6 +539,11 @@ def execute_test_case(qid, pid, tcid):
     if not protocol:
         return jsonify({"error": "Protocol not found"}), 404
 
+    unapproved = _approval_blocker_for_execution(protocol)
+    if unapproved:
+        audit.log_failure("qualification", qid, f"{protocol['protocol_type']} test execution blocked", reason=unapproved)
+        return jsonify({"error": unapproved}), 409
+
     # Phase F (WP3, workflow enforcement): re-check the sequencing gate at
     # execution time too, not just at protocol-creation time — a protocol
     # created before this fix, or whose prerequisite was later deleted/
@@ -541,6 +602,10 @@ def complete_protocol(qid, pid):
     protocol = _scoped_protocol(qid, pid)
     if not protocol:
         return jsonify({"error": "Protocol not found"}), 404
+    unapproved = _approval_blocker_for_execution(protocol)
+    if unapproved:
+        audit.log_failure("qualification", qid, f"{protocol['protocol_type']} protocol completion blocked", reason=unapproved)
+        return jsonify({"error": unapproved}), 409
     data = request.get_json() or {}
 
     # Check for any failing test cases
@@ -564,6 +629,7 @@ def complete_protocol(qid, pid):
         audit.log_failure("qualification", qid, "Protocol completion blocked — e-signature failed", reason=str(exc))
         return jsonify({"error": str(exc)}), 401
     except esignature_service.ESignatureError as exc:
+        audit.log_failure("qualification", qid, evt.ESIGNATURE_FAILURE, reason=str(exc))
         return jsonify({"error": str(exc)}), 400
 
     overall_status = "completed" if fail_count == 0 else "completed_with_deviations"
@@ -640,6 +706,53 @@ def update_deviation(qid, did):
 
 
 # ── Approvals ─────────────────────────────────────────────────────────────────
+# Approval is PER PROTOCOL: each IQ/OQ/PQ protocol has its own approval_status
+# and its own sign-off ledger (doc_type = the protocol type, record_id = the
+# protocol id). The parent Qualification only groups them; its status is a
+# roll-up (see _rollup_qualification_status) and approving one protocol never
+# approves another. All lifecycle/RBAC/e-signature/Effective-gate logic is the
+# shared services/validation_approval.py.
+
+_PROTOCOL_LOCK_MSG = ("This protocol is {status} and its definition is locked — reject it back to "
+                      "Draft to change it (test execution is unaffected)")
+
+
+def _protocol_creator(qual: dict, protocol: dict) -> dict:
+    """The protocol's own creator, falling back to its parent Qualification's
+    (and finally the parent's authenticated `prepared_by`) for rows created
+    before creator identity was captured."""
+    return {
+        "created_by_user_id": protocol.get("created_by_user_id") or qual.get("created_by_user_id") or "",
+        "created_by_display_name": protocol.get("created_by_display_name") or qual.get("created_by_display_name") or "",
+        "prepared_by": qual.get("prepared_by", ""),
+    }
+
+
+def _protocol_locked(protocol: dict) -> bool:
+    return qdb.get_protocol_approval_status(protocol) != "draft"
+
+
+def _rollup_qualification_status(qid: int) -> None:
+    """Derive the parent's status from its protocols. Never overrides the
+    parent's closed/obsolete terminal states, and never raises the parent
+    above what ALL of its protocols have reached."""
+    qual = qdb.get_qualification(qid)
+    if not qual or qual["status"] in ("closed", "obsolete"):
+        return
+    states = [qdb.get_protocol_approval_status(p) for p in qdb.get_protocols_for_qual(qid)]
+    if not states:
+        return
+    if all(st == "effective" for st in states):
+        new = "effective"
+    elif all(st in ("approved", "effective") for st in states):
+        new = "approved"
+    elif any(st not in ("draft", "obsolete") for st in states):
+        new = "under_review"  # some protocol is in review, or only some are approved so far
+    else:
+        new = "draft"
+    if new != qual["status"]:
+        qdb.update_qualification(qid, {"status": new})
+
 
 @bp.route("/<int:qid>/approval", methods=["GET"])
 def get_approval(qid):
@@ -648,10 +761,88 @@ def get_approval(qid):
     return jsonify(qdb.get_approval_trail(qid))
 
 
+@bp.route("/<int:qid>/approval/signatories", methods=["GET"])
+def get_qualification_approval_summary(qid):
+    """Roll-up of every protocol's approval state (one entry per protocol)."""
+    qual = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
+    if not qual:
+        return jsonify({"error": "Qualification not found"}), 404
+    out = []
+    for p in qdb.get_protocols_for_qual(qid):
+        page = validation_approval.build_page(
+            g.tenant.company_id, p["protocol_type"], p["id"], qdb.get_protocol_approval_status(p))
+        out.append({"protocol_id": p["id"], "protocol_type": p["protocol_type"],
+                    "approval_status": page["status"], "completed_count": page["completed_count"],
+                    "mandatory_count": page["mandatory_count"]})
+    return jsonify({"qualification_status": qual["status"], "protocols": out})
+
+
+@bp.route("/<int:qid>/protocols/<int:pid>/approval/signatories", methods=["GET"])
+def get_protocol_approval_signatories(qid, pid):
+    protocol = _scoped_protocol(qid, pid)
+    if not protocol:
+        return jsonify({"error": "Protocol not found"}), 404
+    return jsonify(validation_approval.build_page(
+        g.tenant.company_id, protocol["protocol_type"], pid, qdb.get_protocol_approval_status(protocol)))
+
+
+@bp.route("/<int:qid>/protocols/<int:pid>/approval", methods=["GET"])
+def get_protocol_approval_trail(qid, pid):
+    if not _scoped_protocol(qid, pid):
+        return jsonify({"error": "Protocol not found"}), 404
+    return jsonify([e for e in qdb.get_approval_trail(qid) if e.get("protocol_id") == pid])
+
+
+@bp.route("/<int:qid>/protocols/<int:pid>/approval", methods=["POST"])
+def add_protocol_approval(qid, pid):
+    """IQ/OQ/PQ protocol approval — the shared Validation workflow.
+    Authorization is decided per action inside perform_action(): submission
+    needs Validation:Submit (an Initiator); sign-off/reject/effective/obsolete
+    need the company_admin/reviewer_qa platform role, the granular Validation
+    permission, and the designation's department + functional role."""
+    qual = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
+    protocol = _scoped_protocol(qid, pid)
+    if not qual or not protocol:
+        return jsonify({"error": "Protocol not found"}), 404
+    data = request.get_json() or {}
+    if not data.get("action", ""):
+        return jsonify({"error": "action is required"}), 400
+
+    sig = tenancy.signing_identity(g.tenant)
+    ptype = protocol["protocol_type"]
+    record = {"id": pid, "status": qdb.get_protocol_approval_status(protocol),
+              "revision": protocol.get("revision") or "A"}
+
+    def _apply(updates):
+        qdb.set_protocol_approval_status(pid, updates.get("status", record["status"]), updates.get("revision"))
+
+    try:
+        body, code = validation_approval.perform_action(
+            tenant=g.tenant, doc_type=ptype, audit_type="qualification", record=record, data=data,
+            performed_by=sig["performed_by"], role=sig["role"],
+            validate_transition=urs_lifecycle.validate_transition, apply_update=_apply, audit_id=qid,
+            creator=_protocol_creator(qual, protocol),
+            add_trail=lambda action, comments, rev: qdb.add_approval_entry(
+                qid, pid, f"{ptype} {action}", sig["performed_by"], sig["role"], comments, rev,
+                sig["electronic_sig"]),
+        )
+    except validation_approval.ApprovalError as exc:
+        return jsonify({"error": exc.message}), exc.http_status
+
+    _rollup_qualification_status(qid)
+    if body.get("new_status") == "effective":
+        protocol = qdb.get_protocol(pid)
+        qdb.create_version_snapshot(qid, pid, f"{ptype} protocol made Effective", sig["performed_by"])
+        _publish_effective_protocol_to_kb(qdb.get_qualification(qid), protocol)
+    return jsonify(body), code
+
+
 @bp.route("/<int:qid>/approval", methods=["POST"])
-@require_role("company_admin", "reviewer_qa")
-@require_business_permission("Validation", "Approve")
 def add_approval(qid):
+    """Container-level actions. Standard approval actions are PER PROTOCOL
+    (POST /qual/<id>/protocols/<protocol_id>/approval) and are refused here,
+    so the parent can never approve its protocols implicitly. Only the
+    pre-standard terminal actions "Closed" and "Obsolete" remain at this level."""
     qual = tenancy.scoped_or_none(qdb.get_qualification(qid), g.tenant.company_id)
     if not qual:
         return jsonify({"error": "Qualification not found"}), 404
@@ -659,93 +850,68 @@ def add_approval(qid):
     action = data.get("action", "")
     if not action:
         return jsonify({"error": "action is required"}), 400
+    if action not in ("Closed", "Obsolete"):
+        return jsonify({"error": "Approval is per protocol — use "
+                                  "POST /qual/<id>/protocols/<protocol_id>/approval"}), 400
+    return _terminal_qualification_action(qid, qual, action, data, tenancy.signing_identity(g.tenant))
 
-    # Electronic Signature gate (21 CFR Part 11 / EU GMP Annex 11) — the
-    # existing, unmodified pharmagpt/services/esignature_service.py.
+
+def _terminal_qualification_action(qid, qual, action, data, sig):
+    """Closed / Obsolete on the parent: platform role + Validation:Approve + e-signature."""
+    if g.tenant.role not in ("company_admin", "reviewer_qa"):
+        return jsonify({"error": "This action requires one of these roles: company_admin, reviewer_qa"}), 403
+    if not module_access.has_business_permission(g.tenant, "Validation", "Approve"):
+        return jsonify({"error": "This action requires 'Approve' permission on 'Validation'"}), 403
+    new_status = "closed" if action == "Closed" else "obsolete"
     old_status = qual["status"]
     try:
+        lifecycle_engine.validate_transition("QUALIFICATION", old_status, new_status)
+    except lifecycle_engine.InvalidTransitionError as exc:
+        return jsonify({"error": str(exc)}), 409
+    try:
         esignature_service.require_esignature(
-            g.tenant, data.get("password", ""), data.get("meaning", ""), data.get("reason", ""),
-        )
+            g.tenant, data.get("password", ""), data.get("meaning", ""), data.get("reason", ""))
     except esignature_service.ReauthenticationError as exc:
         audit.log_failure("qualification", qid, f"Approval action blocked ({action}) — e-signature failed", reason=str(exc))
         return jsonify({"error": str(exc)}), 401
     except esignature_service.ESignatureError as exc:
+        audit.log_failure("qualification", qid, evt.ESIGNATURE_FAILURE, reason=str(exc))
         return jsonify({"error": str(exc)}), 400
-
-    # Status transitions
-    status_map = {
-        "Submitted for Review": "under_review",
-        "Review Complete": "under_review",
-        "Submitted for Approval": "pending_approval",
-        "Approved": "approved",
-        "Rejected": "draft",
-        "Closed": "closed",
-        "Obsolete": "obsolete",
-    }
-    if action in status_map:
-        new_status = status_map[action]
-        try:
-            lifecycle_engine.validate_transition("QUALIFICATION", qual["status"], new_status)
-        except lifecycle_engine.InvalidTransitionError as exc:
-            return jsonify({"error": str(exc)}), 409
-
-        qdb.update_qualification(qid, {"status": new_status})
-        if new_status == "approved":
-            _publish_effective_protocols_to_kb(qdb.get_qualification(qid))
-
-    sig = tenancy.signing_identity(g.tenant)
-    entry = qdb.add_approval_entry(
-        qid, data.get("protocol_id"),
-        action, sig["performed_by"],
-        sig["role"],
-        data.get("comments", ""),
-        qual.get("revision", "A"),
-        sig["electronic_sig"],
-    )
-    audit.log("qualification", qid, action, old={"status": qual["status"]}, reason=data.get("comments", ""))
-    qual = qdb.get_qualification(qid)
+    qdb.update_qualification(qid, {"status": new_status})
+    entry = qdb.add_approval_entry(qid, data.get("protocol_id"), action, sig["performed_by"], sig["role"],
+                                   data.get("comments", ""), qual.get("revision", "A"), sig["electronic_sig"])
+    audit.log("qualification", qid, action, old={"status": old_status}, new={"status": new_status},
+              reason=data.get("comments", ""))
     esignature_service.record_signature(
         tenant=g.tenant, meaning=data.get("meaning", ""), reason=data.get("reason", ""),
         record_type="qualification", record_id=qid, version_number=qual.get("revision", ""),
-        old_status=old_status, new_status=qual.get("status", ""),
-    )
+        old_status=old_status, new_status=new_status)
     return jsonify(entry), 201
 
 
-def _publish_effective_protocols_to_kb(qual: dict) -> None:
-    """Phase 2: when a Qualification is Approved, each of its IQ/OQ/PQ/DQ
-    protocols — the actual documents a QA reviewer looks for, not the
-    Qualification container itself — becomes the current version in the
-    Knowledge Base automatically. Failures are logged, never raised: a
-    KB-sync problem must not block the approval itself."""
+def _publish_effective_protocol_to_kb(qual: dict, protocol: dict) -> None:
+    """A protocol becomes the current version in the Knowledge Base at ITS OWN
+    Effective transition (not when the parent or a sibling is approved).
+    kb_sync.publish_to_kb refuses unless every mandatory approval is complete.
+    Failures are logged, never raised: the approval is already committed."""
     try:
-        protocols = qdb.get_protocols_for_qual(qual["id"])
+        test_cases = qdb.get_test_cases(protocol["id"])
+        executions = qdb.get_executions(protocol["id"])
+        markdown_content = svc.build_protocol_markdown(qual, protocol, test_cases, executions)
+        ptype = protocol.get("protocol_type", "IQ")
+        kb_sync.publish_to_kb(
+            source_type="qualification_protocol", source_id=protocol["id"],
+            company_id=g.tenant.company_id,
+            title=protocol.get("title", f"{ptype} Protocol"), doc_type=ptype,
+            doc_number=protocol.get("protocol_number", ""), version=protocol.get("revision", "A"),
+            content_markdown=markdown_content, effective_date=date.today().isoformat(),
+            form_data={
+                "title": protocol.get("title", ""), "equipment_name": qual.get("equipment_name", ""),
+                "department": qual.get("department", ""),
+            },
+        )
     except Exception:
-        logger.exception("kb_sync: could not load protocols for qualification %s", qual["id"])
-        return
-    for protocol in protocols:
-        try:
-            test_cases = qdb.get_test_cases(protocol["id"])
-            executions = qdb.get_executions(protocol["id"])
-            markdown_content = svc.build_protocol_markdown(qual, protocol, test_cases, executions)
-            ptype = protocol.get("protocol_type", "IQ")
-            kb_sync.publish_to_kb(
-                source_type="qualification_protocol", source_id=protocol["id"],
-                company_id=g.tenant.company_id,
-                title=protocol.get("title", f"{ptype} Protocol"), doc_type=ptype,
-                doc_number=protocol.get("protocol_number", ""), version=protocol.get("revision", "A"),
-                content_markdown=markdown_content, effective_date=qual.get("effective_date"),
-                form_data={
-                    "title": protocol.get("title", ""), "equipment_name": qual.get("equipment_name", ""),
-                    "department": qual.get("department", ""),
-                },
-            )
-        except Exception:
-            logger.exception(
-                "kb_sync: failed to publish protocol %s (qualification %s) to Knowledge Base",
-                protocol.get("id"), qual["id"],
-            )
+        logger.exception("kb_sync: failed to publish protocol %s to Knowledge Base", protocol.get("id"))
 
 
 # ── Version History ───────────────────────────────────────────────────────────

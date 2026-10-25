@@ -80,6 +80,7 @@ from flask import Blueprint, g, jsonify, request, Response, stream_with_context,
 from google.genai import types
 
 from pharmagpt import audit
+from pharmagpt import audit_events as evt
 from pharmagpt import qms_document_database as qdb
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import qms_workflow_database as wfdb
@@ -94,7 +95,10 @@ from pharmagpt.services import esignature_service
 from pharmagpt.services import kb_sync
 from pharmagpt.services import lifecycle_engine
 from pharmagpt.services import qms_document_service as svc
+from pharmagpt.services import urs_lifecycle
+from pharmagpt.services import validation_approval
 from pharmagpt.services import workflow_engine as wfe
+from pharmagpt.services.supabase_client import get_service_role_client
 from pharmagpt.services.company_branding import get_company_name_for_docx
 from pharmagpt.prompts import qms_document_prompt as qp
 
@@ -147,7 +151,8 @@ def create_document():
     # supplied — see tenancy.signing_identity's identical non-spoofable
     # pattern used elsewhere in this file.
     document = qdb.create_document(data, company_id=g.tenant.company_id,
-                                    created_by_user_id=g.tenant.user_id)
+                                    created_by_user_id=g.tenant.user_id,
+                                    created_by_display_name=g.tenant.display_name or g.tenant.email)
     audit.log("document", document["id"], "Document created", new=document)
     if document.get("template_id"):
         template = qdb.get_template(document["template_id"])
@@ -221,6 +226,28 @@ def set_review_chain_route(did):
                if not p["user_id"]]
     if missing:
         return jsonify({"error": f"The following are required: {', '.join(missing)}"}), 400
+
+    # Wave 3A-C (Security Audit remediation, Finding A): every submitted
+    # non-empty user_id must be a real, active user of THIS company —
+    # mirrors the identical CRIT-02 control already enforced by
+    # routes/qms_capa.py::assign_workflow_step and routes/
+    # qms_change_control.py::assign_workflow_step
+    # (tenancy.missing_or_inactive_users). Without this, the Author could
+    # name a different tenant's user id (or a fabricated one) as Reviewer/
+    # Department Head/Quality Head/Plant Head — never actually exploitable
+    # for a cross-tenant approval (every downstream workflow action
+    # re-scopes the document to g.tenant.company_id — see
+    # _record_scoped_or_404), but it creates unverified identities in the
+    # audit trail and can permanently soft-lock the document's workflow
+    # once submitted. Checked before qdb.set_review_chain() below so an
+    # invalid identity is never persisted — one rejected id rejects the
+    # whole chain, never a partial write.
+    submitted_ids = {p["user_id"] for p in (reviewer, department_head, quality_head, plant_head) if p["user_id"]}
+    invalid = tenancy.missing_or_inactive_users(get_service_role_client(), g.tenant.company_id, submitted_ids)
+    if invalid:
+        reason = f"Not a valid, active user of this company: {', '.join(sorted(invalid))}"
+        audit.log_failure("document", did, "Assign review/approval chain blocked", reason=reason)
+        return jsonify({"error": reason}), 400
 
     if author_user_id:
         conflicts = [label for label, p in
@@ -394,6 +421,21 @@ def update_document(did):
     data = request.get_json() or {}
     for f in _AUTHOR_READONLY_FIELDS:
         data.pop(f, None)
+    # GXP-02 (content lock): content is editable only while the current
+    # version is being authored/revised (Draft, Under Revision) — every
+    # other non-Obsolete lifecycle state (Under Review, Pending Approval,
+    # Approved, Effective) is otherwise-controlled and must not have its
+    # denormalized qms_documents.content mirror silently overwritten by a
+    # raw PUT. Mirrors the Obsolete check above (same 409 convention);
+    # placed here (not repository-layer) because this is the one existing
+    # enforcement point for this route.
+    if "content" in data and existing["status"] not in ("Draft", "Under Revision"):
+        audit.log_failure("document", did, "Update blocked (content locked outside Draft/Under Revision)",
+                           reason=f"Document status is '{existing['status']}'")
+        return jsonify({
+            "error": f"Content cannot be edited while the document is '{existing['status']}' — "
+                     "only Draft or Under Revision versions may have their content changed",
+        }), 409
     # Configurable quorum approval: a positive integer requires that many
     # distinct Approver votes on this document's next review/approval steps
     # (services/workflow_engine.py::start_instance's default_quorum); null
@@ -541,7 +583,12 @@ def generate_draft(did):
 def review_document(did):
     if not tenancy.scoped_or_none(qdb.get_document(did), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
-    review = svc.ai_review_document(did)
+    try:
+        review = svc.ai_review_document(did)
+    except Exception as exc:
+        audit.log_failure("document", did, evt.DOCUMENT_REVIEW_AI, reason=f"AI regulatory review failed: {exc}")
+        raise
+    audit.log("document", did, evt.DOCUMENT_REVIEW_AI, detail="AI regulatory review generated")
     return jsonify(review)
 
 
@@ -767,6 +814,7 @@ def update_training(tid):
             audit.log_failure("document", existing["document_id"], "Training completion blocked — e-signature failed", reason=str(exc))
             return jsonify({"error": str(exc)}), 401
         except esignature_service.ESignatureError as exc:
+            audit.log_failure("document", existing["document_id"], evt.ESIGNATURE_FAILURE, reason=str(exc))
             return jsonify({"error": str(exc)}), 400
 
     entry = qdb.update_training_status(tid, new_training_status, data.get("training_date", ""))
@@ -881,7 +929,7 @@ _START_REVISION_REQUIRED_ERROR = (
 )
 
 
-def _submission_gate_error(did, document: dict | None = None) -> str | None:
+def _submission_gate_error(did, document: dict | None = None, *, require_chain: bool = True) -> str | None:
     """Author Self-Check + Final Author Version + review/approval chain hard
     gates. If the CURRENT version is still 'draft', checks its own
     self-check, Final Author Version upload (spec §10: "The workflow must
@@ -920,6 +968,8 @@ def _submission_gate_error(did, document: dict | None = None) -> str | None:
         return _SELF_CHECK_REQUIRED_ERROR
     if not version.get("source_attachment_id"):
         return _FINAL_VERSION_REQUIRED_ERROR
+    if not require_chain:
+        return None
     document = document if document is not None else qdb.get_document(did)
     chain = qdb.get_review_chain(document or {})
     chain_complete = bool(chain["reviewer"] and chain["department_head"] and chain["quality_head"])
@@ -959,6 +1009,10 @@ def start_workflow(did):
     # CURRENT version — never carried forward from a prior version (see
     # qms_document_database.record_self_check's docstring and
     # _submission_gate_error() above for the Effective-document case).
+    if _uses_shared_engine(document):
+        audit.log_failure("document", did, "Workflow start blocked", reason="DQ uses the shared approval engine")
+        return jsonify({"error": "DQ documents are approved through the shared Validation approval "
+                                  "workflow — use POST /qms/documents/<id>/approval"}), 409
     gate_error = _submission_gate_error(did, document)
     if gate_error:
         audit.log_failure("document", did, "Workflow start blocked", reason=gate_error)
@@ -1014,6 +1068,7 @@ def decide_workflow_step(did, step_order):
         audit.log_failure("document", did, f"Workflow decision blocked ({decision}) — e-signature failed", reason=str(exc))
         return jsonify({"error": str(exc)}), 401
     except esignature_service.ESignatureError as exc:
+        audit.log_failure("document", did, evt.ESIGNATURE_FAILURE, reason=str(exc))
         return jsonify({"error": str(exc)}), 400
 
     sig = tenancy.signing_identity(g.tenant)
@@ -1055,6 +1110,8 @@ def release_document(did):
     document = _record_scoped_or_404(did)
     if not document:
         return jsonify({"error": "Not found"}), 404
+    if _uses_shared_engine(document):
+        return _shared_document_approval(did, document, {**(request.get_json() or {}), "action": "Make Effective"})
     version = qdb.get_current_version(did)
     if not version or version["status"] != "approved":
         return jsonify({"error": "This document is not awaiting release — the current version must "
@@ -1088,6 +1145,7 @@ def release_document(did):
         audit.log_failure("document", did, "Release blocked — e-signature failed", reason=str(exc))
         return jsonify({"error": str(exc)}), 401
     except esignature_service.ESignatureError as exc:
+        audit.log_failure("document", did, evt.ESIGNATURE_FAILURE, reason=str(exc))
         return jsonify({"error": str(exc)}), 400
 
     audit.log("document", did, "Quality Release requested",
@@ -1107,6 +1165,158 @@ def release_document(did):
     if (released_document.get("content") or "").strip():
         _publish_effective_document_to_kb(released_document)
     return jsonify(released_document)
+
+
+# ── DQ on the shared Validation approval engine ──────────────────────────────
+# A DQ is a Document Control record (doc_type 'DQ'). Its approval runs on the
+# SAME services/validation_approval.py engine as URS and IQ/OQ/PQ — lifecycle,
+# seven signatories, RBAC, department enforcement, distinct signers,
+# e-signature and the Effective gate are not re-implemented here. This block is
+# only the Document Control adapter: it maps statuses, keeps the version rows
+# (immutability triggers, fork-on-reject) in step, and preserves the Document
+# Control safeguards — Author Self-Check, Final Author Version, the training
+# gate and Quality Release content check — as pre-signature vetoes.
+#
+# In-flight DQs that already have an active legacy workflow instance keep
+# finishing on the legacy engine (grandfathered); every new submission uses the
+# shared engine, and starting a legacy workflow for a DQ is refused.
+
+_DQ_NATIVE_STATUS = {
+    "draft": "Draft", "under_review": "Under Review", "technical_review": "Technical Review",
+    "qa_review": "QA Review", "validation_review": "Validation Review",
+    "final_approval": "Final Approval", "approved": "Approved", "effective": "Effective",
+    "obsolete": "Obsolete",
+}
+_DQ_STD_STATUS = {v: k for k, v in _DQ_NATIVE_STATUS.items()}
+_DQ_STD_STATUS.update({"Pending Approval": "pending_approval", "Under Revision": "draft"})
+_DQ_SIGNOFF_COLUMNS = {"reviewed_by": "reviewed_by", "final_approval": "approved_by"}
+
+
+def _uses_shared_engine(document: dict | None) -> bool:
+    return bool(document) and document.get("doc_type") == "DQ" and not wfdb.get_active_instance(
+        RECORD_TYPE, document["id"])
+
+
+def _dq_release_precheck(did: int) -> None:
+    """Quality Release safeguards (identical to release_document's): the
+    current version must be Approved, the training gate cleared, and the
+    document must have drafted content."""
+    document = qdb.get_document(did)
+    version = qdb.get_current_version(did)
+    if not version or version["status"] != "approved":
+        raise validation_approval.ApprovalError(
+            "This document is not awaiting release — the current version must have completed approval first", 409)
+    gate = qdb.training_gate_status(version["id"])
+    if not gate["cleared"]:
+        raise validation_approval.ApprovalError(
+            f"Training completion is {gate['completion_pct'] or 0:.0f}% — must reach "
+            f"{gate['threshold_pct']:.0f}% with at least 1 trainee before this document can be released", 409)
+    if not (document.get("content") or "").strip():
+        raise validation_approval.ApprovalError(
+            "This document has no drafted content — required document information must be complete "
+            "before Quality Release", 409)
+
+
+@bp.route("/<int:did>/approval/signatories", methods=["GET"])
+def get_document_approval_signatories(did):
+    document = _record_scoped_or_404(did)
+    if not document:
+        return jsonify({"error": "Not found"}), 404
+    if document.get("doc_type") != "DQ":
+        return jsonify({"error": "Signatory approval applies to DQ documents"}), 404
+    page = validation_approval.build_page(
+        g.tenant.company_id, "DQ", did, _DQ_STD_STATUS.get(document["status"], "draft"))
+    page["shared_engine"] = _uses_shared_engine(document)
+    page["training_gate"] = (qdb.training_gate_status(qdb.get_current_version(did)["id"])
+                             if qdb.get_current_version(did) else None)
+    return jsonify(page)
+
+
+def _shared_document_approval(did: int, document: dict, data: dict):
+    sig = tenancy.signing_identity(g.tenant)
+    version = qdb.get_current_version(did)
+    std_status = _DQ_STD_STATUS.get(document["status"], "draft")
+    record = {"id": did, "status": std_status,
+              "revision": (version or {}).get("version_number") or document.get("version") or "A"}
+    reason_text = (data.get("comments") or data.get("reason") or "").strip()
+
+    def _precheck(action, old, new):
+        if action == validation_approval.SUBMIT:
+            error = _submission_gate_error(did, document, require_chain=False)
+            if error:
+                audit.log_failure("document", did, "Approval action blocked (Submitted for Review)", reason=error)
+                raise validation_approval.ApprovalError(error, 409)
+        elif action == validation_approval.REJECT:
+            current = qdb.get_current_version(did)
+            if not current or current["status"] not in ("under_review", "pending_approval"):
+                raise validation_approval.ApprovalError(
+                    "This version can no longer be rejected from here", 409)
+        elif action == validation_approval.MAKE_EFFECTIVE:
+            _dq_release_precheck(did)
+
+    def _apply(updates):
+        new_std = updates.get("status", std_status)
+        stamps = {k: v for k, v in updates.items() if k in ("reviewed_by", "approved_by")}
+        if "reviewed_by" in stamps:
+            from datetime import date as _date
+            stamps["review_date"] = _date.today().isoformat()
+        current = qdb.get_current_version(did)
+        if new_std != std_status:
+            if new_std == "under_review" and std_status == "draft":
+                qdb.transition_version_status(current["id"], "under_review")
+            elif new_std == "final_approval":
+                qdb.advance_version_to_pending_approval(did)
+            elif new_std == "approved":
+                qdb.advance_version_to_approved(did)
+            elif new_std == "draft":
+                qdb.reject_and_fork_version(did, reason_text)
+            elif new_std == "effective":
+                released = qdb.try_clear_training_gate(did, effective_date=(data.get("effective_date") or "").strip() or None)
+                if not released:
+                    raise validation_approval.ApprovalError(
+                        "Release conditions are no longer met — please retry", 409)
+            elif new_std == "obsolete":
+                from datetime import date as _date
+                qdb.update_document(did, {"status": "Obsolete", "superseded_date": _date.today().isoformat()},
+                                    allow_controlled_fields=True)
+            if new_std not in ("effective", "obsolete"):
+                stamps["status"] = _DQ_NATIVE_STATUS[new_std]
+        if stamps:
+            qdb.update_document(did, stamps, allow_controlled_fields=True)
+
+    try:
+        body, code = validation_approval.perform_action(
+            tenant=g.tenant, doc_type="DQ", audit_type="document", record=record, data=data,
+            performed_by=sig["performed_by"], role=sig["role"],
+            validate_transition=urs_lifecycle.validate_transition, apply_update=_apply,
+            add_trail=lambda action, comments, rev: qmsdb.add_approval_entry(
+                "document", did, action, sig["performed_by"], sig["role"], comments, sig["electronic_sig"]),
+            signoff_columns=_DQ_SIGNOFF_COLUMNS, precheck=_precheck,
+            creator=qdb.get_creator_identity(document),
+            reject_statuses=validation_approval.REVIEW_STATUSES + (validation_approval.LEGACY_PENDING_APPROVAL,),
+        )
+    except validation_approval.ApprovalError as exc:
+        return jsonify({"error": exc.message}), exc.http_status
+
+    if body.get("new_status") == "effective":
+        _publish_effective_document_to_kb(qdb.get_document(did))
+    return jsonify(body), code
+
+
+@bp.route("/<int:did>/approval", methods=["POST"])
+def submit_approval(did):
+    """Approval entry point. DQ documents run on the shared Validation engine;
+    every other document type (and a DQ already mid-flight on the legacy
+    workflow) continues through the unchanged legacy handler below."""
+    document = _record_scoped_or_404(did)
+    if not document:
+        return jsonify({"error": "Not found"}), 404
+    if _uses_shared_engine(document):
+        data = request.get_json() or {}
+        if not data.get("action"):
+            return jsonify({"error": "Action is required"}), 400
+        return _shared_document_approval(did, document, data)
+    return _legacy_submit_approval(did)
 
 
 # ── Approval / status transition (legacy compatibility wrapper) ──────────────
@@ -1129,10 +1339,9 @@ _STATUS_MAP = {
 _POST_EFFECTIVE_ACTIONS = {"Made Obsolete", "Send for Revision"}
 
 
-@bp.route("/<int:did>/approval", methods=["POST"])
 @require_role("company_admin", "reviewer_qa")
 @require_business_permission("Document Control", "Approve")
-def submit_approval(did):
+def _legacy_submit_approval(did):
     """Legacy-URL compatibility wrapper (kept for backward compatibility
     during deployment — see docs/plan). Same URL, request shape, and
     response shape as before. Actions that gate the initial Draft->Effective
@@ -1165,6 +1374,7 @@ def submit_approval(did):
         audit.log_failure("document", did, f"Approval action blocked ({action_name}) — e-signature failed", reason=str(exc))
         return jsonify({"error": str(exc)}), 401
     except esignature_service.ESignatureError as exc:
+        audit.log_failure("document", did, evt.ESIGNATURE_FAILURE, reason=str(exc))
         return jsonify({"error": str(exc)}), 400
 
     sig = tenancy.signing_identity(g.tenant)
@@ -1318,6 +1528,9 @@ def get_review_pdf(did):
     if not document:
         return jsonify({"error": "Not found"}), 404
     pdf_bytes = svc.generate_review_pdf(did)
+    # Wave 4B: this serves the controlled document's actual content for
+    # in-app review — log it like any other content-access event.
+    audit.log("document", did, evt.DOCUMENT_DOWNLOADED, detail="Review PDF viewed")
     return send_file(
         io.BytesIO(pdf_bytes), mimetype="application/pdf", as_attachment=False,
         download_name=f"{document.get('doc_number', 'DOC')}_review.pdf",
@@ -1363,6 +1576,8 @@ def export_docx(did):
     })
     safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", document.get("title", "Document"))[:40]
     filename = f"{document.get('doc_number', 'DOC')}_{safe_title}.docx"
+    # Wave 4B: log the export itself (not the file's contents).
+    audit.log("document", did, evt.DOCUMENT_EXPORTED, detail=filename)
     return send_file(
         io.BytesIO(docx_bytes),
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",

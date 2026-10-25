@@ -51,6 +51,7 @@ from pharmagpt.auth.decorators import require_role
 from pharmagpt.services import kb_sync
 from pharmagpt.services import urs_service as svc
 from pharmagpt.services import urs_lifecycle as lifecycle
+from pharmagpt.services import validation_approval
 from pharmagpt.services.urs_generation_job import submit_generation_job
 from pharmagpt.services.urs_requirement_library import (
     build_numbered_requirements,
@@ -207,7 +208,9 @@ def create_urs():
     # ignores urs_number/doc_number/revision/status/reviewed_by/approved_by/
     # effective_date from `data` regardless of what's set here.
     data["prepared_by"] = _current_display_name(fallback=data.get("prepared_by", ""))
-    urs = udb.create_urs(data, company_id=g.tenant.company_id)
+    urs = udb.create_urs(data, company_id=g.tenant.company_id,
+                         created_by_user_id=g.tenant.user_id,
+                         created_by_display_name=_current_display_name())
     audit.log("urs", urs["id"], "Created", new=urs)
     return jsonify(urs), 201
 
@@ -520,86 +523,60 @@ def get_approval(uid):
     return jsonify(udb.get_approval_trail(uid))
 
 
-# Action -> target lifecycle status. Kept as the same action vocabulary the
-# approval-panel UI already sends (see static/js/urs.js addApprovalEntry())
-# so no frontend change is required — only the status each one maps to, and
-# the validation now applied to it, are new. "Make Effective" is a new
-# action with no UI trigger yet (Iteration 3); the backend supports it now
-# so the lifecycle's terminal Approved -> Effective step isn't left
-# unreachable pending that frontend work.
-_ACTION_STATUS_MAP = {
-    "Submitted for Review":   lifecycle.UNDER_REVIEW,
-    "Review Complete":        lifecycle.UNDER_REVIEW,
-    "Submitted for Approval": lifecycle.PENDING_APPROVAL,
-    "Approved":               lifecycle.APPROVED,
-    "Rejected":                lifecycle.DRAFT,
-    "Make Effective":          lifecycle.EFFECTIVE,
-    "Obsolete":                 lifecycle.OBSOLETE,
-}
+# Approval is the shared Validation workflow (services/validation_approval.py):
+# lifecycle, signatory sign-offs, RBAC, segregation of duties, e-signature and
+# the Effective gate all live there so URS and Qualification cannot drift.
+# Authorization is decided per action inside perform_action() — submission is
+# open to an authorized Initiator (Validation: Submit); sign-off, rejection,
+# Make Effective and Obsolete keep the company_admin/reviewer_qa platform gate
+# AND need the matching granular Validation permission.
+_SIGNOFF_COLUMNS = {"reviewed_by": "reviewed_by", "final_approval": "approved_by"}
 
-# "Submitted for Review" is the author moving their own draft into review —
-# it must NOT set reviewed_by (the author isn't the reviewer). Only "Review
-# Complete" (a reviewer logging that they finished reviewing it) does.
-_REVIEW_ACTIONS = {"Review Complete"}
-_APPROVAL_ACTIONS = {"Approved"}
+
+@bp.route("/<int:uid>/approval/signatories", methods=["GET"])
+def get_approval_signatories(uid):
+    urs = tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id)
+    if not urs:
+        return jsonify({"error": "URS not found"}), 404
+    return jsonify(validation_approval.build_page(g.tenant.company_id, "URS", uid, urs["status"]))
 
 
 @bp.route("/<int:uid>/approval", methods=["POST"])
-@require_role("company_admin", "reviewer_qa")
 def add_approval(uid):
     urs = tenancy.scoped_or_none(udb.get_urs(uid), g.tenant.company_id)
     if not urs:
         return jsonify({"error": "URS not found"}), 404
     data = request.get_json() or {}
-    action = data.get("action", "")
-    if not action:
+    if not data.get("action", ""):
         return jsonify({"error": "action is required"}), 400
 
-    # Reviewed By / Approved By / QA Approval now come from the
-    # authenticated identity performing this action, not a free-text field
-    # the caller could set to anyone's name — the client-supplied
-    # performed_by/role are only used as a fallback when there is no
-    # authenticated tenant (e.g. tests that bypass the auth gate).
+    # Reviewed By / Approved By / QA Approval come from the authenticated
+    # identity performing this action, not a free-text field the caller could
+    # set to anyone's name — the client-supplied performed_by/role are only
+    # used as a fallback when there is no authenticated tenant.
     performed_by = _current_display_name(fallback=data.get("performed_by", ""))
     role = _current_role(fallback=data.get("role", ""))
-    comments = data.get("comments", "")
     if not performed_by:
         return jsonify({"error": "performed_by is required"}), 400
 
-    revision = urs.get("revision", "A")
-    updates: dict = {}
-    if action in _ACTION_STATUS_MAP:
-        new_status = _ACTION_STATUS_MAP[action]
-        try:
-            lifecycle.validate_transition(urs["status"], new_status)
-        except lifecycle.InvalidTransitionError as exc:
-            return jsonify({"error": str(exc)}), 409
-
-        if new_status != urs["status"]:
-            updates["status"] = new_status
-            # Rework cycle: a document leaving Draft never had a prior
-            # approval to rework, so only bump revision when Draft is
-            # re-entered *from* a state that had actually been approved.
-            if new_status == lifecycle.DRAFT and urs["status"] in (
-                lifecycle.APPROVED, lifecycle.EFFECTIVE,
-            ):
-                revision = lifecycle.bump_revision(revision)
-                updates["revision"] = revision
-            if new_status == lifecycle.EFFECTIVE and not urs.get("effective_date"):
-                updates["effective_date"] = date.today().isoformat()
-
-        if action in _REVIEW_ACTIONS:
-            updates["reviewed_by"] = performed_by
-        if action in _APPROVAL_ACTIONS:
-            updates["approved_by"] = performed_by
-
-    if updates:
+    def _apply(updates):
         udb.update_urs(uid, updates)
-        if updates.get("status") == lifecycle.EFFECTIVE:
-            _publish_effective_urs_to_kb(udb.get_urs(uid))
 
-    entry = udb.add_approval_entry(uid, action, performed_by, role, comments, revision)
-    return jsonify(entry), 201
+    try:
+        body, code = validation_approval.perform_action(
+            tenant=g.tenant, doc_type="URS", audit_type="urs", record=urs, data=data,
+            performed_by=performed_by, role=role,
+            validate_transition=lifecycle.validate_transition, apply_update=_apply,
+            add_trail=lambda action, comments, rev: udb.add_approval_entry(
+                uid, action, performed_by, role, comments, rev),
+            signoff_columns=_SIGNOFF_COLUMNS, creator=urs,
+        )
+    except validation_approval.ApprovalError as exc:
+        return jsonify({"error": exc.message}), exc.http_status
+
+    if body.get("new_status") == lifecycle.EFFECTIVE:
+        _publish_effective_urs_to_kb(udb.get_urs(uid))
+    return jsonify(body), code
 
 
 def _publish_effective_urs_to_kb(urs: dict) -> None:

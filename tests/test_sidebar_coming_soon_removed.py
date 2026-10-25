@@ -34,7 +34,8 @@ def test_coming_soon_labels_absent_from_rendered_markup(client):
 
 def test_coming_soon_placeholder_modules_absent_from_rendered_markup(client):
     html = _get_shell(client)
-    for label in ("Training", "Complaints", "Audit Management", "Supplier Quality", "Management Review"):
+    # "Complaints" removed from this list: Market Complaints is now a real module.
+    for label in ("Training", "Audit Management", "Supplier Quality", "Management Review"):
         assert label not in html
 
 

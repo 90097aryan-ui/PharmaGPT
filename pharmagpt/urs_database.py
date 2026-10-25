@@ -148,7 +148,8 @@ def _next_document_number(series: str, prefix: str) -> str:
 
 # ── URS Projects ──────────────────────────────────────────────────────────────
 
-def create_urs(data: dict, *, company_id: str) -> dict:
+def create_urs(data: dict, *, company_id: str, created_by_user_id: str = "",
+               created_by_display_name: str = "") -> dict:
     """Create a new URS. Document-control fields are entirely system-issued:
     urs_number/doc_number are auto-numbered, revision/version always start
     at 'A'/'1.0', status always starts at 'draft', and reviewed_by/
@@ -221,6 +222,8 @@ def create_urs(data: dict, *, company_id: str) -> dict:
     conn.close()
     add_approval_entry(new_id, "URS Created", data.get("prepared_by", "System"), "Author",
                        "Initial draft created", "A")
+    from pharmagpt import creator_identity
+    creator_identity.stamp("urs_projects", new_id, created_by_user_id, created_by_display_name)
     return get_urs(new_id)
 
 
@@ -412,7 +415,7 @@ def get_dashboard_stats(company_id: str) -> dict:
         (company_id,),
     ).fetchall()
     pending_approval = conn.execute(
-        "SELECT COUNT(*) FROM urs_projects WHERE status IN ('under_review','pending_approval') AND company_id = ?",
+        "SELECT COUNT(*) FROM urs_projects WHERE status IN ('under_review','technical_review','qa_review','validation_review','final_approval','pending_approval') AND company_id = ?",
         (company_id,),
     ).fetchone()[0]
     conn.close()

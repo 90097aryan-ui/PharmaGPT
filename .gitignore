@@ -76,3 +76,15 @@ generated_documents/
 
 # Temporary files
 *.tmp
+
+# ─── Local/generated artifacts (audit-confirmed, not product source) ────────
+graphify-out/
+node_modules/
+strix_runs/
+branding_recovery_backup/
+backups/*.sql
+deck.html
+supabase/.temp/
+
+# Alternate virtualenvs
+venv_*/

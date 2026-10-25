@@ -125,6 +125,25 @@ def client(db_path, monkeypatch):
     import pharmagpt.services.esignature_service as esignature_service
     monkeypatch.setattr(esignature_service, "require_esignature", lambda *a, **k: None)
 
+    # Wave 3A-C (Security Audit remediation, Finding A): routes/
+    # qms_documents.py::set_review_chain_route now validates every submitted
+    # reviewer/department_head/quality_head/plant_head id against
+    # tenancy.missing_or_inactive_users() before persisting the chain. The
+    # 300+ existing Document Control tests using this fixture predate that
+    # control and use small, fixed placeholder ids (not real Supabase-backed
+    # users) for those roles — same rationale as the two bypasses above.
+    # Scoped to routes/qms_documents.py's own get_service_role_client
+    # reference only, so CAPA/Change Control/Deviations' own (already
+    # correctly tenant-validated) assign endpoints are completely
+    # unaffected. Real validation against a restrictive, multi-company
+    # directory is covered separately by
+    # tests/test_wave3a_finding_a_assign_chain_validation.py, which builds
+    # its own fake client rather than using this fixture.
+    monkeypatch.setattr(
+        "pharmagpt.routes.qms_documents.get_service_role_client",
+        lambda: _PermissiveDocumentChainUsersClient(),
+    )
+
     # Yuktav org/RBAC/workflow authorization task, enforcement-closure phase:
     # pharmagpt.auth.module_access.has_business_permission() no longer gives
     # company_admin/reviewer_qa an unconditional bypass — it resolves through
@@ -161,3 +180,42 @@ def client(db_path, monkeypatch):
     )
 
     return appmod.app.test_client()
+
+
+class _PermissiveDocumentChainUsersClient:
+    """See the Wave 3A-C note in the `client` fixture above. Every id ever
+    used as a placeholder Reviewer/Department Head/Quality Head/Plant Head
+    across the Document Control test suite is treated as an active user —
+    this fixture doesn't test directory validation itself, so it stays
+    permissive rather than trying to track "which test uses which id"."""
+
+    _KNOWN_TEST_USER_IDS = (
+        "00000000-0000-0000-0000-000000000001",
+        "00000000-0000-0000-0000-000000000002",
+        "00000000-0000-0000-0000-000000000003",
+        "00000000-0000-0000-0000-000000000004",
+        "00000000-0000-0000-0000-000000000005",
+        "22222222-2222-2222-2222-222222222222",
+        "33333333-3333-3333-3333-333333333333",
+        "44444444-4444-4444-4444-444444444444",
+        "rev-1", "rev-assigned", "dh-1", "qh-1",
+    )
+
+    class _Query:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def select(self, *_a, **_k):
+            return self
+
+        def eq(self, *_a, **_k):
+            return self
+
+        def execute(self):
+            from types import SimpleNamespace
+            return SimpleNamespace(data=self._rows)
+
+    def table(self, name):
+        if name != "users":
+            return self._Query([])
+        return self._Query([{"id": uid} for uid in self._KNOWN_TEST_USER_IDS])

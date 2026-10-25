@@ -41,6 +41,14 @@ def client(db_path, monkeypatch):
         lambda tenant: {(m, a) for m in rbac_defaults.MODULES for a in rbac_defaults.ACTIONS},
     )
 
+    # Standardized Validation workflow: signatories are also authorized by
+    # department + functional role (user_departments). This file is about the
+    # e-signature gate, not department authorization (covered in
+    # tests/test_validation_approval_workflow.py), so the directory is stubbed
+    # permissively here, like the RBAC stub above.
+    from tests._va_helpers import grant_all_departments
+    grant_all_departments(monkeypatch)
+
     return appmod.app.test_client()
 
 
@@ -49,35 +57,49 @@ def _reauth(ok=True):
 
 
 SIGN = {"password": "correct-password", "meaning": "Approved", "reason": "Looks correct"}
+# Qualification submission is signed "Created" (services/validation_approval.py
+# allows only Created/Verified for Submitted for Review).
+QUAL_SUBMIT_SIGN = {**SIGN, "meaning": "Created"}
 
 
-# ── Qualification (IQ/OQ/PQ) ────────────────────────────────────────────────
+# ── Qualification (IQ/OQ/PQ) — approval is per protocol ─────────────────────
+
+def _protocol(client):
+    qual = client.post("/qual/", json={"title": "Q1", "equipment_name": "HPLC"}).get_json()
+    proto = client.post(f"/qual/{qual['id']}/protocols", json={"protocol_type": "IQ"}).get_json()
+    return qual, proto
+
 
 def test_qualification_approval_requires_reason(client):
-    qual = client.post("/qual/", json={"title": "Q1", "equipment_name": "HPLC"}).get_json()
+    qual, proto = _protocol(client)
     with _reauth(True):
-        resp = client.post(f"/qual/{qual['id']}/approval", json={"action": "Submitted for Review", "password": "x", "meaning": "Reviewed"})
+        resp = client.post(f"/qual/{qual['id']}/protocols/{proto['id']}/approval",
+                           json={"action": "Submitted for Review", "password": "x", "meaning": "Created"})
     assert resp.status_code == 400
 
 
 def test_qualification_approval_wrong_password_blocked(client):
-    qual = client.post("/qual/", json={"title": "Q1", "equipment_name": "HPLC"}).get_json()
+    qual, proto = _protocol(client)
     with _reauth(False):
-        resp = client.post(f"/qual/{qual['id']}/approval", json={"action": "Submitted for Review", **SIGN})
+        resp = client.post(f"/qual/{qual['id']}/protocols/{proto['id']}/approval",
+                           json={"action": "Submitted for Review", **QUAL_SUBMIT_SIGN})
     assert resp.status_code == 401
-    assert client.get(f"/qual/{qual['id']}").get_json()["status"] == "draft"  # unchanged
+    import pharmagpt.qual_database as qdb
+    assert qdb.get_protocol_approval_status(qdb.get_protocol(proto["id"])) == "draft"  # unchanged
 
 
 def test_qualification_approval_records_signature_and_audit_and_continues(client):
-    qual = client.post("/qual/", json={"title": "Q1", "equipment_name": "HPLC"}).get_json()
+    qual, proto = _protocol(client)
     with _reauth(True):
-        resp = client.post(f"/qual/{qual['id']}/approval", json={"action": "Submitted for Review", **SIGN})
+        resp = client.post(f"/qual/{qual['id']}/protocols/{proto['id']}/approval",
+                           json={"action": "Submitted for Review", **QUAL_SUBMIT_SIGN})
     assert resp.status_code == 201
-    assert client.get(f"/qual/{qual['id']}").get_json()["status"] == "under_review"  # workflow continued
+    import pharmagpt.qual_database as qdb
+    assert qdb.get_protocol_approval_status(qdb.get_protocol(proto["id"])) == "under_review"  # workflow continued
 
     trail = qmsdb.get_esignatures("qualification", qual["id"])
     assert len(trail) == 1
-    assert trail[0]["meaning"] == "Approved"
+    assert trail[0]["meaning"] == "Created"
 
     audit_trail = qmsdb.get_audit_trail("qualification", qual["id"])
     assert any("E-Signature" in a["action"] for a in audit_trail)
@@ -204,20 +226,30 @@ def test_unauthorized_role_cannot_reach_qualification_approval(client, monkeypat
     Flask forbids registering new before_request handlers after the app has
     served its first request) falls back to a fixed company_admin tenant
     whenever g.tenant isn't already set. Monkeypatching that fallback's
-    *role* to a plain "user" for this test exercises the exact same
-    require_role gate a real non-admin session would hit — without needing
-    a second before_request registration this late."""
+    *role* to a plain "user" exercises the same gates a real non-admin
+    session hits. Standardized workflow: a plain user may only SUBMIT (and
+    only with Validation:Submit); sign-off/reject/effective stay behind the
+    company_admin/reviewer_qa platform gate, and submit without the grant is
+    denied — all before esignature_service is ever called."""
     from pharmagpt.auth.context import TenantContext
     import tests.conftest as conftest_module
 
     qual = client.post("/qual/", json={"title": "Q1", "equipment_name": "HPLC"}).get_json()
 
+    proto = client.post(f"/qual/{qual['id']}/protocols", json={"protocol_type": "IQ"}).get_json()
     plain_user = TenantContext(
         user_id="plain-user", email="plain@example.com", display_name="Plain User",
         role="user", company_id=conftest_module._TEST_TENANT.company_id,
     )
     monkeypatch.setattr(conftest_module, "_TEST_TENANT", plain_user)
+    url = f"/qual/{qual['id']}/protocols/{proto['id']}/approval"
 
     with _reauth(True):
-        resp = client.post(f"/qual/{qual['id']}/approval", json={"action": "Submitted for Review", **SIGN})
-    assert resp.status_code == 403  # blocked by @require_role before esignature_service is ever called
+        # Granted everything by the fixture, a plain user still cannot sign off:
+        resp = client.post(url, json={"action": "Sign Off", **SIGN})
+        assert resp.status_code == 403
+        # ...and without Validation:Submit it cannot submit either.
+        monkeypatch.setattr("pharmagpt.auth.module_access.get_effective_permissions",
+                            lambda tenant: {("Validation", "View")})
+        resp = client.post(url, json={"action": "Submitted for Review", **QUAL_SUBMIT_SIGN})
+    assert resp.status_code == 403

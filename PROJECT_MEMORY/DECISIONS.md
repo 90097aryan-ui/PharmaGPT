@@ -1203,3 +1203,85 @@ machine-readable version source) would be worthwhile — see Future Review.
 **Future Review Required:** Adopt a machine-readable `VERSION` file or `__version__` string
 referenced by all docs instead of hand-typed commit hashes/version numbers, per DEC-014's original
 (still unactioned) recommendation — now overdue given three recurrences.
+
+---
+
+### DEC-027 — Yuktav Brain: Global Regulatory Knowledge (`company_id=''`)
+
+**Date:** 2026-09-04
+**Problem Statement:** "Yuktav Brain" — one common regulatory mind shared across every Yuktav
+client, combining common regulatory/pharmaceutical knowledge with each client's own private
+organizational knowledge — has no prior entry in this log or in `docs/PLATFORM_ARCHITECTURE.md`.
+That document's §6 ("every tenant-scoped row carries `company_id`") and §13 ("a retrieval query can
+never surface another company's content, embeddings included") describe strict per-company
+retrieval with no documented cross-tenant exception. Two things needed resolving before any global
+knowledge could be built: (1) whether that silence means "not yet designed" or "deliberately
+excluded," and (2) how to represent global knowledge without weakening the tenant isolation that
+same section establishes.
+**Prior, related fix:** TEN-01 (`services/retrieval_engine.py`) — `_load_kb_all()` previously
+queried every company's Knowledge Base with no `company_id` filter at all, so an AI-generated
+document for one company could be seeded with, and cite, another company's confidential SOPs. Fixed
+by requiring `company_id` on `retrieve_context()`/`_load_kb_all()` with no default and threading it
+through the two call sites (`routes/validation.py`, `routes/qms_deviations.py`). See
+`tests/test_retrieval_engine_tenant_isolation.py`. This decision does not reopen or modify that fix.
+**Options Considered:** (a) A second table for global knowledge, isolated from `kb_documents`
+entirely; (b) reuse the `company_id=''` sentinel `qms_document_database.py::list_templates()`
+already established for platform-wide document templates, applied to `kb_documents` instead, with
+additive governance columns.
+**Decision Taken:** (b). `company_id=''` on `kb_documents` denotes global (Yuktav-owned) content;
+any non-empty `company_id` denotes client-private content, exactly as before. No second table.
+Global content is further split into two `content_category` values — `regulatory_source` (primary
+text from a recognized authority) and `yuktav_interpretation` (Yuktav-authored analysis derived
+from sources) — since these must never be presented with equal authority.
+**Governance model:** Only `super_admin` (the sole role with no `company_id`) may author or publish
+global content — `company_admin`/`reviewer_qa`/`user` cannot, at any tenant. A document is staged
+(`content_status='staged'`, not yet retrievable) by one `super_admin`, then published
+(`content_status='active'`) by a *different* `super_admin` — enforced in
+`routes/knowledge_base.py::kb_global_publish_document`, mirroring the same segregation-of-duty
+principle `services/workflow_engine.py::reject_creator_as_approver` already applies to record
+approvers. `published_by` is always `g.tenant.user_id` from the authenticated session — request-body
+`published_by`/`role`/`company_id` are never read for this action. Lifecycle:
+`staged → active → superseded | retired`; a new version's publish action flips the document it
+`supersedes` to `superseded` in the same commit; retirement sets `retired`. Neither superseded nor
+retired content is ever deleted — both stay in `kb_documents` for audit, excluded from retrieval.
+**Schema:** nine additive, nullable columns on `kb_documents` (`content_category`,
+`source_authority`, `source_reference`, `jurisdiction`, `publication_date`, `content_status`
+[default `'active'`, so every pre-existing/tenant row is unaffected], `published_by`,
+`published_at`, `supersedes`) — added via the existing `_add_column_if_missing()` convention, no new
+table, no migration framework introduced. Reused as-is: `effective_date`, `doc_version`,
+`kb_document_versions`.
+**Retrieval:** `retrieval_engine.py`'s tenant-isolation predicate, `(company_id = ? OR
+company_id = '')`, is unchanged from TEN-01. One additive clause,
+`AND (company_id != '' OR content_status = 'active')`, constrains only the `company_id=''` branch —
+a tenant's own rows are unaffected regardless of their `content_status` value. Staged, superseded,
+and retired global content is never returned to any tenant.
+**Provenance:** `RetrievedChunk`/`sources[]` gained a `scope` field ("Global" | "Client"), always
+derived from the row's own `company_id` — never caller-supplied — plus `content_category`,
+`source_authority`, `source_reference`, `jurisdiction`, `publication_date` when the database
+actually holds them (never fabricated). The assembled Gemini context block now labels each citation
+"Global Regulatory Source" / "Yuktav Interpretation" / "Client Knowledge" accordingly
+(`retrieval_engine.py::_scope_label`).
+**Reason (the §13 exception, stated explicitly):** `docs/PLATFORM_ARCHITECTURE.md` §13's "a
+retrieval query can never surface another company's content" was written to prevent Company A ever
+seeing Company B's content — it does not contemplate content that belongs to no company at all.
+This decision is the explicit exception that document's silence left unresolved: global
+(`company_id=''`) content may flow to every tenant by design; client-owned content still can never
+cross a tenant boundary, and nothing here changes that guarantee.
+**Benefits:** Zero new isolation surface — the security-critical predicate from TEN-01 is untouched,
+only extended with an unrelated content-status filter on the branch that was already `OR`'d in.
+Full reuse of the existing KB upload/extraction/versioning pipeline, role system, and citation
+architecture — no second RAG pipeline, no second permission system.
+**Trade-offs:** `kb_documents.created_by` now holds a stable `user_id` for global rows specifically
+(needed to compare "is the publisher the same person who staged this"), versus the display-name
+string every tenant-owned row still stores in that column — a deliberate, narrowly-scoped exception
+documented at both call sites, not a schema-wide semantic change.
+**Impact:** `pharmagpt/database.py` (schema + `create_kb_document`/`get_global_kb_document`/
+`publish_global_kb_document`/`retire_global_kb_document`), `pharmagpt/routes/knowledge_base.py`
+(3 new `super_admin`-gated routes), `pharmagpt/services/retrieval_engine.py` (filter + provenance).
+`tests/test_global_knowledge_governance.py` (21 tests: authorization, publishing/segregation of
+duty, lifecycle, tenant isolation, provenance) plus 6 pre-existing TEN-01 tests, all passing.
+**Future Review Required:** Client-facing read-only browsing of published global content (not yet
+built — authoring/publishing only); whether publishing regulatory content should require two-person
+approval as a hard rule rather than a single-gate publish; whether `effective_date`/
+`publication_date` should ever be enforced at retrieval time (e.g. refusing to surface content
+before its effective date) — none of this is required for the foundation this decision establishes.

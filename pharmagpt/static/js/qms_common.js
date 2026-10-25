@@ -171,7 +171,7 @@ async function qmsRenderAttachments(containerId, recordType, recordId) {
           </div>
           <div>
             <a href="/qms/attachments/${a.id}/download" style="font-size:11px;margin-right:10px">Download</a>
-            <a href="#" style="font-size:11px;color:#C35F5B" onclick="qmsDeleteAttachment('${recordType}',${recordId},${a.id});return false;">Delete</a>
+            <a href="#" style="font-size:11px;color:#DC2626" onclick="qmsDeleteAttachment('${recordType}',${recordId},${a.id});return false;">Delete</a>
           </div>
         </div>`).join("");
     } else if (window.PharmaUI) {

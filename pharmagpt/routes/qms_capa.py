@@ -45,6 +45,7 @@ import re
 from flask import Blueprint, g, jsonify, request, send_file
 
 from pharmagpt import audit
+from pharmagpt import audit_events as evt
 from pharmagpt import config
 from pharmagpt import database as db
 from pharmagpt import qms_capa_database as cdb
@@ -192,7 +193,13 @@ def create_capa():
 def trend_summary():
     if not g.tenant.company_id:
         return jsonify({"error": "Super Admin has no standing access to tenant content"}), 403
-    return jsonify({"summary": svc.ai_trend_summary(g.tenant.company_id)})
+    try:
+        summary = svc.ai_trend_summary(g.tenant.company_id)
+    except Exception as exc:
+        audit.log_failure("capa", 0, evt.CAPA_AI_ASSIST, reason=f"Trend summary generation failed: {exc}")
+        raise
+    audit.log("capa", 0, evt.CAPA_AI_ASSIST, detail="Trend summary generated")
+    return jsonify({"summary": summary})
 
 
 @bp.route("/<int:cid>", methods=["GET"])
@@ -254,14 +261,26 @@ def delete_capa(cid):
 def suggest_draft(cid):
     if not tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
-    return jsonify(svc.ai_suggest_draft(cid))
+    try:
+        result = svc.ai_suggest_draft(cid)
+    except Exception as exc:
+        audit.log_failure("capa", cid, evt.CAPA_AI_ASSIST, reason=f"Draft suggestion failed: {exc}")
+        raise
+    audit.log("capa", cid, evt.CAPA_AI_ASSIST, detail="Draft suggestion generated")
+    return jsonify(result)
 
 
 @bp.route("/<int:cid>/suggest-effectiveness", methods=["POST"])
 def suggest_effectiveness(cid):
     if not tenancy.scoped_or_none(cdb.get_capa(cid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
-    return jsonify(svc.ai_suggest_effectiveness(cid))
+    try:
+        result = svc.ai_suggest_effectiveness(cid)
+    except Exception as exc:
+        audit.log_failure("capa", cid, evt.CAPA_AI_ASSIST, reason=f"Effectiveness suggestion failed: {exc}")
+        raise
+    audit.log("capa", cid, evt.CAPA_AI_ASSIST, detail="Effectiveness suggestion generated")
+    return jsonify(result)
 
 
 # ── Actions (corrective / preventive tasks) ────────────────────────────────────
@@ -416,6 +435,7 @@ def decide_workflow_step(cid, step_order):
         audit.log_failure("capa", cid, f"Workflow decision blocked ({decision}) — e-signature failed", reason=str(exc))
         return jsonify({"error": str(exc)}), 401
     except esignature_service.ESignatureError as exc:
+        audit.log_failure("capa", cid, evt.ESIGNATURE_FAILURE, reason=str(exc))
         return jsonify({"error": str(exc)}), 400
 
     sig = tenancy.signing_identity(g.tenant)
@@ -497,6 +517,7 @@ def submit_effectiveness_verification(cid):
         audit.log_failure("capa", cid, "Effectiveness Verification blocked — e-signature failed", reason=str(exc))
         return jsonify({"error": str(exc)}), 401
     except esignature_service.ESignatureError as exc:
+        audit.log_failure("capa", cid, evt.ESIGNATURE_FAILURE, reason=str(exc))
         return jsonify({"error": str(exc)}), 400
 
     sig = tenancy.signing_identity(g.tenant)
@@ -592,6 +613,7 @@ def submit_approval(cid):
         audit.log_failure("capa", cid, f"Approval action blocked ({action_name}) — e-signature failed", reason=str(exc))
         return jsonify({"error": str(exc)}), 401
     except esignature_service.ESignatureError as exc:
+        audit.log_failure("capa", cid, evt.ESIGNATURE_FAILURE, reason=str(exc))
         return jsonify({"error": str(exc)}), 400
 
     sig = tenancy.signing_identity(g.tenant)
@@ -616,22 +638,35 @@ def submit_approval(cid):
         else:
             decision = "approve" if step["step_type"] == "approval" else "advance"
         if step["step_type"] == "approval":
+            # Wave 3A-B (Security Audit remediation, Finding B): only
+            # auto-self-assign when NO approver is set yet at all — mirrors
+            # routes/qms_documents.py::submit_approval's identical guard.
+            # Once a named approver already exists (assigned via the
+            # CRIT-02-hardened .../workflow/steps/<order>/assign, or by this
+            # same fallback for an earlier caller), a caller who isn't one of
+            # them must never silently displace that assignment —
+            # decide_step()'s own WorkflowPermissionError (403) is the
+            # correct outcome for that case, exactly as it already is for the
+            # Workflow Panel path (.../workflow/steps/<order>/decide).
             approver_ids = {a["user_id"] for a in step.get("approvers", [])}
-            if g.tenant.user_id not in approver_ids:
+            if not approver_ids and g.tenant.user_id not in approver_ids:
                 wfe.assign_approvers(RECORD_TYPE, cid, step["step_order"],
                                       [{"user_id": g.tenant.user_id, "display_name": sig["performed_by"]}])
         wfe.decide_step(RECORD_TYPE, cid, step["step_order"], decision,
                          user_id=g.tenant.user_id, role=g.tenant.role,
                          performed_by=sig["performed_by"], comments=comments,
                          tenant=g.tenant)
-    except (wfe.WorkflowPermissionError, wfe.WorkflowError) as e:
+    except wfe.WorkflowPermissionError as e:
+        audit.log_failure("capa", cid, f"Approval action blocked ({action_name})", reason=str(e))
+        return jsonify({"error": str(e)}), 403
+    except wfe.WorkflowError as e:
         audit.log_failure("capa", cid, f"Approval action blocked ({action_name})", reason=str(e))
         return jsonify({"error": str(e)}), 409
 
-    # CRIT-01: allow_controlled_fields=True — this write is the e-signed,
-    # role-gated (@require_role above) outcome of a real approval decision
-    # just made via wfe.decide_step(), not a raw client field.
     if action_name == "Closed":
+        # CRIT-01: allow_controlled_fields=True — this write is the e-signed,
+        # role-gated (@require_role above) outcome of a real approval
+        # decision just made via wfe.decide_step(), not a raw client field.
         cdb.update_capa(cid, {"closure_date": data.get("closure_date", ""), "approver": sig["performed_by"]},
                         allow_controlled_fields=True)
     if action_name == "Submitted for QA Review":
@@ -675,6 +710,8 @@ def export_docx(cid):
     })
     safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", capa.get("title", "CAPA"))[:40]
     filename = f"{capa.get('capa_number', 'CAPA')}_{safe_title}.docx"
+    # Wave 4B: log the export itself (not the file's contents).
+    audit.log("capa", cid, evt.CAPA_EXPORTED, detail=filename)
     return send_file(
         io.BytesIO(docx_bytes),
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",

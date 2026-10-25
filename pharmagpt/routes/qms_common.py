@@ -38,6 +38,7 @@ from werkzeug.utils import secure_filename
 from flask import Blueprint, g, jsonify, request, send_file
 
 from pharmagpt import audit
+from pharmagpt import audit_events as evt
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import qms_document_database as qdocdb
 from pharmagpt import qms_deviation_database as qdevdb
@@ -248,6 +249,11 @@ def download_attachment(attachment_id):
     path = os.path.join(_qms_upload_dir(attachment["record_type"], attachment["record_id"]), attachment["filename"])
     if not os.path.exists(path):
         return jsonify({"error": "File missing on disk"}), 404
+    # Wave 4B: log the download itself (not the file's contents/path) —
+    # closes a Wave 4A gap where attachment upload/delete were audited but
+    # download never was.
+    audit.log(attachment["record_type"], attachment["record_id"], evt.FILE_DOWNLOADED,
+              detail=f"Attachment downloaded: {attachment['original_name']}")
     return send_file(
         path,
         mimetype=get_mime_type(attachment.get("file_type", "")),

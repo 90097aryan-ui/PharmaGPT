@@ -109,7 +109,7 @@ async function rApi(path, opts = {}) {
 async function loadReportDashboard() {
   const el = document.getElementById('report-dash-body');
   if (!el) return;
-  el.innerHTML = '<div style="padding:40px;text-align:center;color:#66615B"><div class="report-spinner"></div></div>';
+  el.innerHTML = '<div style="padding:40px;text-align:center;color:#64748B"><div class="report-spinner"></div></div>';
   try {
     const d = await rApi('/dashboard');
     el.innerHTML = renderReportDashboard(d);
@@ -199,7 +199,7 @@ function renderReportDashboard(d) {
                 <tbody>
                   ${d.recent.map(r => `
                   <tr onclick="openReport(${r.id})">
-                    <td><strong style="color:#2D2A28">${r.report_number || '—'}</strong></td>
+                    <td><strong style="color:#1E293B">${r.report_number || '—'}</strong></td>
                     <td>${r.equipment_name || r.title || '—'}</td>
                     <td>${r.department || '—'}</td>
                     <td><span class="report-badge badge-${r.status}">${r.status}</span></td>
@@ -225,8 +225,8 @@ function renderReportDashboard(d) {
           <div class="report-panel-body">
             ${d.by_department.map(r => `
             <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:13px">
-              <span style="color:#9A948C">${r.department}</span>
-              <span style="color:#8A6B52;font-weight:700">${r.cnt}</span>
+              <span style="color:#94A3B8">${r.department}</span>
+              <span style="color:#2563EB;font-weight:700">${r.cnt}</span>
             </div>`).join('')}
           </div>
         </div>` : ''}
@@ -239,8 +239,8 @@ function renderReportDashboard(d) {
               const pct = d.total > 0 ? Math.round(r.cnt / d.total * 100) : 0;
               return `<div style="margin-bottom:10px">
                 <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-                  <span style="color:#9A948C;text-transform:capitalize">${r.status.replace('_',' ')}</span>
-                  <span style="color:#66615B">${r.cnt} (${pct}%)</span>
+                  <span style="color:#94A3B8;text-transform:capitalize">${r.status.replace('_',' ')}</span>
+                  <span style="color:#64748B">${r.cnt} (${pct}%)</span>
                 </div>
                 <div class="report-score-bar-bg"><div class="report-score-bar-fill" style="width:${pct}%"></div></div>
               </div>`;
@@ -257,7 +257,7 @@ function renderReportDashboard(d) {
 async function loadReportList() {
   const body = document.getElementById('report-list-body');
   if (!body) return;
-  body.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:#66615B"><div class="report-spinner"></div></td></tr>';
+  body.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:#64748B"><div class="report-spinner"></div></td></tr>';
 
   const q = new URLSearchParams({
     status: ReportState.filters.status || '',
@@ -273,10 +273,10 @@ async function loadReportList() {
     }
     body.innerHTML = reports.map(r => `
       <tr onclick="openReport(${r.id})">
-        <td><strong style="color:#2D2A28">${r.report_number || '—'}</strong></td>
+        <td><strong style="color:#1E293B">${r.report_number || '—'}</strong></td>
         <td>
-          <div style="font-weight:600;color:#2D2A28">${r.title}</div>
-          <div style="font-size:11px;color:#66615B">${r.equipment_name || ''}</div>
+          <div style="font-weight:600;color:#1E293B">${r.title}</div>
+          <div style="font-size:11px;color:#64748B">${r.equipment_name || ''}</div>
         </td>
         <td>${r.department || '—'}</td>
         <td><span class="report-badge badge-${r.status}">${r.status.replace('_',' ')}</span></td>
@@ -288,14 +288,14 @@ async function loadReportList() {
           </div>
         </td>
         <td>
-          <span style="font-size:13px;font-weight:700;${r.ai_readiness_score>=80?'color:#5F8A61':r.ai_readiness_score>=60?'color:#C59A41':'color:#CE7975'}">
+          <span style="font-size:13px;font-weight:700;${r.ai_readiness_score>=80?'color:#16A34A':r.ai_readiness_score>=60?'color:#D97706':'color:#EF4444'}">
             ${r.ai_readiness_score || 0}%
           </span>
         </td>
-        <td style="font-size:11px;color:#66615B">${(r.created_at||'').slice(0,10)}</td>
+        <td style="font-size:11px;color:#64748B">${(r.created_at||'').slice(0,10)}</td>
       </tr>`).join('');
   } catch (e) {
-    body.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:30px;color:#CE7975">${e.message}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:30px;color:#EF4444">${e.message}</td></tr>`;
   }
 }
 
@@ -353,24 +353,24 @@ function renderNewReportWizard() {
 
     <!-- Step 1: Link Modules -->
     <div class="report-wizard-panel ${ReportState.wizardStep === 1 ? 'active' : ''}" id="rwiz-1">
-      <h3 style="color:#2D2A28;margin-bottom:6px">Link to Completed Qualification</h3>
-      <p style="color:#66615B;font-size:13px;margin-bottom:18px">
+      <h3 style="color:#1E293B;margin-bottom:6px">Link to Completed Qualification</h3>
+      <p style="color:#64748B;font-size:13px;margin-bottom:18px">
         Select a qualification project to automatically populate the report with IQ/OQ/PQ data.
       </p>
 
       <div style="margin-bottom:20px">
-        <div style="font-size:12px;font-weight:700;color:#66615B;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">
           Qualification Project (IQ/OQ/PQ)
         </div>
         ${quals.length === 0
-          ? '<div style="color:#66615B;font-size:13px;padding:14px;background:#FFFFFF;border-radius:8px;border:1px solid #E6DED6">No qualification projects found. You can still create a standalone report.</div>'
+          ? '<div style="color:#64748B;font-size:13px;padding:14px;background:#FFFFFF;border-radius:8px;border:1px solid #E2E5EA">No qualification projects found. You can still create a standalone report.</div>'
           : `<div style="display:grid;gap:8px;max-height:280px;overflow-y:auto">
               ${quals.map(q => `
               <div class="report-link-card ${document.getElementById('rwiz-qual-id') && document.getElementById('rwiz-qual-id').value == q.id ? 'selected' : ''}"
-                   onclick="selectLinkedQual(${q.id},'${esc(q.title)}','${esc(q.equipment_name)}')">
-                <div class="report-link-card-title">${q.qual_number || 'QUAL-'+q.id}</div>
-                <div class="report-link-card-value">${q.title}</div>
-                <div class="report-link-card-sub">${q.equipment_name} | ${q.department} | IQ:${q.iq_status} OQ:${q.oq_status} PQ:${q.pq_status}</div>
+                   data-eq="${escapeHtml(q.equipment_name ?? '')}" onclick="selectLinkedQual(${Number(q.id)}, this.dataset.eq)">
+                <div class="report-link-card-title">${escapeHtml(q.qual_number || 'QUAL-'+q.id)}</div>
+                <div class="report-link-card-value">${escapeHtml(q.title ?? '')}</div>
+                <div class="report-link-card-sub">${escapeHtml(q.equipment_name ?? '')} | ${escapeHtml(q.department ?? '')} | IQ:${escapeHtml(q.iq_status ?? '')} OQ:${escapeHtml(q.oq_status ?? '')} PQ:${escapeHtml(q.pq_status ?? '')}</div>
               </div>`).join('')}
             </div>`
         }
@@ -379,14 +379,14 @@ function renderNewReportWizard() {
 
       <div class="report-form-grid" style="grid-template-columns:1fr 1fr;margin-top:16px">
         <div>
-          <div style="font-size:12px;font-weight:700;color:#66615B;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Link URS (optional)</div>
+          <div style="font-size:12px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Link URS (optional)</div>
           <select class="report-filter-select" id="rwiz-urs-id" style="width:100%">
             <option value="">— Select URS —</option>
             ${ursList.map(u => `<option value="${u.id}">${u.urs_number || 'URS-'+u.id} — ${u.title.slice(0,40)}</option>`).join('')}
           </select>
         </div>
         <div>
-          <div style="font-size:12px;font-weight:700;color:#66615B;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Link Risk Assessment (optional)</div>
+          <div style="font-size:12px;font-weight:700;color:#64748B;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Link Risk Assessment (optional)</div>
           <select class="report-filter-select" id="rwiz-risk-id" style="width:100%">
             <option value="">— Select Risk Assessment —</option>
             ${riskList.map(r => `<option value="${r.id}">${r.title.slice(0,40)}</option>`).join('')}
@@ -401,8 +401,8 @@ function renderNewReportWizard() {
 
     <!-- Step 2: Report Details -->
     <div class="report-wizard-panel ${ReportState.wizardStep === 2 ? 'active' : ''}" id="rwiz-2">
-      <h3 style="color:#2D2A28;margin-bottom:6px">Report Details</h3>
-      <p style="color:#66615B;font-size:13px;margin-bottom:18px">Enter the report metadata. Fields will be pre-filled from the linked qualification.</p>
+      <h3 style="color:#1E293B;margin-bottom:6px">Report Details</h3>
+      <p style="color:#64748B;font-size:13px;margin-bottom:18px">Enter the report metadata. Fields will be pre-filled from the linked qualification.</p>
 
       <div class="report-form-grid">
         <div class="report-field">
@@ -483,17 +483,17 @@ function renderNewReportWizard() {
 
     <!-- Step 3: Create -->
     <div class="report-wizard-panel ${ReportState.wizardStep === 3 ? 'active' : ''}" id="rwiz-3">
-      <h3 style="color:#2D2A28;margin-bottom:6px">Create Report</h3>
-      <p style="color:#66615B;font-size:13px;margin-bottom:20px">Review your selections and create the validation report.</p>
+      <h3 style="color:#1E293B;margin-bottom:6px">Create Report</h3>
+      <p style="color:#64748B;font-size:13px;margin-bottom:20px">Review your selections and create the validation report.</p>
 
       <div class="report-panel" style="margin-bottom:20px">
         <div class="report-panel-header"><div class="report-panel-title">Summary</div></div>
         <div class="report-panel-body" id="rwiz-summary">Loading...</div>
       </div>
 
-      <div style="background:#FFFFFF;border:1px solid #E6DED6;border-radius:10px;padding:16px;margin-bottom:20px">
-        <div style="font-size:12px;font-weight:700;color:#2D2A28;margin-bottom:8px"><span class=\'icon\' data-lucide=\'bot\'></span> AI Generation Options</div>
-        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:#9A948C">
+      <div style="background:#FFFFFF;border:1px solid #E2E5EA;border-radius:10px;padding:16px;margin-bottom:20px">
+        <div style="font-size:12px;font-weight:700;color:#1E293B;margin-bottom:8px"><span class=\'icon\' data-lucide=\'bot\'></span> AI Generation Options</div>
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:#94A3B8">
           <input type="checkbox" id="rwiz-auto-gen" checked style="width:16px;height:16px">
           Automatically generate all report sections with AI after creation
         </label>
@@ -530,7 +530,7 @@ function reportWizardStep(n) {
   renderNewReportWizard();
 }
 
-function selectLinkedQual(id, title, eqName) {
+function selectLinkedQual(id, eqName) {
   document.getElementById('rwiz-qual-id').value = id;
   // Pre-fill equipment name if empty
   const eqInput = document.getElementById('rwiz-equipment-name');
@@ -551,15 +551,15 @@ function renderWizardSummary() {
 
   el.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">
-      <div><span style="color:#66615B">Report #:</span> <strong style="color:#2D2A28">${v('rwiz-report-number')}</strong></div>
-      <div><span style="color:#66615B">Type:</span> <strong style="color:#2D2A28">${v('rwiz-report-type')}</strong></div>
-      <div><span style="color:#66615B">Equipment:</span> <strong style="color:#2D2A28">${v('rwiz-equipment-name')}</strong></div>
-      <div><span style="color:#66615B">Department:</span> <strong style="color:#2D2A28">${v('rwiz-department')}</strong></div>
-      <div><span style="color:#66615B">Prepared By:</span> <strong style="color:#2D2A28">${v('rwiz-prepared-by')}</strong></div>
-      <div><span style="color:#66615B">Validation Type:</span> <strong style="color:#2D2A28">${v('rwiz-val-type')}</strong></div>
-      <div><span style="color:#66615B">Linked Qual:</span> <strong style="color:#2D2A28">${qual ? qual.title.slice(0,40) : 'None'}</strong></div>
-      <div><span style="color:#66615B">Linked URS:</span> <strong style="color:#2D2A28">${urs ? urs.title.slice(0,40) : 'None'}</strong></div>
-      <div><span style="color:#66615B">Linked Risk:</span> <strong style="color:#2D2A28">${risk ? risk.title.slice(0,40) : 'None'}</strong></div>
+      <div><span style="color:#64748B">Report #:</span> <strong style="color:#1E293B">${v('rwiz-report-number')}</strong></div>
+      <div><span style="color:#64748B">Type:</span> <strong style="color:#1E293B">${v('rwiz-report-type')}</strong></div>
+      <div><span style="color:#64748B">Equipment:</span> <strong style="color:#1E293B">${v('rwiz-equipment-name')}</strong></div>
+      <div><span style="color:#64748B">Department:</span> <strong style="color:#1E293B">${v('rwiz-department')}</strong></div>
+      <div><span style="color:#64748B">Prepared By:</span> <strong style="color:#1E293B">${v('rwiz-prepared-by')}</strong></div>
+      <div><span style="color:#64748B">Validation Type:</span> <strong style="color:#1E293B">${v('rwiz-val-type')}</strong></div>
+      <div><span style="color:#64748B">Linked Qual:</span> <strong style="color:#1E293B">${qual ? qual.title.slice(0,40) : 'None'}</strong></div>
+      <div><span style="color:#64748B">Linked URS:</span> <strong style="color:#1E293B">${urs ? urs.title.slice(0,40) : 'None'}</strong></div>
+      <div><span style="color:#64748B">Linked Risk:</span> <strong style="color:#1E293B">${risk ? risk.title.slice(0,40) : 'None'}</strong></div>
     </div>`;
 }
 
@@ -644,9 +644,9 @@ function renderReportDetail(report, sections) {
         <div class="report-detail-sub">${report.report_number || ''} ${report.report_number && report.equipment_name ? '·' : ''} ${report.equipment_name || ''} ${report.department ? '· ' + report.department : ''}</div>
         <div class="report-detail-badges">
           <span class="report-badge badge-${report.status}">${report.status.replace('_',' ')}</span>
-          <span class="report-badge" style="background:#F1ECE6;color:#9A948C">Rev ${report.revision}</span>
-          <span class="report-badge" style="background:#F1ECE6;color:#9A948C">${report.validation_type}</span>
-          ${report.ai_generated ? '<span class="report-badge" style="background:#F1ECE6;color:#2D2A28"><span class=\'icon\' data-lucide=\'bot\'></span> AI Generated</span>' : ''}
+          <span class="report-badge" style="background:#EEF0F3;color:#94A3B8">Rev ${report.revision}</span>
+          <span class="report-badge" style="background:#EEF0F3;color:#94A3B8">${report.validation_type}</span>
+          ${report.ai_generated ? '<span class="report-badge" style="background:#EEF0F3;color:#1E293B"><span class=\'icon\' data-lucide=\'bot\'></span> AI Generated</span>' : ''}
         </div>
       </div>
       <div class="report-header-actions" style="flex-shrink:0">
@@ -667,16 +667,16 @@ function renderReportDetail(report, sections) {
     </div>
 
     <!-- Completion bar -->
-    <div style="padding:12px 28px;border-bottom:1px solid #E6DED6;display:flex;align-items:center;gap:16px">
-      <div style="font-size:12px;color:#66615B">Sections: ${generatedCount}/${totalSections}</div>
+    <div style="padding:12px 28px;border-bottom:1px solid #E2E5EA;display:flex;align-items:center;gap:16px">
+      <div style="font-size:12px;color:#64748B">Sections: ${generatedCount}/${totalSections}</div>
       <div style="flex:1;max-width:300px">
         <div class="report-score-bar-bg" style="height:8px">
           <div class="report-score-bar-fill" style="width:${completePct}%"></div>
         </div>
       </div>
-      <div style="font-size:12px;color:#8A6B52;font-weight:700">${completePct}% Complete</div>
-      ${report.compliance_score ? `<div style="font-size:12px;color:#5F8A61;font-weight:700">Compliance: ${report.compliance_score}%</div>` : ''}
-      ${report.ai_readiness_score ? `<div style="font-size:12px;color:#C59A41;font-weight:700">Readiness: ${report.ai_readiness_score}%</div>` : ''}
+      <div style="font-size:12px;color:#2563EB;font-weight:700">${completePct}% Complete</div>
+      ${report.compliance_score ? `<div style="font-size:12px;color:#16A34A;font-weight:700">Compliance: ${report.compliance_score}%</div>` : ''}
+      ${report.ai_readiness_score ? `<div style="font-size:12px;color:#D97706;font-weight:700">Readiness: ${report.ai_readiness_score}%</div>` : ''}
     </div>
 
     <!-- Tabs -->
@@ -700,14 +700,14 @@ function renderReportDetail(report, sections) {
     </div>
     <div class="report-tab-panel ${ReportState.currentTab==='traceability'?'active':''}" id="rtab-traceability">
       <div id="trace-content">
-        <div style="text-align:center;padding:40px;color:#66615B">
+        <div style="text-align:center;padding:40px;color:#64748B">
           <button class="report-btn report-btn-primary" onclick="loadTraceability()">Load Traceability Matrix</button>
         </div>
       </div>
     </div>
     <div class="report-tab-panel ${ReportState.currentTab==='ai-review'?'active':''}" id="rtab-ai-review">
       <div id="review-content">
-        ${report.compliance_score > 0 ? '' : '<div style="text-align:center;padding:40px;color:#66615B"><button class="report-btn report-btn-success" onclick="runAIReview()"><span class=\'icon\' data-lucide=\'search\'></span> Run AI Review</button></div>'}
+        ${report.compliance_score > 0 ? '' : '<div style="text-align:center;padding:40px;color:#64748B"><button class="report-btn report-btn-success" onclick="runAIReview()"><span class=\'icon\' data-lucide=\'search\'></span> Run AI Review</button></div>'}
       </div>
     </div>
     <div class="report-tab-panel ${ReportState.currentTab==='approval'?'active':''}" id="rtab-approval">
@@ -754,8 +754,8 @@ function renderOverviewTab(report, sections) {
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             ${stats.slice(0,9).map(([k,v]) => `
             <tr>
-              <td style="padding:6px 0;color:#66615B;width:45%">${k}</td>
-              <td style="padding:6px 0;color:#2D2A28;font-weight:500">${v}</td>
+              <td style="padding:6px 0;color:#64748B;width:45%">${k}</td>
+              <td style="padding:6px 0;color:#1E293B;font-weight:500">${v}</td>
             </tr>`).join('')}
           </table>
         </div>
@@ -767,8 +767,8 @@ function renderOverviewTab(report, sections) {
             <table style="width:100%;border-collapse:collapse;font-size:13px">
               ${stats.slice(9).map(([k,v]) => `
               <tr>
-                <td style="padding:6px 0;color:#66615B;width:50%">${k}</td>
-                <td style="padding:6px 0;color:#2D2A28;font-weight:500">${v}</td>
+                <td style="padding:6px 0;color:#64748B;width:50%">${k}</td>
+                <td style="padding:6px 0;color:#1E293B;font-weight:500">${v}</td>
               </tr>`).join('')}
             </table>
           </div>
@@ -807,7 +807,7 @@ function renderSectionsTab(report, sections) {
             <button class="${ReportState.sectionMode==='preview'?'active':''}" onclick="setSectionMode('preview')"><span class=\'icon\' data-lucide=\'eye\'></span> Preview</button>
           </div>
         </div>
-        <div style="font-size:12px;color:#66615B">
+        <div style="font-size:12px;color:#64748B">
           ${sections.filter(s => s.is_generated).length} / ${sections.length} sections generated
         </div>
       </div>
@@ -1083,7 +1083,7 @@ window.runAIReview = async function () {
   if (btn) { btn.disabled = true; btn.innerHTML = '<div class="report-spinner"></div> Reviewing...'; }
 
   const content = document.getElementById('review-content');
-  if (content) content.innerHTML = '<div style="text-align:center;padding:60px;color:#66615B"><div class="report-spinner"></div><div style="margin-top:12px;font-size:13px">AI is reviewing the validation report for GMP compliance...</div></div>';
+  if (content) content.innerHTML = '<div style="text-align:center;padding:60px;color:#64748B"><div class="report-spinner"></div><div style="margin-top:12px;font-size:13px">AI is reviewing the validation report for GMP compliance...</div></div>';
 
   switchReportTab('ai-review');
 
@@ -1115,11 +1115,11 @@ function renderAIReview(r) {
 
   const renderList = (items, cls = '') => items && items.length
     ? `<ul class="report-review-list">${items.map(i => {
-        const text = typeof i === 'string' ? i : `<strong>${i.section}</strong> — ${i.comment} <span style="font-size:10px;color:#66615B">[${i.severity}]</span>`;
+        const text = typeof i === 'string' ? i : `<strong>${i.section}</strong> — ${i.comment} <span style="font-size:10px;color:#64748B">[${i.severity}]</span>`;
         const sev = typeof i === 'object' ? `severity-${(i.severity||'').toLowerCase()}` : '';
         return `<li class="${sev} ${cls}">${text}</li>`;
       }).join('')}</ul>`
-    : '<div style="font-size:13px;color:#66615B;padding:8px">None identified</div>';
+    : '<div style="font-size:13px;color:#64748B;padding:8px">None identified</div>';
 
   return `
     <div class="report-review-scores">
@@ -1148,7 +1148,7 @@ function renderAIReview(r) {
 
     ${r.executive_summary ? `<div class="report-panel" style="margin-bottom:20px">
       <div class="report-panel-header"><div class="report-panel-title">Executive Summary</div></div>
-      <div class="report-panel-body" style="font-size:13px;color:#2D2A28;line-height:1.7">${r.executive_summary}</div>
+      <div class="report-panel-body" style="font-size:13px;color:#1E293B;line-height:1.7">${r.executive_summary}</div>
     </div>` : ''}
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
@@ -1194,7 +1194,7 @@ function renderAIReview(r) {
 window.loadTraceability = async function () {
   const content = document.getElementById('trace-content');
   if (!content || !ReportState.currentReportId) return;
-  content.innerHTML = '<div style="text-align:center;padding:40px"><div class="report-spinner"></div><div style="margin-top:12px;font-size:13px;color:#66615B">Building traceability matrix...</div></div>';
+  content.innerHTML = '<div style="text-align:center;padding:40px"><div class="report-spinner"></div><div style="margin-top:12px;font-size:13px;color:#64748B">Building traceability matrix...</div></div>';
 
   try {
     const matrix = await rApi('/' + ReportState.currentReportId + '/traceability');
@@ -1224,7 +1224,7 @@ function renderTraceabilityMatrix(m) {
       </div>
       <div class="report-trace-card">
         <div class="report-trace-card-title">Uncovered Requirements</div>
-        <div class="report-trace-pct" style="color:${m.uncovered_requirements > 0 ? '#CE7975' : '#5F8A61'}">${m.uncovered_requirements}</div>
+        <div class="report-trace-pct" style="color:${m.uncovered_requirements > 0 ? '#EF4444' : '#16A34A'}">${m.uncovered_requirements}</div>
         <div class="report-trace-detail">${m.uncovered_requirements > 0 ? 'Need test coverage' : 'Full coverage achieved'}</div>
       </div>
     </div>
@@ -1233,7 +1233,7 @@ function renderTraceabilityMatrix(m) {
     <div class="report-panel" style="margin-bottom:20px">
       <div class="report-panel-header">
         <div class="report-panel-title">URS Requirements <span class=\'icon\' data-lucide=\'arrow-right\'></span> Test Cases</div>
-        <div style="font-size:12px;color:#66615B">${m.covered_requirements}/${m.total_requirements} covered</div>
+        <div style="font-size:12px;color:#64748B">${m.covered_requirements}/${m.total_requirements} covered</div>
       </div>
       <div style="overflow-x:auto">
         <table class="report-trace-table">
@@ -1243,13 +1243,13 @@ function renderTraceabilityMatrix(m) {
           <tbody>
             ${m.requirements.map(r => `
             <tr>
-              <td style="color:#2D2A28;font-weight:600">${r.req_id}</td>
+              <td style="color:#1E293B;font-weight:600">${r.req_id}</td>
               <td style="max-width:300px">${r.requirement}</td>
               <td>${r.priority}</td>
               <td>${r.gmp_criticality}</td>
               <td>
                 <div class="trace-tc-list">
-                  ${r.test_cases.length ? r.test_cases.map(tc => `<span class="trace-tc-chip">${tc}</span>`).join('') : '<span style="color:#66615B;font-size:11px">None</span>'}
+                  ${r.test_cases.length ? r.test_cases.map(tc => `<span class="trace-tc-chip">${tc}</span>`).join('') : '<span style="color:#64748B;font-size:11px">None</span>'}
                 </div>
               </td>
               <td><span class="${r.covered ? 'trace-covered' : 'trace-uncovered'}">${r.covered ? '<span class=\'icon\' data-lucide=\'check\'></span> Covered' : '<span class=\'icon\' data-lucide=\'x\'></span> Gap'}</span></td>
@@ -1263,7 +1263,7 @@ function renderTraceabilityMatrix(m) {
     <div class="report-panel">
       <div class="report-panel-header">
         <div class="report-panel-title">Risk Items <span class=\'icon\' data-lucide=\'arrow-right\'></span> Test Cases</div>
-        <div style="font-size:12px;color:#66615B">${m.covered_risks}/${m.total_risks} covered</div>
+        <div style="font-size:12px;color:#64748B">${m.covered_risks}/${m.total_risks} covered</div>
       </div>
       <div style="overflow-x:auto">
         <table class="report-trace-table">
@@ -1273,13 +1273,13 @@ function renderTraceabilityMatrix(m) {
           <tbody>
             ${m.risks.map(r => `
             <tr>
-              <td style="color:#C59A41;font-weight:600">${r.item_id}</td>
+              <td style="color:#D97706;font-weight:600">${r.item_id}</td>
               <td style="max-width:280px">${r.failure_mode}</td>
               <td>${r.risk_level}</td>
               <td>${r.rpn || '—'}</td>
               <td>
                 <div class="trace-tc-list">
-                  ${r.test_cases.length ? r.test_cases.map(tc => `<span class="trace-tc-chip">${tc}</span>`).join('') : '<span style="color:#66615B;font-size:11px">None</span>'}
+                  ${r.test_cases.length ? r.test_cases.map(tc => `<span class="trace-tc-chip">${tc}</span>`).join('') : '<span style="color:#64748B;font-size:11px">None</span>'}
                 </div>
               </td>
               <td><span class="${r.covered ? 'trace-covered' : 'trace-uncovered'}">${r.covered ? '<span class=\'icon\' data-lucide=\'check\'></span> Covered' : '<span class=\'icon\' data-lucide=\'x\'></span> Gap'}</span></td>
@@ -1298,7 +1298,7 @@ async function loadApprovalTrail() {
   try {
     const trail = await rApi('/' + ReportState.currentReportId + '/approval');
     el.innerHTML = renderApproval(trail);
-  } catch (e) { el.innerHTML = `<div style="color:#CE7975">${e.message}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#EF4444">${e.message}</div>`; }
 }
 
 function renderApproval(trail) {
@@ -1316,10 +1316,10 @@ function renderApproval(trail) {
                 const active = report && report.status === s;
                 const past = report && statusFlow.indexOf(report.status) > statusFlow.indexOf(s);
                 return `<div style="display:flex;align-items:center;gap:12px;padding:8px 0;${!active && !past ? 'opacity:0.4' : ''}">
-                  <div style="width:28px;height:28px;border-radius:50%;background:${active?'#9D7B60':past?'#3D6140':'#5B4C43'};display:flex;align-items:center;justify-content:center;font-size:14px">
+                  <div style="width:28px;height:28px;border-radius:50%;background:${active?'#1D4ED8':past?'#15803D':'var(--sidebar-bg)'};display:flex;align-items:center;justify-content:center;font-size:14px">
                     ${active ? '●' : past ? '<span class=\'icon\' data-lucide=\'check\'></span>' : '○'}
                   </div>
-                  <span style="font-size:13px;color:${active?'#8A6B52':past?'#5F8A61':'#66615B'};font-weight:${active?700:400};text-transform:capitalize">
+                  <span style="font-size:13px;color:${active?'#2563EB':past?'#16A34A':'#64748B'};font-weight:${active?700:400};text-transform:capitalize">
                     ${s.replace('_',' ')}
                   </span>
                 </div>`;
@@ -1427,7 +1427,7 @@ async function loadVersionHistory() {
   try {
     const versions = await rApi('/' + ReportState.currentReportId + '/versions');
     el.innerHTML = renderVersionHistory(versions);
-  } catch (e) { el.innerHTML = `<div style="color:#CE7975">${e.message}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#EF4444">${e.message}</div>`; }
 }
 
 function renderVersionHistory(versions) {
@@ -1442,13 +1442,13 @@ function renderVersionHistory(versions) {
           <tbody>
             ${versions.map(v => `
             <tr>
-              <td><strong style="color:#2D2A28">${v.version}</strong></td>
+              <td><strong style="color:#1E293B">${v.version}</strong></td>
               <td>${v.revision}</td>
               <td><span class="report-badge badge-${v.status}">${v.status}</span></td>
               <td>${v.compliance_score}%</td>
               <td>${v.completeness_score}%</td>
               <td>${v.created_by}</td>
-              <td style="font-size:11px;color:#66615B">${(v.created_at||'').slice(0,16)}</td>
+              <td style="font-size:11px;color:#64748B">${(v.created_at||'').slice(0,16)}</td>
             </tr>`).join('')}
           </tbody>
         </table>`
@@ -1495,10 +1495,6 @@ window.exportReportDocx = function (id) {
 function v(id) {
   const el = document.getElementById(id);
   return el ? el.value : '';
-}
-
-function esc(str) {
-  return (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
 
 function showReportToast(msg, type = '') {

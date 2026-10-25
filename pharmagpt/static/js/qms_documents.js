@@ -567,6 +567,17 @@ async function qmsDocRenderWorkflowTab(id, doc) {
     return;
   }
 
+  // DQ documents run on the shared Validation approval engine (same seven
+  // signatories as URS and IQ/OQ/PQ) — see services/validation_approval.py.
+  if (doc.doc_type === "DQ") {
+    let page = null;
+    try { page = await qmsFetch(`/qms/documents/${id}/approval/signatories`); } catch (e) { /* fall through */ }
+    if (page && page.shared_engine) {
+      await qmsDocRenderSharedDq(id, doc, version, page);
+      return;
+    }
+  }
+
   if (version.status === "draft") {
     await qmsDocRenderDraftStepper(id, doc, version);
   } else if (version.status === "under_review" || version.status === "pending_approval") {
@@ -580,6 +591,57 @@ async function qmsDocRenderWorkflowTab(id, doc) {
     // CURRENT version (a rejection always forks a fresh Draft current
     // version) — rendered read-only as a defensive fallback only.
     qmsDocRenderImmutableVersionPanel(id, doc, version);
+  }
+}
+
+async function qmsDocRenderSharedDq(id, doc, version, page) {
+  const el = document.getElementById("qms-doc-tab-body");
+  const selfCheckDone = !!version.self_check_completed_at;
+  const finalUploaded = !!version.source_attachment_id;
+  const gates = version.status === "draft" ? `
+    <div class="qms-section-card" style="margin-bottom:14px">
+      <h3>Before submission</h3>
+      <p style="font-size:12px;color:var(--text-muted)">
+        The Document Control safeguards still apply: both items below must be complete for this version
+        before it can be submitted. Review and approval run through the seven-signatory approval below.
+      </p>
+      <div class="qms-stats-grid">
+        <div class="qms-stat-card ${selfCheckDone ? "success" : "info"}">
+          <strong>1. Author Self-Check${selfCheckDone ? " — Done" : ""}</strong>
+          ${selfCheckDone ? "" : `<button class="qms-btn qms-btn-primary" onclick="qmsDocRecordSelfCheck(${id})">Confirm Self-Check</button>`}
+        </div>
+        <div class="qms-stat-card ${finalUploaded ? "success" : "info"}">
+          <strong>2. Final Author Version${finalUploaded ? " — Uploaded" : ""}</strong>
+          ${finalUploaded ? "" : `<input type="file" id="qms-final-version-file-${id}">
+            <button class="qms-btn qms-btn-primary" onclick="qmsDocUploadFinalVersion(${id})">Upload</button>`}
+        </div>
+      </div>
+    </div>` : "";
+  const gate = page.training_gate;
+  const training = (version.status === "approved" && gate) ? `
+    <div class="qms-section-card" style="margin-bottom:14px">
+      <h3>Training gate</h3>
+      <p style="font-size:12px;color:var(--text-muted)">
+        Training completion ${gate.completion_pct == null ? "—" : gate.completion_pct.toFixed(1) + "%"}
+        (${gate.trainee_count} trainee${gate.trainee_count === 1 ? "" : "s"}); minimum ${gate.threshold_pct.toFixed(0)}%
+        is required before Make Effective.
+      </p>
+    </div>` : "";
+  el.innerHTML = `
+    <div class="qms-section-card" style="margin-bottom:14px">
+      <h3>${doc.doc_number || "DQ"} — Version ${version.version_number}</h3>
+      <div class="qms-detail-meta">
+        <span>Title: ${doc.title || ""}</span>
+        <span>${qmsBadge((doc.status || "").toString().toUpperCase())}</span>
+      </div>
+    </div>
+    ${gates}${training}
+    <div class="qms-section-card"><div id="qms-dq-approval-${id}"></div></div>`;
+  if (window.ValidationApproval) {
+    window.ValidationApproval.render(document.getElementById(`qms-dq-approval-${id}`), {
+      base: "/qms/documents", id,
+      onChanged: async () => { qmsDocSwitchTab("workflow"); },
+    });
   }
 }
 

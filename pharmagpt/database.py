@@ -337,6 +337,8 @@ def init_db() -> None:
     # ── URS Management Suite tables ───────────────────────────────────────────
     from pharmagpt.urs_database import URS_SCHEMA
     conn.executescript(URS_SCHEMA)
+    from pharmagpt.validation_approval_database import VALIDATION_APPROVAL_SCHEMA
+    conn.executescript(VALIDATION_APPROVAL_SCHEMA)
     conn.commit()
 
     # ── URS AI generation — background job tracking (additive columns) ───────
@@ -412,6 +414,25 @@ def init_db() -> None:
     # ── Qualification Management Suite tables ─────────────────────────────────
     from pharmagpt.qual_database import QUAL_SCHEMA
     conn.executescript(QUAL_SCHEMA)
+    conn.commit()
+
+    # Protocol-level approval (standardized Validation workflow): each IQ/OQ/PQ
+    # protocol carries its own approval_status, independent of its siblings and
+    # of the execution `status`. Additive, nullable column + a one-time,
+    # idempotent backfill (only rows still NULL) that carries a legacy
+    # container-level approval down to its protocols so documents approved
+    # under the old workflow stay approved (no ledger rows -> grandfathered).
+    _add_column_if_missing(conn, "qual_protocols", "approval_status", "TEXT DEFAULT NULL")
+    conn.execute("""
+        UPDATE qual_protocols SET approval_status = COALESCE((
+            SELECT CASE q.status
+                     WHEN 'approved' THEN 'approved'  WHEN 'closed' THEN 'approved'
+                     WHEN 'effective' THEN 'effective' WHEN 'obsolete' THEN 'obsolete'
+                     WHEN 'under_review' THEN 'under_review'
+                     WHEN 'pending_approval' THEN 'pending_approval'
+                     ELSE 'draft' END
+            FROM qual_qualifications q WHERE q.id = qual_protocols.qual_id), 'draft')
+        WHERE approval_status IS NULL""")
     conn.commit()
 
     # ── Tenant isolation (security fix, docs/SECURITY_REVIEW.md) ──────────────
@@ -596,6 +617,14 @@ def init_db() -> None:
     # transitions to Obsolete, the same way effective_date is already stamped
     # on the transition to Effective.
     _add_column_if_missing(conn, "qms_documents", "superseded_date", "TEXT DEFAULT ''")
+    conn.commit()
+
+    # Reliable creator identity for the Validation approval workflow
+    # (creator_identity.py): authenticated user id + display name stamped once
+    # at creation. Additive; blank for pre-existing rows.
+    for _creator_table in ("urs_projects", "qual_qualifications", "qual_protocols", "qms_documents"):
+        _add_column_if_missing(conn, _creator_table, "created_by_user_id", "TEXT DEFAULT ''")
+        _add_column_if_missing(conn, _creator_table, "created_by_display_name", "TEXT DEFAULT ''")
     conn.commit()
 
     # ── Equipment entity (PharmaGPT v1.0 Module 2) ─────────────────────────────

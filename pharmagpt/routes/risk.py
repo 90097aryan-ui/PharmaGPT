@@ -38,6 +38,7 @@ import logging
 from flask import Blueprint, g, jsonify, request, Response, stream_with_context
 
 from pharmagpt import audit
+from pharmagpt import audit_events as evt
 from pharmagpt import config
 from pharmagpt import risk_database as rdb
 from pharmagpt import qms_database as qmsdb
@@ -306,7 +307,12 @@ def review_assessment(aid):
     """Run AI review on an assessment. Returns review data."""
     if not tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
-    review = svc.ai_review_assessment(aid)
+    try:
+        review = svc.ai_review_assessment(aid)
+    except Exception as exc:
+        audit.log_failure("risk_assessment", aid, evt.RISK_AI_ASSIST, reason=f"AI review failed: {exc}")
+        raise
+    audit.log("risk_assessment", aid, evt.RISK_AI_ASSIST, detail="AI review generated")
     return jsonify(review)
 
 
@@ -318,7 +324,12 @@ def suggest_mitigations(aid):
     if not a:
         return jsonify({"error": "Not found"}), 404
     item_data = request.get_json() or {}
-    suggestions = svc.suggest_mitigations(item_data, a.get("methodology", "FMEA"), a)
+    try:
+        suggestions = svc.suggest_mitigations(item_data, a.get("methodology", "FMEA"), a)
+    except Exception as exc:
+        audit.log_failure("risk_assessment", aid, evt.RISK_AI_ASSIST, reason=f"Mitigation suggestion failed: {exc}")
+        raise
+    audit.log("risk_assessment", aid, evt.RISK_AI_ASSIST, detail="Mitigation suggestions generated")
     return jsonify(suggestions)
 
 
@@ -370,6 +381,7 @@ def add_approval(aid):
         audit.log_failure("risk_assessment", aid, f"Approval action blocked ({action_name}) — e-signature failed", reason=str(exc))
         return jsonify({"error": str(exc)}), 401
     except esignature_service.ESignatureError as exc:
+        audit.log_failure("risk_assessment", aid, evt.ESIGNATURE_FAILURE, reason=str(exc))
         return jsonify({"error": str(exc)}), 400
 
     # Update assessment status based on approval action
@@ -487,6 +499,8 @@ def export_docx(aid):
     filename = f"Risk_Assessment_{aid}_{a.get('title','').replace(' ','_')[:30]}.docx"
     from flask import send_file
     import io
+    # Wave 4B: log the export itself (not the file's contents).
+    audit.log("risk_assessment", aid, evt.RISK_EXPORTED, detail=filename)
     return send_file(
         io.BytesIO(docx_bytes),
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
