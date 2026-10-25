@@ -60,6 +60,42 @@ def fixtures_dir(tmp_path_factory) -> dict:
     return build_all(str(out_dir))
 
 
+class _NullSupabaseQuery:
+    """Chainable stand-in whose .execute() returns no rows."""
+    data: list = []
+    count = 0
+
+    def __getattr__(self, _name):
+        return lambda *a, **k: self
+
+    def execute(self):
+        return self
+
+
+class _NullSupabaseClient:
+    def table(self, _name):
+        return _NullSupabaseQuery()
+
+    def __getattr__(self, _name):
+        return lambda *a, **k: _NullSupabaseQuery()
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_supabase(monkeypatch):
+    """No test may reach a real Supabase project (it made the suite depend on
+    live data and fail offline/in CI). Every module-level service-role /
+    authenticated client getter returns an empty-table client; tests that need
+    data patch the getter themselves, which overrides this per test."""
+    null = _NullSupabaseClient()
+    for mod in list(sys.modules.values()):
+        name = getattr(mod, "__name__", "")
+        if not name.startswith("pharmagpt"):
+            continue
+        for attr in ("get_service_role_client", "get_authenticated_client"):
+            if attr in getattr(mod, "__dict__", {}):
+                monkeypatch.setattr(mod, attr, lambda *a, **k: null)
+
+
 @pytest.fixture()
 def db_path(tmp_path, monkeypatch):
     """Point pharmagpt.database at a throwaway SQLite file for this test and

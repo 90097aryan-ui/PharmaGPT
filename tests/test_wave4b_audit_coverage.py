@@ -68,7 +68,8 @@ def test_login_failure_logs_without_inventing_an_actor_or_leaking_password(auth_
     fake_client = MagicMock()
     fake_client.auth.sign_in_with_password.side_effect = AuthApiError("Invalid login credentials", 400, None)
 
-    resp = auth_client.post("/auth/login", json={"email": "jane@example.com", "password": "super-secret-pw"})
+    with patch("pharmagpt.routes.auth.get_anonymous_client", return_value=fake_client):
+        resp = auth_client.post("/auth/login", json={"email": "jane@example.com", "password": "super-secret-pw"})
 
     assert resp.status_code == 401
     trail = qmsdb.get_audit_trail("auth", 0)
@@ -213,6 +214,8 @@ def test_capa_ai_suggest_draft_failure_logged_and_no_secret_leaked(client, monke
         raise RuntimeError("upstream AI provider error (api_key=sk-should-not-be-logged)")
 
     monkeypatch.setattr("pharmagpt.routes.qms_capa.svc.ai_suggest_draft", _boom)
+    # Propagation is otherwise only on when FLASK_DEBUG=true (local .env), not in CI.
+    monkeypatch.setitem(client.application.config, "PROPAGATE_EXCEPTIONS", True)
 
     with pytest.raises(RuntimeError):
         client.post(f"/qms/capa/{cid}/suggest-draft")
