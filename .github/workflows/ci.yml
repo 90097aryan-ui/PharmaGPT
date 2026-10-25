@@ -21,4 +21,8 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Run tests
+        env:
+          # CI-only throwaway value; config.py refuses to start without one.
+          FLASK_SECRET_KEY: ci-only-not-a-real-secret
+          GEMINI_API_KEY: ci-only-dummy-key  # client is built at import; tests never call it
         run: python3 -m pytest
