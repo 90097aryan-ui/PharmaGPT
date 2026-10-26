@@ -1,0 +1,153 @@
+/* ── Neumorphic (soft 3D) skin ─────────────────────────────────────────────────
+   Loaded LAST in index.html. Visual-only override: no colours are redefined
+   here except the logo-derived brown palette tokens below and two warm shadow tones.
+   Remove this <link> to revert. */
+:root {
+  /* Palette sampled from the Yuktav logo: espresso brown #3A2A1D + copper #C3702F */
+  --navy: #2A1C11;  --navy-light: #3A2A1D;
+  --blue: #964E14;  --blue-light: #B3621F;  --accent: #C3702F;
+  --sidebar-bg: #3A2A1D;  --sidebar-hover: #4B382A;  --sidebar-active: #B3621F;
+  --success: #5F8A61;  --warning: #C59A41;  --info: #6E8FA5;  --error: #C35F5B;
+  --soft-blue: #E7EEF6;  --soft-green: #E8F2EA;  --soft-amber: #FFF4E5;
+  --bg: #F8F4EF;  --bg-secondary: #F0E9E1;  --surface: #FFFFFF;
+  --border: #E7DDD2;  --divider: #EFE6DC;
+  --text: #3A2A1D;  --text-muted: #6B5A4C;  --text-disabled: #9C8C7E;
+  --user-bg: #B3621F;  --ai-text: #3A2A1D;
+
+  --neu-light: #FFFFFF;
+  --neu-dark:  #DACCBD;                 /* warm shadow tone derived from --bg */
+  --neu-raised:     6px 6px 14px var(--neu-dark), -6px -6px 14px var(--neu-light);
+  --neu-raised-lg:  10px 10px 22px var(--neu-dark), -10px -10px 22px var(--neu-light);
+  --neu-raised-sm:  3px 3px 7px var(--neu-dark), -3px -3px 7px var(--neu-light);
+  --neu-inset:      inset 3px 3px 7px var(--neu-dark), inset -3px -3px 7px var(--neu-light);
+  --neu-ease: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+/* ── Header: same surface as page, soft lift instead of a hairline ── */
+header {
+  background: var(--bg);
+  border-bottom: none;
+  box-shadow: 0 6px 14px -6px var(--neu-dark);
+}
+.status-badge { background: var(--bg); border: none; box-shadow: var(--neu-inset); }
+.logo-icon { box-shadow: var(--neu-raised-sm); border-radius: 10px; }
+
+/* ── Raised surfaces (cards / panels) ── */
+.dash-card, .dash-stat-card, .ws-card, .qms-stat-card, .qms-section-card,
+.qual-card, .urs-card, .assessment-card, .methodology-card, .template-card,
+.report-panel, .val-panel, .val-summary-card, .insights-stat-card,
+.gd-proj-card, .gd-doctype-card, .kb-detail-panel {
+  background: var(--bg);
+  border: none;
+  border-radius: 1.25rem;
+  box-shadow: var(--neu-raised);
+  transition: box-shadow 0.35s var(--neu-ease), transform 0.35s var(--neu-ease);
+}
+.dash-stat-card:hover, .ws-card:hover, .qms-stat-card:hover,
+.qual-card:hover, .urs-card:hover, .assessment-card:hover,
+.methodology-card:hover, .template-card:hover, .gd-proj-card:hover, .gd-doctype-card:hover {
+  box-shadow: var(--neu-raised-lg);
+  transform: translateY(-3px);
+  border-color: transparent;
+}
+/* keep the semantic colour strip on stat cards */
+.dash-stat-card { border-top: 3px solid var(--border); }
+
+/* ── Buttons ── */
+.btn-secondary, .btn-clear, .dash-refresh-btn, .dash-qa-btn, .doc-btn,
+.btn-risk-secondary, .btn-risk-icon, .btn-urs-outline, .btn-qual-outline,
+.btn-new-project, .kb-btn-upload, .kb-row-btn, .val-btn-secondary,
+.gd-btn-secondary, .val-tool-btn, .btn-upload {
+  background: var(--bg);
+  border: none;
+  border-radius: 12px;
+  box-shadow: var(--neu-raised-sm);
+  transition: box-shadow 0.2s ease, transform 0.2s ease, color 0.2s ease;
+}
+.btn-secondary:hover, .btn-clear:hover, .dash-refresh-btn:hover, .dash-qa-btn:hover,
+.doc-btn:hover, .btn-risk-secondary:hover, .btn-risk-icon:hover, .btn-new-project:hover,
+.kb-btn-upload:hover, .kb-row-btn:hover, .val-btn-secondary:hover, .gd-btn-secondary:hover,
+.val-tool-btn:hover, .btn-upload:hover {
+  background: var(--bg);
+  box-shadow: 2px 2px 5px var(--neu-dark), -2px -2px 5px var(--neu-light);
+  color: var(--blue-light);
+}
+.btn-urs-outline:hover, .btn-qual-outline:hover { background: var(--bg); color: var(--blue-light); }
+
+/* coloured CTAs keep their palette fill; only gain depth */
+.btn-primary, .btn-danger, .btn-success, .btn-risk-primary, .btn-risk-danger,
+.btn-urs-primary, .btn-urs-danger, .btn-qual-primary, .btn-qual-danger, .btn-qual-success,
+.val-btn-primary, .val-btn-generate, .gd-btn-primary, .gd-btn-generate {
+  border-radius: 12px;
+  box-shadow: 4px 4px 10px var(--neu-dark), -3px -3px 8px var(--neu-light);
+  transition: box-shadow 0.2s ease, transform 0.2s ease, background 0.15s;
+}
+
+/* pressed feedback for every button */
+button:active:not(:disabled):not(.login-view *) {
+  box-shadow: var(--neu-inset);
+  transform: scale(0.97);
+}
+.btn-primary:active:not(:disabled), .btn-danger:active:not(:disabled), .btn-success:active:not(:disabled),
+.btn-risk-primary:active:not(:disabled), .btn-urs-primary:active:not(:disabled),
+.btn-qual-primary:active:not(:disabled), .val-btn-primary:active:not(:disabled),
+.gd-btn-primary:active:not(:disabled) {
+  box-shadow: inset 3px 3px 7px rgba(0,0,0,0.25), inset -2px -2px 5px rgba(255,255,255,0.15);
+}
+
+/* ── Inputs: pressed-in ── */
+input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]):not([type=color]):not(#user-input):not(.login-view *),
+textarea:not(#user-input), select:not(.login-view *),
+.val-input, .gd-input, .kb-search-input, .input-wrapper {
+  background: var(--bg);
+  border: none;
+  border-radius: 12px;
+  box-shadow: var(--neu-inset);
+}
+.input-wrapper:focus-within,
+input:focus-visible:not(.login-view *), textarea:focus-visible, select:focus-visible {
+  box-shadow: var(--neu-inset), 0 0 0 2px rgba(179,98,31,0.35);
+  outline: none;
+}
+.input-bar { background: var(--bg); border-top: none; box-shadow: 0 -6px 14px -6px var(--neu-dark); }
+.input-wrapper input, .input-wrapper textarea { box-shadow: none; }
+
+/* ── Tabs ── */
+.ws-tab, .qms-tab { border-radius: 12px 12px 0 0; }
+.ws-tab.active, .qms-tab.active {
+  background: var(--bg);
+  box-shadow: var(--neu-inset);
+}
+
+/* ── Modals ── */
+.modal {
+  background: var(--bg);
+  border: none;
+  border-radius: 1.5rem;
+  box-shadow: 14px 14px 34px rgba(45,42,40,0.28), -8px -8px 24px rgba(255,255,255,0.35);
+}
+
+/* ── Sidebar: keep navy palette, apply the same raised/pressed language in dark tones ── */
+.sidebar-item { border-left: none; border-radius: 12px; transition: box-shadow 0.25s ease, background 0.2s ease, color 0.2s ease; }
+.sidebar-item:hover {
+  box-shadow: 4px 4px 9px rgba(0,0,0,0.32), -3px -3px 8px rgba(255,255,255,0.05);
+}
+.sidebar-item.active {
+  box-shadow: inset 3px 3px 7px rgba(0,0,0,0.35), inset -2px -2px 6px rgba(255,255,255,0.07);
+}
+
+/* ── Tables: flat rows inside raised cards, rounded container ── */
+.qms-table { border-radius: 1rem; overflow: hidden; }
+
+/* ── Respect reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .dash-stat-card:hover, .ws-card:hover, .qms-stat-card:hover, .qual-card:hover,
+  .urs-card:hover, .assessment-card:hover, .methodology-card:hover, .template-card:hover,
+  .gd-proj-card:hover, .gd-doctype-card:hover, button:active:not(:disabled) { transform: none; }
+}
+
+/* ── Yuktav logo images ── */
+.brand-logo { height: 38px; width: auto; display: block; flex-shrink: 0; }
+.logo-icon-img { background: var(--surface) !important; box-shadow: var(--neu-raised-sm); padding: 5px; }
+.logo-icon-img img { width: 100%; height: 100%; object-fit: contain; display: block; }
+@media (max-width: 768px) { .brand-logo { height: 30px; } }

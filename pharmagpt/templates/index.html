@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/yuktav-mark.png') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/risk.css') }}" />
@@ -22,6 +23,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/error_pages.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile_nav.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/login.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/neumorphic.css') }}" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <!-- Wave 1 (AI-02, PharmaGPT Production Readiness Audit): sanitizes
        marked.parse() output before it's ever assigned to innerHTML
@@ -60,7 +62,7 @@
 
       <div class="login-card" id="login-card">
         <div class="login-brand">
-          <div class="logo-icon">Rx</div>
+          <div class="logo-icon logo-icon-img"><img src="{{ url_for('static', filename='img/yuktav-mark.png') }}" alt="" /></div>
           <div class="header-titles">
             <h1>Yuktav</h1>
             <p>Manufacturing & Quality Intelligence Platform</p>
@@ -106,11 +108,7 @@
       <button class="mobile-menu-btn" id="mobile-menu-btn" title="Menu" aria-label="Open navigation menu" aria-haspopup="true" aria-expanded="false">
         <span class="icon" data-lucide="menu"></span>
       </button>
-      <div class="logo-icon">Rx</div>
-      <div class="header-titles">
-        <h1>Yuktav</h1>
-        <p>Manufacturing & Quality Intelligence Platform</p>
-      </div>
+      <img class="brand-logo" src="{{ url_for('static', filename='img/yuktav-logo.png') }}" alt="Yuktav — Manufacturing &amp; Quality Intelligence" />
       <div class="header-divider"></div>
       <span class="header-context" id="header-breadcrumb">Overview</span>
       <div class="hdr-chips" id="hdr-chips">
