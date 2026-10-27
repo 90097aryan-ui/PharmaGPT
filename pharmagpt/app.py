@@ -126,7 +126,16 @@ def index():
 
 @app.route("/health")
 def health():
-    """Unauthenticated liveness endpoint for deployment/uptime checks."""
+    """Unauthenticated liveness endpoint for deployment/uptime checks. Still HTTP 200 when a
+    compliance control is unavailable, but the body says so: {"status": "degraded", "degraded": [...]}
+    (e.g. the sign-off unique indexes were skipped because historical duplicates exist)."""
+    try:
+        from pharmagpt import validation_approval_database as vadb
+        missing = vadb.control_status()
+    except Exception:  # noqa: BLE001 - liveness must never fail because of this check
+        missing = []
+    if missing:
+        return jsonify({"status": "degraded", "degraded": missing})
     return jsonify({"status": "ok"})
 
 

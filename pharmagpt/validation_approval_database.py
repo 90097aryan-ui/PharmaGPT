@@ -39,6 +39,22 @@ VALIDATION_APPROVAL_SCHEMA = """
     );
     CREATE INDEX IF NOT EXISTS idx_validation_signoffs_record
         ON validation_signoffs (company_id, doc_type, record_id, status);
+    -- One row per Reject / Make Effective / Obsolete: the UNIQUE key lets exactly one of several
+    -- concurrent or repeated requests perform the transition. `fingerprint` is the newest sign-off
+    -- id of the record, so a later approval cycle (which adds sign-offs) gets a fresh key.
+    CREATE TABLE IF NOT EXISTS validation_transition_claims (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id  TEXT    NOT NULL,
+        doc_type    TEXT    NOT NULL,
+        record_id   INTEGER NOT NULL,
+        action      TEXT    NOT NULL,
+        from_status TEXT    NOT NULL,
+        revision    TEXT    NOT NULL DEFAULT '',
+        fingerprint INTEGER NOT NULL DEFAULT 0,
+        completed   INTEGER NOT NULL DEFAULT 0,
+        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (company_id, doc_type, record_id, action, from_status, revision, fingerprint)
+    );
 """
 
 
@@ -93,6 +109,16 @@ def ensure_unique_indexes(conn) -> bool:
     return True
 
 
+def control_status() -> list[str]:
+    """Names of required compliance controls that are NOT active in this database (empty = all active)."""
+    conn = get_connection()
+    try:
+        have = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+    finally:
+        conn.close()
+    return [name for name, _ in VALIDATION_APPROVAL_INDEXES if name not in have]
+
+
 def add_signoff(*, company_id, doc_type, record_id, revision, signatory_key, designation,
                 signer_user_id, signer_name, signer_role, signer_department="",
                 meaning="", reason="", esignature_id=None, signature_hash="") -> dict:
@@ -136,6 +162,57 @@ def discard_unsigned_claim(signoff_id: int) -> None:
     conn = get_connection()
     with conn:
         conn.execute("DELETE FROM validation_signoffs WHERE id = ? AND esignature_id IS NULL", (signoff_id,))
+    conn.close()
+
+
+class DuplicateTransitionError(Exception):
+    """Another request already claimed (or completed) this transition."""
+
+
+CLAIM_STALE_SECONDS = 120  # an unfinished claim older than this belongs to a crashed request
+
+
+def claim_transition(*, company_id, doc_type, record_id, action, from_status, revision) -> int:
+    """Atomically claim one transition; raises DuplicateTransitionError for the losers."""
+    conn = get_connection()
+    try:
+        for _ in range(2):
+            fp = conn.execute("SELECT COALESCE(MAX(id), 0) FROM validation_signoffs WHERE company_id = ? "
+                              "AND doc_type = ? AND record_id = ?", (company_id, doc_type, record_id)).fetchone()[0]
+            key = (company_id, doc_type, record_id, action, from_status, revision or "", fp)
+            try:
+                with conn:
+                    cur = conn.execute(
+                        "INSERT INTO validation_transition_claims (company_id, doc_type, record_id, action, "
+                        "from_status, revision, fingerprint) VALUES (?,?,?,?,?,?,?)", key)
+                return cur.lastrowid
+            except sqlite3.IntegrityError:
+                # Take over only a crashed, never-completed claim; a completed one is final.
+                with conn:
+                    taken = conn.execute(
+                        "DELETE FROM validation_transition_claims WHERE company_id = ? AND doc_type = ? AND "
+                        "record_id = ? AND action = ? AND from_status = ? AND revision = ? AND fingerprint = ? "
+                        "AND completed = 0 AND created_at < datetime('now', ?)",
+                        key + (f"-{CLAIM_STALE_SECONDS} seconds",)).rowcount
+                if not taken:
+                    raise DuplicateTransitionError() from None
+        raise DuplicateTransitionError()
+    finally:
+        conn.close()
+
+
+def complete_transition(claim_id: int) -> None:
+    conn = get_connection()
+    with conn:
+        conn.execute("UPDATE validation_transition_claims SET completed = 1 WHERE id = ?", (claim_id,))
+    conn.close()
+
+
+def release_transition(claim_id: int) -> None:
+    """Release a claim whose action failed before anything was applied."""
+    conn = get_connection()
+    with conn:
+        conn.execute("DELETE FROM validation_transition_claims WHERE id = ? AND completed = 0", (claim_id,))
     conn.close()
 
 

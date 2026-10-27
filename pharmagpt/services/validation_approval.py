@@ -423,6 +423,19 @@ def perform_action(*, tenant, doc_type: str, audit_type: str, record: dict, data
             stage_complete = all(s["key"] in done_now for s in signatories_for_stage(status))
             new_status = _NEXT_STATUS[status] if stage_complete else status
 
+    transition_claim = None
+    if action in (REJECT, MAKE_EFFECTIVE, OBSOLETE_ACTION):
+        # One winner per transition: concurrent/repeated requests get 409 before any
+        # state change, signature, audit event or Knowledge Base publish.
+        try:
+            transition_claim = vadb.claim_transition(
+                company_id=company_id, doc_type=doc_type, record_id=record_id, action=action,
+                from_status=status, revision=revision)
+        except vadb.DuplicateTransitionError:
+            audit.log_failure(audit_type, audit_rid, f"Duplicate action blocked ({action})",
+                              reason=f"user {tenant.user_id}")
+            raise ApprovalError(f"'{action}' was already performed on this document by another request", 409)
+
     updates: dict = {}
     try:
         if new_status != status:
@@ -440,7 +453,11 @@ def perform_action(*, tenant, doc_type: str, audit_type: str, record: dict, data
     except BaseException:
         if claim:
             vadb.discard_unsigned_claim(claim["id"])  # nothing applied: release the claim
+        if transition_claim:
+            vadb.release_transition(transition_claim)
         raise
+    if transition_claim:
+        vadb.complete_transition(transition_claim)
     if action == REJECT:
         # Only after the document really moved back to Draft: the cycle's
         # sign-offs are superseded (kept, never deleted).
