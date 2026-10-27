@@ -27,6 +27,8 @@ Two responsibilities:
 
 from __future__ import annotations
 
+import logging
+
 from pharmagpt.db import rbac_repo
 from pharmagpt.services import org_directory
 from pharmagpt.services.rbac_defaults import DEPARTMENT_ROLE_TEMPLATES
@@ -36,6 +38,9 @@ from pharmagpt.services.rbac_defaults import DEPARTMENT_ROLE_TEMPLATES
 _TEMPLATE_NAME_BY_CELL: dict[tuple[str, str], str] = {
     cell: name for name, cell in DEPARTMENT_ROLE_TEMPLATES.items()
 }
+
+
+logger = logging.getLogger(__name__)
 
 
 def _department_role_template_name(department_code: str, functional_role: str) -> str | None:
@@ -49,6 +54,23 @@ def _find_company_role_by_name(client, company_id: str, name: str) -> dict | Non
         if role.get("company_id") == company_id and role.get("name") == name:
             return role
     return None
+
+
+def _compensate(client, user_id, company_id, department_id, before, role_inserted) -> None:
+    """Undo this call's writes after a failure. Best effort and itself never raises
+    over the original error (which the caller re-raises)."""
+    try:
+        if role_inserted:
+            rbac_repo.revoke_user_role(client, user_id, role_inserted)
+        if before is None:
+            client.table("user_departments").delete()                 .eq("user_id", user_id).eq("department_id", department_id).execute()
+        else:
+            client.table("user_departments").update(
+                {"workflow_role_id": before["workflow_role_id"], "is_primary": before["is_primary"]}
+            ).eq("user_id", user_id).eq("department_id", department_id).execute()
+    except Exception:  # noqa: BLE001
+        logger.exception("org_assignment: compensation failed for user %s dept %s — manual check needed",
+                         user_id, department_id)
 
 
 def assign_user_to_department(client, *, user_id: str, company_id: str, department_id: str,
@@ -72,36 +94,51 @@ def assign_user_to_department(client, *, user_id: str, company_id: str, departme
     if not reason or not reason.strip():
         raise ValueError("reason is required for a department/role assignment")
 
-    membership = org_directory.add_department_membership(
-        client, user_id, company_id, department_id,
-        workflow_role_id=workflow_role_id, is_primary=is_primary,
-    )
+    # PostgREST has no multi-statement transaction, so the change is applied step by
+    # step and compensated if any later step (RBAC insert or the audit write) fails:
+    # a membership/role change must never persist without its audit row.
+    before = (
+        client.table("user_departments").select("id, workflow_role_id, is_primary")
+        .eq("user_id", user_id).eq("department_id", department_id).execute()
+    ).data or []
+    before = before[0] if before else None
+    role_inserted = None
+    try:
+        membership = org_directory.add_department_membership(
+            client, user_id, company_id, department_id,
+            workflow_role_id=workflow_role_id, is_primary=is_primary,
+        )
 
-    rbac_role_assigned = None
-    already_held = None
-    template_name = _department_role_template_name(department_code, functional_role_name)
-    if template_name:
-        matching_role = _find_company_role_by_name(client, company_id, template_name)
-        if matching_role:
-            # rbac_user_roles is UNIQUE (user_id, role_id): re-inserting a role the user
-            # already holds would raise AFTER the membership change committed and BEFORE
-            # the audit row below, leaving an unaudited change.
-            already_held = (
-                client.table("rbac_user_roles").select("id")
-                .eq("user_id", user_id).eq("role_id", matching_role["id"]).execute()
-            ).data
-            if not already_held:
-                rbac_repo.assign_user_role(client, user_id, matching_role["id"], company_id)
-            rbac_role_assigned = matching_role
+        rbac_role_assigned = None
+        already_held = None
+        template_name = _department_role_template_name(department_code, functional_role_name)
+        if template_name:
+            matching_role = _find_company_role_by_name(client, company_id, template_name)
+            if matching_role:
+                # rbac_user_roles is UNIQUE (user_id, role_id): re-inserting a role the
+                # user already holds would raise after the membership change committed.
+                already_held = (
+                    client.table("rbac_user_roles").select("id")
+                    .eq("user_id", user_id).eq("role_id", matching_role["id"]).execute()
+                ).data
+                if not already_held:
+                    rbac_repo.assign_user_role(client, user_id, matching_role["id"], company_id)
+                    role_inserted = matching_role["id"]
+                rbac_role_assigned = matching_role
 
-    rbac_repo.add_rbac_audit_entry(
-        client, company_id=company_id, actor_user_id=actor_user_id, target_user_id=user_id,
-        department_id=department_id, role_id=(rbac_role_assigned or {}).get("id"),
-        reason=f"Department/functional-role assignment ({functional_role_name}): {reason}",
-        new_value={"department_id": department_id, "functional_role": functional_role_name,
-                   "is_primary": is_primary, "rbac_role_id": (rbac_role_assigned or {}).get("id"),
-                   "rbac_role_already_held": bool(already_held)},
-    )
+        rbac_repo.add_rbac_audit_entry(
+            client, company_id=company_id, actor_user_id=actor_user_id, target_user_id=user_id,
+            department_id=department_id, role_id=(rbac_role_assigned or {}).get("id"),
+            reason=f"Department/functional-role assignment ({functional_role_name}): {reason}",
+            old_value=({"workflow_role_id": before["workflow_role_id"], "is_primary": before["is_primary"]}
+                       if before else None),
+            new_value={"department_id": department_id, "functional_role": functional_role_name,
+                       "is_primary": is_primary, "rbac_role_id": (rbac_role_assigned or {}).get("id"),
+                       "rbac_role_already_held": bool(already_held)},
+        )
+    except Exception:
+        _compensate(client, user_id, company_id, department_id, before, role_inserted)
+        raise
 
     return {"membership": membership, "rbac_role_assigned": rbac_role_assigned}
 

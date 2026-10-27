@@ -45,6 +45,10 @@ class _FakeQuery:
         self._payload = payload if isinstance(payload, list) else [payload]
         return self
 
+    def delete(self):
+        self._op = "delete"
+        return self
+
     def update(self, payload):
         self._op = "update"
         self._payload = payload
@@ -82,6 +86,11 @@ class _FakeQuery:
                 table.append(row)
                 inserted.append(row)
             return _FakeResult(inserted)
+
+        if self._op == "delete":
+            matched = self._matches(table)
+            table[:] = [r for r in table if r not in matched]
+            return _FakeResult(matched)
 
         if self._op == "update":
             matched = self._matches(table)
@@ -226,6 +235,48 @@ def test_assign_when_user_already_holds_the_rbac_role_updates_membership_and_aud
     entries = store["rbac_audit_log"]
     assert len(entries) == 1 and entries[0]["new_value"]["rbac_role_already_held"] is True
     assert "QA-1" in entries[0]["reason"]
+
+
+def _failing_audit(*_a, **_k):
+    raise RuntimeError("audit insert failed")
+
+
+def test_audit_failure_restores_existing_membership_and_leaves_no_change(store, monkeypatch):
+    """A failed audit write must not leave an unaudited membership change."""
+    store["rbac_user_roles"].append({"id": "x", "user_id": "user-1", "role_id": "role-a-prod-reviewer",
+                                     "company_id": COMPANY_A})
+    store["user_departments"].append({"user_id": "user-1", "department_id": "dept-a-production",
+                                      "company_id": COMPANY_A, "workflow_role_id": None, "is_primary": True})
+    monkeypatch.setattr(org_assignment.rbac_repo, "add_rbac_audit_entry", _failing_audit)
+    with pytest.raises(RuntimeError):
+        org_assignment.assign_user_to_department(
+            FakeOrgClient(store), user_id="user-1", company_id=COMPANY_A, department_id="dept-a-production",
+            department_code="PRODUCTION", workflow_role_id=3, functional_role_name="Reviewer",
+            is_primary=True, actor_user_id="admin-1", reason="r")
+    assert store["user_departments"][0]["workflow_role_id"] is None   # restored
+    assert store["user_departments"][0]["is_primary"] is True         # is_primary preserved
+    assert len(store["rbac_user_roles"]) == 1 and store["rbac_audit_log"] == []
+
+
+def test_audit_failure_removes_new_membership_and_newly_inserted_role(store, monkeypatch):
+    monkeypatch.setattr(org_assignment.rbac_repo, "add_rbac_audit_entry", _failing_audit)
+    with pytest.raises(RuntimeError):
+        org_assignment.assign_user_to_department(
+            FakeOrgClient(store), user_id="user-1", company_id=COMPANY_A, department_id="dept-a-production",
+            department_code="PRODUCTION", workflow_role_id=3, functional_role_name="Reviewer",
+            is_primary=False, actor_user_id="admin-1", reason="r")
+    assert store["user_departments"] == []
+    assert store["rbac_user_roles"] == []
+
+
+def test_audit_entry_records_previous_membership_state(store):
+    store["user_departments"].append({"user_id": "user-1", "department_id": "dept-a-production",
+                                      "company_id": COMPANY_A, "workflow_role_id": None, "is_primary": False})
+    org_assignment.assign_user_to_department(
+        FakeOrgClient(store), user_id="user-1", company_id=COMPANY_A, department_id="dept-a-production",
+        department_code="PRODUCTION", workflow_role_id=3, functional_role_name="Reviewer",
+        is_primary=False, actor_user_id="admin-1", reason="r")
+    assert store["rbac_audit_log"][0]["old_value"] == {"workflow_role_id": None, "is_primary": False}
 
 
 def test_assign_user_to_department_without_a_provisioned_rbac_role_still_creates_membership(store):
