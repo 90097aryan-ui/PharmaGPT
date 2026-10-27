@@ -263,6 +263,23 @@ def test_supabase_directory_only_selects():
     assert set(client.log) == {"select"}
 
 
+def test_supabase_companies_uses_actual_legal_name_column():
+    """Regression: the live schema has companies.legal_name, not companies.name
+    (selecting `name` made the live preflight crash with Postgres 42703)."""
+    class _Strict(_Query):
+        def select(self, cols, *a, **k):
+            asked = {c.strip() for c in cols.split(",")}
+            assert asked <= {"id", "legal_name"}, f"unknown companies column(s): {asked - {'id', 'legal_name'}}"
+            return super().select(cols)
+
+    client = _Client()
+    client.tables["companies"] = [{"id": "A", "legal_name": "Acme Pharma"}]
+    client.table = lambda name: (_Strict if name == "companies" else _Query)(client.tables[name], client.log)
+    assert pf.SupabaseDirectory(client).companies() == [{"id": "A", "name": "Acme Pharma"}]
+    client.tables["companies"] = [{"id": "B", "legal_name": None}]
+    assert pf.SupabaseDirectory(client).companies() == [{"id": "B", "name": ""}]
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def test_cli_exit_codes_and_report(populated, db_path, tmp_path, capsys):

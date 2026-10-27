@@ -68,7 +68,9 @@ class SupabaseDirectory:
         self._c = client
 
     def companies(self):
-        return self._c.table("companies").select("id, name").execute().data or []
+        # The live column is companies.legal_name (there is no companies.name).
+        rows = self._c.table("companies").select("id, legal_name").execute().data or []
+        return [{"id": r["id"], "name": r.get("legal_name") or ""} for r in rows]
 
     def users(self, company_id):
         rows = (self._c.table("users").select("id, company_id, display_name, status, roles(name)")
