@@ -166,3 +166,31 @@ The earlier "2.50:1" for `--text-disabled` came from a faulty ad-hoc script. Cor
 - **Practical consequence for Nutra:** it has no `company_admin`. A super_admin needs an active break-glass grant, AND a different tenant user
   with a QA authority role must co-approve (the directory has a QA Coordinator/Admin user who is not among the 7). Whether a demo tenant may
   use a different process is the owner's quality-system decision, not something the tool can waive.
+
+## 13. Is there an existing authorized QA person? (read-only evidence, 2026-10-27) — NO: provisioning stays BLOCKED
+**Candidates that pass the tool's technical check.** Two active tenant users hold a QA authority RBAC role and a QA department membership:
+`6facc0` (QA Coordinator/Admin; Validation grants Admin/Approve/Create/Delete/Edit/Reject/Review/Submit/View; platform role reviewer_qa) and
+`b0369b` (QA Approver; Approve/Reject/Review/View). `b0369b` is row 5 of the change set, so it can never approve its own change.
+`6facc0` is not among the 7 and is the only technical candidate.
+
+**Why that does not establish a legitimate approver.** Technical eligibility is necessary, not sufficient:
+- Every one of the 23 tenant accounts was created on the same day (2026-07-30) by the seed script; none has MFA; only 9 have ever signed in (latest 2026-10-10;
+  `6facc0` 2026-10-03, `b0369b` 2026-08-29). Nothing in the identity source ties either account to a named, individually accountable QA person.
+- The seed script hard-codes one shared demo password in the repository. Unless it was changed (not tested), a valid token for `6facc0` proves possession of a
+  demo credential, not the decision of a qualified QA person.
+- The platform defines no approval workflow or approver role for directory/access changes, and no SOP for it is in the repo. QA authority over designation
+  eligibility is a quality-system decision made outside the application.
+
+**Missing identity.** A named individual with (a) an individually owned account (not a seed/demo account; credentials known only to them, MFA recommended,
+email verified), (b) platform role `reviewer_qa` (or company_admin), (c) a QA authority RBAC role (QA Approver or QA Coordinator/Admin) and a QA department
+membership, (d) not one of the 7 people being changed. Also missing: a Nutra `company_admin`, or a super_admin willing to act under an active break-glass grant.
+
+**Process to establish it (uses only existing platform mechanisms; each step is logged):**
+1. System owner records who holds QA authority for Nutra (quality-system decision) and whether a demo tenant may use this process or a documented alternative.
+2. Super-admin signs in and opens **Assume Company Context** for Nutra with a reason (creates the logged, time-boxed `break_glass_access` grant).
+3. Under that grant, create the individual's account through the existing user-management route (`routes/users.py` -> `identity_admin.provision_user`) as
+   `reviewer_qa`; assign the QA authority RBAC role through the existing RBAC role-assignment route (audited); add a QA department membership.
+4. The individual sets their own password / MFA and signs in. (Their own functional role on the membership is a later, separately approved change.)
+5. Approvers authenticate with their own live tokens; run the tool as a dry run, then `--execute` only after written approvals exist.
+6. Separately: rotate or disable the 23 seed demo accounts and retire the shared password.
+If the owner decides a demo tenant needs a lighter process, that is a documented policy implemented as a reviewed code change, never a flag.

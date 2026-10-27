@@ -46,6 +46,8 @@ def _store():
     st["rbac_roles"].append({"id": "r-qa-coord", "company_id": CO, "name": "QA Coordinator/Admin",
                              "is_template": False, "status": "active"})
     st["rbac_user_roles"].append({"id": "ur-qa-ind", "user_id": "u-qa-ind", "role_id": "r-qa-coord", "company_id": CO})
+    st["user_departments"].append({"id": "m-qa-ind", "user_id": "u-qa-ind", "department_id": "d-QA", "company_id": CO,
+                                   "workflow_role_id": None, "is_primary": True})
     return st
 
 
@@ -221,6 +223,14 @@ def test_independent_qa_is_mandatory(tmp_path):
     _unchanged(st, before)
 
 
+def test_qa_approver_must_be_a_member_of_the_qa_department(tmp_path):
+    st = _store(); before = copy.deepcopy(st)
+    st["user_departments"] = [m for m in st["user_departments"] if m["user_id"] != "u-qa-ind"]   # role name alone is not enough
+    before = copy.deepcopy(st)
+    assert _run(tmp_path, st, execute=True) == 2
+    _unchanged(st, before)
+
+
 def test_nobody_may_approve_or_act_on_their_own_change(tmp_path):
     st = _store(); before = copy.deepcopy(st)
     # the QA Approver (a subject, row 5) approving the change set that gives them authority
@@ -257,7 +267,8 @@ def test_authorized_execute_applies_seven_changes_with_verified_attribution(tmp_
     assert by["u-val-init"]["workflow_role_id"] == roles["Initiator"] and by["u-val-init"]["is_primary"] is True
     assert by["u-prod-app"]["is_primary"] is True and by["u-eng-rev"]["is_primary"] is False
     assert by["u-plant"]["workflow_role_id"] == roles["Plant Head"] and by["u-plant"]["department_id"] == "d-PLANT_HEAD"
-    assert len(st["user_departments"]) == 7 and len(st["rbac_user_roles"]) == 8      # no duplicate RBAC inserts
+    assert by["u-qa-ind"]["workflow_role_id"] is None                                   # the QA approver is untouched
+    assert len(st["user_departments"]) == 8 and len(st["rbac_user_roles"]) == 8      # no duplicate RBAC inserts
     audits = st["rbac_audit_log"]
     assert len(audits) == 7
     for a in audits:                                                                   # actor = the VERIFIED token holder

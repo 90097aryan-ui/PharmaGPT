@@ -153,6 +153,13 @@ def authorize_qa_approver(client, tenant, company_id: str) -> None:
         raise ProvisioningError("QA approver must be an authenticated user of this company")
     if not (_held_rbac_roles(client, tenant.user_id, company_id) & set(QA_AUTHORITY_ROLES)):
         raise ProvisioningError(f"QA approver must hold a QA authority role ({' / '.join(QA_AUTHORITY_ROLES)})")
+    # a role NAME is company-editable text: also require a real membership in the QA department
+    qa_depts = [d["id"] for d in (client.table("departments").select("id").eq("company_id", company_id)
+                                  .eq("department_code", "QA").execute().data or [])]
+    member = [m for d in qa_depts for m in (client.table("user_departments").select("id").eq("user_id", tenant.user_id)
+                                            .eq("department_id", d).execute().data or [])]
+    if not member:
+        raise ProvisioningError("QA approver must be a member of this company's QA department")
 
 
 def establish_authority(client, company_id: str, rec: dict, *, actor_token, admin_token, qa_token) -> dict:
