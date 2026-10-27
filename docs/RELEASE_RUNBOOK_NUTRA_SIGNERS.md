@@ -13,7 +13,10 @@ separate deployment authorization is recorded. Facts below were verified read-on
 - Startup migration (verified by running `init_db()` twice on a throwaway copy of the verified backup): additive only —
   new table `validation_signoffs`; new columns `created_by_user_id/created_by_display_name` on `urs_projects`,
   `qual_qualifications`, `qual_protocols`, `qms_documents`; `qual_protocols.approval_status` (+ one-time back-fill);
-  indexes `idx_validation_signoffs_record`, `uq_validation_signoffs_signatory`, `uq_validation_signoffs_signer`.
+  indexes `idx_validation_signoffs_record`, `uq_validation_signoffs_signatory`, `uq_validation_signoffs_signer`;
+  (added after that check, re-verify on the final candidate) tables `validation_transition_claims` and
+  `qms_esignature_attempts` (+ index). `/health` now returns `{"status":"degraded","degraded":[...]}` (HTTP 200) if the
+  sign-off unique indexes are missing; post-deploy check must expect exactly `{"status":"ok"}`.
   Integrity ok before/after; no row-count change in any existing table; second run is a no-op.
 - Supabase migration `0017_company_branding`: **not required** for this release (only the company-branding PUT API
   uses the new `company_settings` columns; DOCX branding reads `companies.legal_name`). It is NOT applied in production
@@ -26,7 +29,7 @@ separate deployment authorization is recorded. Facts below were verified read-on
    (every designation has a distinct authorized signer). Department enforcement stays ON.
 3. Candidate commit pushed (separate instruction) and **CI green on that exact SHA** (real PyMuPDF, Linux).
 4. Candidate release directory re-staged from that exact SHA (the currently staged `PharmaGPT-release-de2f9dc` predates
-   `533dde5`, `326df84`, `7909301`, `1095237` and must NOT be switched to).
+   `533dde5` and every later commit, and must NOT be switched to).
 5. Separate written deployment authorization.
 
 ## 2. Pre-deployment (on the Oracle host, ubuntu@92.4.64.238)

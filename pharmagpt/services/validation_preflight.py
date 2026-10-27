@@ -194,6 +194,9 @@ def schema_report(conn) -> list[dict]:
     if not {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'uq_validation_signoffs_%'")}             >= {"uq_validation_signoffs_signatory", "uq_validation_signoffs_signer"}:
         needs.append({"item": "unique indexes on validation_signoffs",
                       "effect": "created at startup unless historical duplicate sign-offs exist (then skipped and reported by /health)"})
+    if not _cols(conn, "qms_esignature_attempts"):
+        needs.append({"item": "table qms_esignature_attempts",
+                      "effect": "created at startup (per-user failed e-signature password limit)"})
     if "approval_status" not in _cols(conn, "qual_protocols"):
         needs.append({"item": "column qual_protocols.approval_status",
                       "effect": "added at startup; back-filled once from each protocol's parent Qualification"})

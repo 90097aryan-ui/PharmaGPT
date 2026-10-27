@@ -123,3 +123,29 @@ author of each, a backup, and a change record): follow `docs/VALIDATION_APPROVAL
 ## 10. Correction
 The earlier "2.50:1" for `--text-disabled` came from a faulty ad-hoc script. Correct value on `--bg` is 2.97:1 (still < 4.5:1 AA);
 `--text-muted` is 6.01:1 (passes). Fixed in `7909301` (`#6F5F52`, 5.58:1) with `tests/test_neumorphic_contrast.py`.
+
+## 11. Architecture reassessment (read-only evidence, 2026-10-27)
+- **What "Nutra" is:** one `companies` row (`legal_name` Nutra, `industry_segment` = `nutraceutical`, created 2026-07-30) — the
+  **demo tenant** created by `scripts/seed_nutra_demo.py` (docs `NUTRA_DEMO_DATA.md`). It is the only tenant in production
+  (23 users, all with the seed's `@nutra.com` addresses, plus one platform super-admin without a company). "Category" is a
+  different thing: the `industry_segment` column. Tenant = `companies.id` (all data is filtered by it). QA approval is a workflow
+  inside a tenant (designations + RBAC + department membership); it is not a category.
+- **Root cause of the 7 blockers:** a data/seed generation gap, not a code-design defect. The seed (2026-07-28) stores each
+  user's functional role in the legacy global column `users.workflow_role_id` (migration 0014). Migration 0016 (2026-09-07) made the
+  functional role a property of the department membership (`user_departments.workflow_role_id`) so that "QA Reviewer" != "Production
+  Reviewer"; the validation engine reads only that. The seed was never updated and no backfill exists, so all 22 memberships are NULL.
+  Evidence: all 23 users have a legacy role (7 Initiator, 7 Reviewer, 7 Approver, 1 Coordinator, 1 Plant Head) and it agrees with the
+  role implied by their RBAC role for 23/23; 22 users have exactly one membership (so a mapping is unambiguous); the Plant Head user has none.
+- **Why "QA Approver" RBAC alone does not qualify:** RBAC answers "may this person do Validation:Approve?"; the signatory line
+  answers "may they sign AS the QA Manager?", which needs the department. The engine requires department AND functional role from
+  the same membership row (`validation_approval._signer_department`), deliberately fail-closed. It is an implementation of the
+  approved designation model (docs/VALIDATION_APPROVAL_WORKFLOW.md), not a Supabase/RBAC rule, and the default can be flipped only by
+  a QA-authorized policy change. Making eligibility follow the RBAC role *name* would hang a signature authority on a free-text,
+  per-company-editable string and re-open the cross-department ambiguity 0016 removed; accepting the legacy global role would let a
+  user with Approver in QA and Production sign both lines. Neither is recommended.
+- **Recommendation:** keep the engine; treat this as tenant data. The 7 minimum rows in §2 stay valid and are now backed by two
+  independent records (RBAC role and the legacy functional role). Also fix `scripts/seed_nutra_demo.py` to write
+  `user_departments.workflow_role_id` so a re-seed cannot recreate the gap (code change, no production effect).
+- **Security note (unverified):** the seed script hard-codes one shared demo password and the production Supabase has 23 matching
+  accounts with elevated platform roles. Whether it was ever changed is unknown (not tested). Owner should rotate/disable demo
+  accounts before any real use of yuktav.com.
