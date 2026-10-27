@@ -1,0 +1,125 @@
+# Nutra — Validation Signer Provisioning Plan (authorization-ready, NOT executed)
+
+Status: **PROPOSED. No change has been made.** Production directory, SQLite and service are untouched.
+Release under review: `de2f9dc` (+ local preflight repair `d3b84f0`, unpushed). Production: `691affa`.
+Evidence date: 2026-10-27. Evidence method: select-only reads; in-memory simulation (no writes).
+Users appear only as 6-hex pseudonyms (first 6 chars of SHA-256 of the user id). No names/emails.
+
+## 1. Why (root cause)
+
+`validation_approval._signer_department` requires ONE `user_departments` row whose department code AND
+functional role (`workflow_roles`) both match the designation. In Nutra:
+- all 22 memberships have `workflow_role_id = NULL` → no row can satisfy any designation;
+- no `PLANT_HEAD` membership exists (the Plant Head user has no membership row).
+Departments, platform roles, RBAC grants and RBAC role assignments are already correct.
+
+## 2. Proposed changes (minimum set: 6 updates + 1 new row)
+
+Mapping rule: the functional role is the one already named by the user's existing company RBAC role
+(e.g. RBAC role "Validation Approver" → department VALIDATION, functional role Approver). No new RBAC
+role, grant, user or department is created. `is_primary` is not changed.
+
+| # | User | Designation | Dept | Functional role | RBAC evidence (existing assignment) | Change type |
+|---|---|---|---|---|---|---|
+| 1 | `9f4353` | Validation Engineer (Prepared By) | VALIDATION | Initiator | RBAC "Validation Initiator"; platform role `user` (no platform role needed for Prepared By) | UPDATE `workflow_role_id` on existing row |
+| 2 | `bef06d` | Process Engineer (Reviewed By) | ENGINEERING | Reviewer | RBAC "Engineering Reviewer"; platform `reviewer_qa` | UPDATE |
+| 3 | `e87edc` | Engineering Manager | ENGINEERING | Approver | RBAC "Engineering Approver"; `reviewer_qa` | UPDATE |
+| 4 | `f38cda` | Production Manager | PRODUCTION | Approver | RBAC "Production Approver"; `reviewer_qa` | UPDATE |
+| 5 | `b0369b` | QA Manager | QA | Approver | RBAC "QA Approver"; `reviewer_qa` | UPDATE |
+| 6 | `cf46ca` | Validation Manager | VALIDATION | Approver | RBAC "Validation Approver"; `reviewer_qa` | UPDATE |
+| 7 | `31405c` | Site Director / VP Quality (Final Approval) | PLANT_HEAD | Plant Head | RBAC "Plant Head / Approver"; `reviewer_qa`; currently NO membership row | INSERT new membership |
+
+Choice flagged for the approver: Reviewed By accepts ENGINEERING **or** PRODUCTION Reviewer. Row 2 uses
+Engineering Reviewer; Production Reviewer `75459e` is an equally valid alternative (pick one; do not do both
+unless wanted — both would make two eligible reviewers).
+
+Simulation (in-memory, same code as the preflight, using live directory data): after #1–#7 →
+`ready=True`, eligible signers per designation 1/2/1/1/1/1/2, **7 of 7 distinct signers assignable**.
+Without #7 only 6/7 (the only other Final Approval candidate is the QA Approver, already needed as QA Manager).
+Separation of duties is unchanged: still seven different people, no switch.
+
+## 3. Expected impact
+
+- **Validation (URS, DQ, IQ/OQ/PQ):** these 7 users become eligible for exactly their designation (plus the
+  existing RBAC grants/platform role, which still apply). Nobody else becomes eligible. Author-only submission
+  and one-person-one-designation are unchanged and enforced server-side + by the DB unique indexes in `de2f9dc`.
+- **Other workflows (side effect):** `workflow_engine` auto-resolves approvers by (department, functional role)
+  only for template steps that opt in via `department_code` + `functional_role_name`. In production SQLite 0 of
+  61 template steps opt in (read-only count), so **no current QMS/Document Control workflow routing changes**.
+  If steps are later configured to opt in, these users would be resolved. Setting roles on the other 15 rows
+  (PPIC, QC, Warehouse, Production/Engineering/QA Initiator etc.) is NOT proposed.
+- **Other modules' RBAC:** no RBAC role/grant changes; no effect on access outside the Validation designations.
+- **Rollback:** each change is reversible (#1–#6 set `workflow_role_id` back to NULL; #7 delete the new row).
+  Capture pre-change values first (membership row id, `workflow_role_id`, `is_primary`).
+
+## 4. Required approvals (record each in writing before execution)
+
+| Item | Approver | Needed because |
+|---|---|---|
+| #1–#6 | Nutra company administrator | directory change inside their tenant |
+| #1–#7 | Nutra QA head | designation eligibility for GMP signatories (Part 11 / Annex 11 accountability) |
+| #7 (new membership) | Nutra administrator **and** QA | adds a membership, i.e. new authority for Final Approval |
+| Reviewer choice (Eng vs Prod) | Nutra QA | selects who is the Reviewed By signatory |
+
+Approval record must name the exact rows above (pseudonym + designation + dept + role). No approval is
+inferred from any earlier task statement.
+
+## 5. Execution method — BLOCKER FOUND in the mandated function
+
+The instruction is to apply changes via `org_assignment.assign_user_to_department`. Reading it
+(`pharmagpt/services/org_assignment.py:54-96`, `db/rbac_repo.py:136`, `migrations/0015…:272`):
+1. it upserts the membership (the intended change);
+2. then **INSERTs** the matching company RBAC role into `rbac_user_roles`;
+3. only then writes the `rbac_audit_log` entry.
+`rbac_user_roles` has `UNIQUE (user_id, role_id)` and every one of these 7 users **already holds** that RBAC
+role. Step 2 would raise a unique-violation after step 1 committed → **membership changed but no audit row
+written** (an unaudited change, the opposite of the requirement). Status: Confirmed from code and schema;
+not executed (would write production).
+
+Options (approver/engineering decision; none executed):
+- **A (recommended):** small code fix + test: in `assign_user_to_department`, skip the RBAC insert when the user
+  already holds the role (membership + audit still written, one audit row per change). Separate commit; then use it.
+- **B:** a reviewed one-off script calling `org_directory.add_department_membership` and
+  `rbac_repo.add_rbac_audit_entry` directly (same effect, no RBAC insert), with `reason` citing the approval ref.
+**Decision recorded: option A selected. Implemented locally as commit `533dde5` (unpushed, not deployed). The
+provisioning call is a one-off, so it must be run from a checkout that contains `533dde5` (not from the staged
+`de2f9dc` release, which lacks the fix and would hit the unaudited-change defect).** Evidence: new regression test fails without the fix and passes
+with it; `tests/test_org_assignment.py`, `test_rbac.py`, `test_org_directory.py` = 50 passed.
+Either way: read the current `is_primary` per row and pass it back unchanged (membership upsert only touches
+`is_primary` when True, and then only via `set_primary_department`).
+
+## 6. QA Coordinator — separate decision (NOT part of this plan)
+
+User `6facc0` holds RBAC "QA Coordinator/Admin" (dept QA, no functional role now). Mapping to `Coordinator` is
+**not proposed and left unchanged**. If QA later decided to do it, consequences:
+- `Coordinator` is accepted on every designation line → this user would be eligible for any ONE designation per
+  cycle (SoD still forbids two). Simulation C: QA Manager eligible 1→2, Final Approval 2→3.
+- It broadens who can sign GMP approvals; it is an elevation, so it needs its own explicit QA decision recorded
+  separately, with a stated reason (e.g. backup signatory). It is not needed for 7/7.
+
+## 7. After approval (not started)
+Apply approved rows (method A or B) → rbac audit entries → re-run repaired preflight read-only (expect GO only if
+all seven designations show a distinct eligible signer) → URS 1 & 2 blank-creator investigation → review the six
+startup changes → request separate deployment authorization.
+
+## 8. Execution tooling (committed locally, nothing executed)
+`scripts/provision_validation_signers.py` (+ `pharmagpt/services/signer_provisioning.py`, tests in
+`tests/test_signer_provisioning.py`). Dry run by default; `--execute` requires `--rollback-out` and a complete
+approval file (administrator + QA head; additional administrator + QA approvals for the Plant Head membership;
+QA `reviewer_choice` = ENGINEERING|PRODUCTION; `actor_pseudonym`). It accepts only the approved minimum set
+(no Coordinator, no extra rows, distinct users), resolves users by pseudonym, requires each user to hold the
+justifying RBAC role, captures original rows before writing, preserves `is_primary` (new Plant Head row: False —
+confirm with the administrator), calls `assign_user_to_department` (which now compensates on failure and records
+`old_value`), and re-reads membership + audit row after each change. Approval files hold references only and must not be committed.
+
+## 9. URS 1 and 2 — blank creator ids (read-only findings, no change made)
+Both are `draft`, created 2026-09-28 and 2026-10-10, no sign-offs (the ledger does not exist yet). `prepared_by` is set on both.
+- URS 2: exactly one active directory user has the same display name → author-by-name works; optional stamp of the true id.
+- URS 1: **no** directory user has that display name → nobody can submit it as its author (author-only rule).
+Not a deployment blocker (no in-flight approvals). Recommended controlled remediation (needs Nutra QA to name the true
+author of each, a backup, and a change record): follow `docs/VALIDATION_APPROVAL_RECOVERY.md` "Stamping a creator" for URS 2
+(confirm user) and URS 1 (QA-attested author), or recreate URS 1 under the right author. Do not stamp by guess.
+
+## 10. Correction
+The earlier "2.50:1" for `--text-disabled` came from a faulty ad-hoc script. Correct value on `--bg` is 2.97:1 (still < 4.5:1 AA);
+`--text-muted` is 6.01:1 (passes). Fixed in `7909301` (`#6F5F52`, 5.58:1) with `tests/test_neumorphic_contrast.py`.
