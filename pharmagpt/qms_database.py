@@ -119,6 +119,17 @@ QMS_SCHEMA = """
     CREATE INDEX IF NOT EXISTS idx_qms_esignatures_record ON qms_esignatures(record_type, record_id);
     CREATE INDEX IF NOT EXISTS idx_qms_esignatures_company_id ON qms_esignatures(company_id);
 
+    -- Password re-authentication attempts at e-signature time (per user), so repeated wrong
+    -- passwords can be throttled across both gunicorn workers. Append-only attempt log.
+    CREATE TABLE IF NOT EXISTS qms_esignature_attempts (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id    TEXT    NOT NULL,
+        company_id TEXT,
+        succeeded  INTEGER NOT NULL,
+        at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_esig_attempts_user ON qms_esignature_attempts(user_id, id);
+
     -- ── Document Control ──────────────────────────────────────────────────────
 
     -- Controlled document templates (Document Control redesign, Phase 5):
@@ -1372,6 +1383,28 @@ def get_approval_trail(record_type: str, record_id: int) -> list[dict]:
 # ── Electronic Signatures (shared, immutable) ─────────────────────────────────
 # No update/delete function exists for this table anywhere in this codebase,
 # and none should be added — see pharmagpt/services/esignature_service.py.
+
+def recent_esignature_failures(user_id: str, window_minutes: int) -> int:
+    """Wrong-password attempts by this user inside the window and after their last success."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM qms_esignature_attempts WHERE user_id = ? AND succeeded = 0 "
+            "AND at >= datetime('now', ?) AND id > COALESCE((SELECT MAX(id) FROM qms_esignature_attempts "
+            "WHERE user_id = ? AND succeeded = 1), 0)",
+            (user_id, f"-{int(window_minutes)} minutes", user_id)).fetchone()
+        return row[0]
+    finally:
+        conn.close()
+
+
+def record_esignature_attempt(user_id: str, company_id: str | None, succeeded: bool) -> None:
+    conn = get_connection()
+    with conn:
+        conn.execute("INSERT INTO qms_esignature_attempts (user_id, company_id, succeeded) VALUES (?,?,?)",
+                     (user_id, company_id, 1 if succeeded else 0))
+    conn.close()
+
 
 def add_esignature(*, company_id: str | None, record_type: str, record_id: int,
                     version_number: str, user_id: str, full_name: str, role: str,

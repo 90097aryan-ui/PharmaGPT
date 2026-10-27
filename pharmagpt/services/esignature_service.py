@@ -38,6 +38,8 @@ from flask import request
 
 from pharmagpt import audit as audit_module
 from pharmagpt import qms_database as qmsdb
+from supabase_auth.errors import AuthApiError, AuthInvalidCredentialsError
+
 from pharmagpt.services.supabase_client import get_anonymous_client
 
 # Fixed vocabulary — not configurable per company, since these are the
@@ -59,6 +61,22 @@ class ReauthenticationError(ESignatureError):
     Callers should return 401 to the client."""
 
 
+class ESignatureThrottledError(ReauthenticationError):
+    """Too many wrong e-signature passwords for this user in the window (HTTP 429 where mapped)."""
+
+
+class ReauthUnavailableError(ReauthenticationError):
+    """Supabase could not verify the password (rate limit, outage, network): NOT a wrong
+    password, so it is neither counted against the user nor reported as one (HTTP 503 where mapped)."""
+
+
+# A user may get this many wrong passwords per window; further attempts are refused without
+# calling Supabase (so one signer cannot exhaust the shared server-IP auth rate limit). This
+# throttles e-signatures only — never login — so it cannot lock anybody out of the application.
+MAX_FAILED_ATTEMPTS = 5
+THROTTLE_WINDOW_MINUTES = 15
+
+
 def reauthenticate(email: str, password: str) -> bool:
     """Verify `password` against Supabase Auth for `email`, independently
     of the caller's existing bearer-token session — "a logged-in session
@@ -72,8 +90,14 @@ def reauthenticate(email: str, password: str) -> bool:
     try:
         client.auth.sign_in_with_password({"email": email, "password": password})
         return True
-    except Exception:
+    except AuthApiError as exc:
+        if exc.status in (400, 401, 422):  # invalid credentials (wrong password)
+            return False
+        raise ReauthUnavailableError("Password verification is temporarily unavailable — please retry") from exc
+    except AuthInvalidCredentialsError:
         return False
+    except Exception as exc:  # noqa: BLE001 - network/timeouts/5xx: not a wrong password
+        raise ReauthUnavailableError("Password verification is temporarily unavailable — please retry") from exc
 
 
 def validate_meaning_and_reason(meaning: str, reason: str) -> None:
@@ -88,7 +112,12 @@ def require_esignature(tenant, password: str, meaning: str, reason: str) -> None
     BEFORE performing the decision itself — raises ESignatureError /
     ReauthenticationError and mutates nothing if it fails."""
     validate_meaning_and_reason(meaning, reason)
-    if not reauthenticate(tenant.email, password):
+    if qmsdb.recent_esignature_failures(tenant.user_id, THROTTLE_WINDOW_MINUTES) >= MAX_FAILED_ATTEMPTS:
+        raise ESignatureThrottledError(
+            f"Too many failed e-signature attempts — try again in up to {THROTTLE_WINDOW_MINUTES} minutes")
+    ok = reauthenticate(tenant.email, password)  # may raise ReauthUnavailableError (not counted)
+    qmsdb.record_esignature_attempt(tenant.user_id, tenant.company_id, ok)
+    if not ok:
         raise ReauthenticationError("Password confirmation failed")
 
 

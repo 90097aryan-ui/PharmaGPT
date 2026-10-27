@@ -393,7 +393,9 @@ def perform_action(*, tenant, doc_type: str, audit_type: str, record: dict, data
     except esignature_service.ReauthenticationError as exc:
         audit.log_failure(audit_type, audit_rid, f"Approval action blocked ({action}) — e-signature failed",
                           reason=str(exc))
-        raise ApprovalError(str(exc), 401)
+        status_code = (429 if isinstance(exc, esignature_service.ESignatureThrottledError)
+                       else 503 if isinstance(exc, esignature_service.ReauthUnavailableError) else 401)
+        raise ApprovalError(str(exc), status_code)
     except esignature_service.ESignatureError as exc:
         audit.log_failure(audit_type, audit_rid, "E-signature rejected", reason=str(exc))
         raise ApprovalError(str(exc), 400)
