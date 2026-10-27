@@ -93,7 +93,12 @@ def plan(client, company_id: str, changes: list[dict], actor_pseudonym: str) -> 
     by_ps = {}
     for u in users:
         by_ps.setdefault(pseudonym(u["id"]), []).append(u)
-    actor = _one(by_ps.get(actor_pseudonym, []), "actor")
+    actor_rows = by_ps.get(actor_pseudonym, [])
+    if not actor_rows:  # a tenant may have no company_admin: the platform super_admin may act as the owner
+        actor_rows = [u for u in (client.table("users").select("id, status, roles(name)").execute().data or [])
+                      if pseudonym(u["id"]) == actor_pseudonym and u.get("status") == "active"
+                      and (u.get("roles") or {}).get("name") == "super_admin"]
+    actor = _one(actor_rows, "actor")
     roles = {r["id"]: r["name"] for r in rbac_repo.list_roles(client, company_id) if r.get("company_id") == company_id}
     depts = {d["department_code"]: d["id"] for d in
              (client.table("departments").select("id, department_code").eq("company_id", company_id).execute().data or [])}

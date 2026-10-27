@@ -129,3 +129,13 @@ def test_does_not_overwrite_an_existing_different_functional_role(tmp_path):
     st["user_departments"][0]["workflow_role_id"] = 3           # Reviewer already on the Initiator's row
     assert cli.main(["--approval", _write(tmp_path, _approval()), "--company-id", CO],
                     client=FakeOrgClient(st)) == 2
+
+
+def test_platform_super_admin_may_act_as_the_approving_owner(tmp_path):
+    st = _store()
+    st["users"].append({"id": "u-super", "company_id": None, "status": "active", "roles": {"name": "super_admin"}})
+    ap = _approval()
+    ap["actor_pseudonym"] = sp.pseudonym("u-super")
+    assert cli.main(["--approval", _write(tmp_path, ap), "--company-id", CO], client=FakeOrgClient(st)) == 0
+    st["users"][-1]["roles"] = {"name": "user"}      # an ordinary user outside the tenant is refused
+    assert cli.main(["--approval", _write(tmp_path, ap), "--company-id", CO], client=FakeOrgClient(st)) == 2
