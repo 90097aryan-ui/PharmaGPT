@@ -78,11 +78,20 @@ def assign_user_to_department(client, *, user_id: str, company_id: str, departme
     )
 
     rbac_role_assigned = None
+    already_held = None
     template_name = _department_role_template_name(department_code, functional_role_name)
     if template_name:
         matching_role = _find_company_role_by_name(client, company_id, template_name)
         if matching_role:
-            rbac_repo.assign_user_role(client, user_id, matching_role["id"], company_id)
+            # rbac_user_roles is UNIQUE (user_id, role_id): re-inserting a role the user
+            # already holds would raise AFTER the membership change committed and BEFORE
+            # the audit row below, leaving an unaudited change.
+            already_held = (
+                client.table("rbac_user_roles").select("id")
+                .eq("user_id", user_id).eq("role_id", matching_role["id"]).execute()
+            ).data
+            if not already_held:
+                rbac_repo.assign_user_role(client, user_id, matching_role["id"], company_id)
             rbac_role_assigned = matching_role
 
     rbac_repo.add_rbac_audit_entry(
@@ -90,7 +99,8 @@ def assign_user_to_department(client, *, user_id: str, company_id: str, departme
         department_id=department_id, role_id=(rbac_role_assigned or {}).get("id"),
         reason=f"Department/functional-role assignment ({functional_role_name}): {reason}",
         new_value={"department_id": department_id, "functional_role": functional_role_name,
-                   "is_primary": is_primary, "rbac_role_id": (rbac_role_assigned or {}).get("id")},
+                   "is_primary": is_primary, "rbac_role_id": (rbac_role_assigned or {}).get("id"),
+                   "rbac_role_already_held": bool(already_held)},
     )
 
     return {"membership": membership, "rbac_role_assigned": rbac_role_assigned}

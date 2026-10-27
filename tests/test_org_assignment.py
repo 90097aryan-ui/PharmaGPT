@@ -186,6 +186,48 @@ def test_assign_user_to_department_creates_membership_and_assigns_matching_rbac_
     assert "New hire onboarding" in entry["reason"]
 
 
+class _UniqueRoleClient(FakeOrgClient):
+    """Enforces rbac_user_roles UNIQUE (user_id, role_id) like migration 0015."""
+
+    def table(self, name):
+        q = super().table(name)
+        if name != "rbac_user_roles":
+            return q
+        real_execute = q.execute
+
+        def execute():
+            if q._op == "insert":
+                for p in q._payload:
+                    if any(r["user_id"] == p["user_id"] and r["role_id"] == p["role_id"]
+                           for r in self.store["rbac_user_roles"]):
+                        raise RuntimeError("duplicate key value violates unique constraint uq_rbac_user_roles_user_role")
+            return real_execute()
+        q.execute = execute
+        return q
+
+
+def test_assign_when_user_already_holds_the_rbac_role_updates_membership_and_audits(store):
+    """Regression: a user who already holds the matching RBAC role (e.g. provisioned
+    before functional roles were stored on memberships) must still get the membership
+    updated AND audited, not a unique violation after the membership committed."""
+    store["rbac_user_roles"].append({"id": "x", "user_id": "user-1", "role_id": "role-a-prod-reviewer",
+                                     "company_id": COMPANY_A})
+    store["user_departments"].append({"user_id": "user-1", "department_id": "dept-a-production",
+                                      "company_id": COMPANY_A, "workflow_role_id": None, "is_primary": True})
+    result = org_assignment.assign_user_to_department(
+        _UniqueRoleClient(store), user_id="user-1", company_id=COMPANY_A, department_id="dept-a-production",
+        department_code="PRODUCTION", workflow_role_id=3, functional_role_name="Reviewer",
+        is_primary=True, actor_user_id="admin-1", reason="Approved ref QA-1")
+
+    assert len(store["rbac_user_roles"]) == 1                       # no duplicate insert
+    assert store["user_departments"][0]["workflow_role_id"] == 3     # membership updated
+    assert store["user_departments"][0]["is_primary"] is True
+    assert result["rbac_role_assigned"]["name"] == "Production Reviewer"
+    entries = store["rbac_audit_log"]
+    assert len(entries) == 1 and entries[0]["new_value"]["rbac_role_already_held"] is True
+    assert "QA-1" in entries[0]["reason"]
+
+
 def test_assign_user_to_department_without_a_provisioned_rbac_role_still_creates_membership(store):
     """A department/role combination the company hasn't cloned a template
     for yet (e.g. provisioned before this task's 23 new templates existed)
