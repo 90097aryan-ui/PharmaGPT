@@ -317,6 +317,8 @@ def perform_action(*, tenant, doc_type: str, audit_type: str, record: dict, data
         if status not in REVIEW_STATUSES:
             raise ApprovalError(f"Nothing to sign while the document is '{status}'", 409)
         pending = [s for s in signatories_for_stage(status) if s["key"] not in completed_keys(current_rows)]
+        if not pending:  # a concurrent signer just completed the stage
+            raise ApprovalError("Every designation for this stage has already signed", 409)
         requested = data.get("signatory")
         if requested:
             signatory = next((s for s in pending if s["key"] == requested), None)

@@ -114,7 +114,8 @@ def test_perform_action_concurrent_signers_one_winner_and_status_advances_once(d
 
     res = _race(call, 6)
     assert sum(1 for k, _ in res if k == "ok") == 1
-    assert all(isinstance(v, va.ApprovalError) and v.http_status == 409 for k, v in res if k == "err")
+    errs = [v for k, v in res if k == "err"]
+    assert all(isinstance(v, va.ApprovalError) and v.http_status == 409 for v in errs), errs
     assert len(vadb.list_signoffs(COMPANY, "URS", 1)) == 1
     assert len(updates) == 1 and updates[0]["status"] == "final_approval"
     assert len(sigs) == 1
