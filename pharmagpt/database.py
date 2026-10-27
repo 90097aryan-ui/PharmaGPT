@@ -337,8 +337,9 @@ def init_db() -> None:
     # ── URS Management Suite tables ───────────────────────────────────────────
     from pharmagpt.urs_database import URS_SCHEMA
     conn.executescript(URS_SCHEMA)
-    from pharmagpt.validation_approval_database import VALIDATION_APPROVAL_SCHEMA
+    from pharmagpt.validation_approval_database import VALIDATION_APPROVAL_SCHEMA, ensure_unique_indexes
     conn.executescript(VALIDATION_APPROVAL_SCHEMA)
+    ensure_unique_indexes(conn)
     conn.commit()
 
     # ── URS AI generation — background job tracking (additive columns) ───────

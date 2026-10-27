@@ -397,18 +397,48 @@ def perform_action(*, tenant, doc_type: str, audit_type: str, record: dict, data
         raise ApprovalError(str(exc), 400)
 
     # ── apply ────────────────────────────────────────────────────────────────
+    # The sign-off row is the claim: the database's unique indexes let exactly one
+    # of several concurrent/repeated attempts through, before anything is mutated.
+    claim = None
+    if signatory:
+        try:
+            claim = vadb.add_signoff(
+                company_id=company_id, doc_type=doc_type, record_id=record_id, revision=revision,
+                signatory_key=signatory["key"], designation=signatory["designation"],
+                signer_user_id=tenant.user_id, signer_name=performed_by, signer_role=role,
+                signer_department=dept, meaning=meaning, reason=reason)
+        except vadb.DuplicateSignoffError as dup:
+            audit.log_failure(audit_type, audit_rid, f"Duplicate sign-off blocked ({action})",
+                              reason=f"user {tenant.user_id}")
+            raise ApprovalError(
+                "Segregation of duties: you have already signed another designation on this document"
+                if dup.same_signer else
+                f"{signatory['label']} has already been signed (a concurrent or repeated request)", 409)
+        if action == SIGN:
+            # A concurrent signer of the same stage may have committed meanwhile:
+            # decide stage completion from the ledger, not the pre-claim snapshot.
+            done_now = completed_keys(vadb.list_signoffs(company_id, doc_type, record_id))
+            stage_complete = all(s["key"] in done_now for s in signatories_for_stage(status))
+            new_status = _NEXT_STATUS[status] if stage_complete else status
+
     updates: dict = {}
-    if new_status != status:
-        updates["status"] = new_status
-    if action == REJECT and status in (APPROVED, EFFECTIVE):
-        revision = bump_revision(revision)
-        updates["revision"] = revision
-    if action == MAKE_EFFECTIVE:
-        updates.update(effective_updates or {"effective_date": date.today().isoformat()})
-    if signatory and signoff_columns and signatory["key"] in signoff_columns:
-        updates[signoff_columns[signatory["key"]]] = performed_by
-    if updates:
-        apply_update(updates)
+    try:
+        if new_status != status:
+            _checked(validate_transition, status, new_status)
+            updates["status"] = new_status
+        if action == REJECT and status in (APPROVED, EFFECTIVE):
+            revision = bump_revision(revision)
+            updates["revision"] = revision
+        if action == MAKE_EFFECTIVE:
+            updates.update(effective_updates or {"effective_date": date.today().isoformat()})
+        if signatory and signoff_columns and signatory["key"] in signoff_columns:
+            updates[signoff_columns[signatory["key"]]] = performed_by
+        if updates:
+            apply_update(updates)
+    except BaseException:
+        if claim:
+            vadb.discard_unsigned_claim(claim["id"])  # nothing applied: release the claim
+        raise
     if action == REJECT:
         # Only after the document really moved back to Draft: the cycle's
         # sign-offs are superseded (kept, never deleted).
@@ -420,14 +450,10 @@ def perform_action(*, tenant, doc_type: str, audit_type: str, record: dict, data
         department=dept, approval_level=signatory["key"] if signatory else "")
 
     signoff = None
-    if signatory:
+    if claim:
         sig_row = sig_row if isinstance(sig_row, dict) else {}
-        signoff = vadb.add_signoff(
-            company_id=company_id, doc_type=doc_type, record_id=record_id, revision=revision,
-            signatory_key=signatory["key"], designation=signatory["designation"],
-            signer_user_id=tenant.user_id, signer_name=performed_by, signer_role=role,
-            signer_department=dept, meaning=meaning, reason=reason,
-            esignature_id=sig_row.get("id"), signature_hash=sig_row.get("signature_hash", ""))
+        vadb.attach_signature(claim["id"], sig_row.get("id"), sig_row.get("signature_hash", ""))
+        signoff = dict(claim, esignature_id=sig_row.get("id"), signature_hash=sig_row.get("signature_hash", ""))
 
     entry = add_trail(trail_action, comments, revision)
     audit.log(audit_type, audit_rid, trail_action, old={"status": status}, new={"status": new_status},
