@@ -149,3 +149,20 @@ The earlier "2.50:1" for `--text-disabled` came from a faulty ad-hoc script. Cor
 - **Security note (unverified):** the seed script hard-codes one shared demo password and the production Supabase has 23 matching
   accounts with elevated platform roles. Whether it was ever changed is unknown (not tested). Owner should rotate/disable demo
   accounts before any real use of yuktav.com.
+
+
+## 12. Hardened tool (local, unpushed; supersedes the description in section 8; provisioning remains BLOCKED)
+`scripts/provision_validation_signers.py` + `pharmagpt/services/signer_provisioning.py` now fail closed:
+- **Identity:** actor, administrator approver and QA approver each present a live Supabase access token, verified with the app's own
+  `resolve_tenant_context`. No actor id is read from a file.
+- **Authorization:** the actor must be this company's `company_admin`, or a `super_admin` with an ACTIVE `break_glass_access` grant for the
+  company (the platform's Assume Company Context rule); the grant id is written into every audit entry. Lookup errors refuse.
+- **Approvals:** bound to the exact change set by SHA-256, dated within 30 days, with references; approver pseudonyms must equal the
+  authenticated approvers. **Independent QA is mandatory in this tool** (policy is not defined in the repo, so the strictest reading is
+  enforced; relaxing it is a reviewed code change): QA approver != actor != administrator approver, holds QA Approver / QA Coordinator/Admin,
+  and is not one of the people changed; nobody acting or approving may be one of the 7 changed users.
+- **Attribution/atomicity:** audit entries carry the verified actor and approval references and are re-read after each change; any failure
+  rolls back everything applied (each undo audited); `--rollback FILE` is an audited undo. Dry run is the default and still verifies everything.
+- **Practical consequence for Nutra:** it has no `company_admin`. A super_admin needs an active break-glass grant, AND a different tenant user
+  with a QA authority role must co-approve (the directory has a QA Coordinator/Admin user who is not among the 7). Whether a demo tenant may
+  use a different process is the owner's quality-system decision, not something the tool can waive.
