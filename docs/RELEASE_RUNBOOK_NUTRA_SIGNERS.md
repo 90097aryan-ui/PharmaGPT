@@ -92,3 +92,19 @@ Rollback is **claimed only after** health, WorkingDirectory and logs are re-veri
 - Startup on a throwaway copy of that backup with the new code: adds 3 tables (`validation_signoffs`, `validation_transition_claims`,
   `qms_esignature_attempts`), creator/approval columns, 5 indexes; 0 row changes; idempotent; no missing controls.
 - Live preflight from the staged dir: NO-GO (7 blocking, Nutra signer directory) until the approved provisioning is done.
+
+## 7. Release decision: FAIL-CLOSED path (owner-selected 2026-10-27) — read before announcing the release
+**Nutra validation approvals remain UNAVAILABLE after this release until authorized provisioning is completed.** Production data and signer
+permissions are intentionally left unchanged; department enforcement stays ON (not disabled).
+- What stops working for Nutra (the only tenant): **Submit for Review** and **Sign Off** on URS, DQ and IQ/OQ/PQ. Users get HTTP 403 with
+  "Signing as <designation> requires a <role> role in: <department>". Nothing is changed by a refused attempt (no status change, no
+  sign-off row, no e-signature; verified for all five document types in `tests/test_nutra_fail_closed.py`).
+- Cannot be bypassed: Make Effective / Obsolete need an Approved / Effective record, which needs the seven signatures, so they cannot skip it.
+- Still works: creating, listing, reading and editing records, the approval page (shows the true status), exports, QMS (deviation, CAPA,
+  change control), Document Control authoring, Knowledge Base, chat/AI, login. (Full regression suite; Nutra has 2 URS in draft and no
+  approvals in flight, so no existing approval is disrupted.)
+- Behaviour change vs 691affa: the old one-step, no-e-signature approval is gone for everyone. That is the intended control improvement.
+- To restore approvals: complete the authorized provisioning in `docs/NUTRA_SIGNER_PROVISIONING_PLAN.md` (needs an identity-verified
+  approver, a break-glass grant or company_admin, and an independent QA approver), then re-run the preflight to GO. No redeploy is needed
+  for that - it is a directory change.
+- Tell users before the switch: "URS/qualification/DQ approvals are temporarily unavailable for Nutra."
