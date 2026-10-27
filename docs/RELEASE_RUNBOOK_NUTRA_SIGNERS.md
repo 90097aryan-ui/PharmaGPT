@@ -81,3 +81,14 @@ Code rollback does not need a DB restore: the new table/columns/indexes are addi
 `$B/pharmagpt.db` only for data corruption (stop service, copy over, start). Directory (Supabase) changes are reverted
 from the rollback JSON the provisioning tool wrote (set `workflow_role_id` back to NULL; delete the new Plant Head row).
 Rollback is **claimed only after** health, WorkingDirectory and logs are re-verified.
+
+## 6. Prepared state (2026-10-27, nothing switched)
+- Candidate: `a926d99bb609620f2f3ec3641779c958f520bbab`; CI run 40462473301 green (2006 passed, 2 skipped, 1 deselected).
+- Staged release dir: `/home/ubuntu/PharmaGPT-release-a926d99` (from `git archive`, tarball sha256
+  `cf515d8c618e70c4991b2fc0b50d5bbf460dcb9c56fa3ea8c27238405f4adfb4`, 299/299 files hash-identical to the commit, `.env` copied
+  mode 600, venv symlinked to the 691affa venv, compileall ok, `RELEASE_SHA.txt` added). `PharmaGPT-release-de2f9dc` is STALE: do not use.
+- Backup for rollback readiness: `/home/ubuntu/db_backups/pre_a926d99_20261027T065621Z` (DB integrity ok, unit file, uploads tar, SHA256SUMS ok).
+  Take a fresh backup immediately before the switch (section 2).
+- Startup on a throwaway copy of that backup with the new code: adds 3 tables (`validation_signoffs`, `validation_transition_claims`,
+  `qms_esignature_attempts`), creator/approval columns, 5 indexes; 0 row changes; idempotent; no missing controls.
+- Live preflight from the staged dir: NO-GO (7 blocking, Nutra signer directory) until the approved provisioning is done.
