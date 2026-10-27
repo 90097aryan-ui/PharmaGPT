@@ -73,7 +73,10 @@ def migrate_deviation(row: dict, template_id: int, template_steps: list[dict], d
         return f"would remap {old_status!r} -> {new_status!r} (completed through step {completed_step_order})"
 
     if old_status == "Initiated":
-        ddb.update_deviation(row["id"], {"status": new_status})
+        # CRIT-01 (Security Audit remediation): allow_controlled_fields=True
+        # — this is a trusted, operator-run offline migration script, not a
+        # client-reachable route.
+        ddb.update_deviation(row["id"], {"status": new_status}, allow_controlled_fields=True)
         return f"remapped {old_status!r} -> {new_status!r} (no instance — still Draft)"
 
     instance = wfdb.create_instance(template_id, "deviation", row["id"], row.get("company_id"))

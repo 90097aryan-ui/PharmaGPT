@@ -28,7 +28,7 @@
   function escHtml(str) {
     return String(str ?? '')
       .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, "&#39;");
   }
 
   var COVERAGE_STATUSES = ['COVERED', 'PARTIALLY_COVERED', 'NOT_COVERED', 'INSUFFICIENT_EVIDENCE'];

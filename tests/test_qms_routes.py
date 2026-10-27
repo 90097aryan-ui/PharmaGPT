@@ -250,6 +250,22 @@ def test_document_docx_export(client):
 # ── Deviation Management ─────────────────────────────────────────────────────
 
 _FIXED_USER_ID = "00000000-0000-0000-0000-000000000001"  # tests/conftest.py::_TEST_TENANT.user_id
+_FIXED_APPROVER_ID = "00000000-0000-0000-0000-000000000002"  # CRIT-02: a distinct, non-creator identity —
+# the deviation-workflow tests below always create the deviation as
+# _FIXED_USER_ID, so it can no longer be assigned as that record's own
+# approver (services/workflow_engine.py::reject_creator_as_approver).
+
+
+def _as_deviation_approver(monkeypatch):
+    """Switch the acting identity to _FIXED_APPROVER_ID for a decide_step()
+    call — see tests/test_deviation_workflow_builder.py::_as_approver for
+    the full rationale (identical pattern)."""
+    import tests.conftest as conftest_module
+    from pharmagpt.auth.context import TenantContext
+    monkeypatch.setattr(conftest_module, "_TEST_TENANT", TenantContext(
+        user_id=_FIXED_APPROVER_ID, email="approver@example.com", display_name="Approver User",
+        role="reviewer_qa", company_id=conftest_module._TEST_TENANT.company_id,
+    ))
 
 
 @pytest.fixture(autouse=True)
@@ -262,13 +278,16 @@ def _active_approver_directory(monkeypatch):
     per-test boilerplate."""
     from tests.test_assume_company_context import FakeSupabaseClient
     from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID
-    store = {"users": [{"id": _FIXED_USER_ID, "company_id": BOOTSTRAP_COMPANY_ID, "status": "active"}]}
+    store = {"users": [
+        {"id": _FIXED_USER_ID, "company_id": BOOTSTRAP_COMPANY_ID, "status": "active"},
+        {"id": _FIXED_APPROVER_ID, "company_id": BOOTSTRAP_COMPANY_ID, "status": "active"},
+    ]}
     monkeypatch.setattr(
         "pharmagpt.routes.qms_deviations.get_service_role_client", lambda: FakeSupabaseClient(store)
     )
 
 
-def _dev_configure_all_approvers(client, did, user_id=_FIXED_USER_ID, display_name="Test User"):
+def _dev_configure_all_approvers(client, did, user_id=_FIXED_APPROVER_ID, display_name="Approver User"):
     """Fill in every named-approval step's approver via the Workflow Builder
     (the only place they can be set for deviations — there is no runtime
     "Assign Approver" action): the Review chain plus the fixed CAPA-phase
@@ -284,21 +303,33 @@ def _dev_configure_all_approvers(client, did, user_id=_FIXED_USER_ID, display_na
     client.put(f"/qms/deviations/{did}/workflow-builder", json={"steps": steps, "capa_phase": capa_phase})
 
 
-def _dev_reach_qa_approval(client, did):
+def _dev_reach_qa_approval(client, did, monkeypatch):
     """Drive a deviation from Draft through the Initiator Manager Review ->
-    QA Manager Review -> QA Approval gate, using the fixture's single fixed
-    tenant (role=company_admin) as the named approver for every step —
-    that role is eligible for all three per DEVIATION_LIFECYCLE_V2 (steps
-    2/3/4, displayed as the "Review" phase). Approvers (including the
+    QA Manager Review -> QA Approval gate. Approvers (including the
     CAPA-phase steps not reached yet) are configured via the Workflow
-    Builder before submission and are auto-assigned at /workflow/start."""
+    Builder before submission and are auto-assigned at /workflow/start.
+
+    CRIT-02 (Security Audit remediation): the fixed test tenant
+    (_FIXED_USER_ID) creates every deviation in this file, so it can no
+    longer be assigned as — or decide as — that record's own approver
+    (services/workflow_engine.py::reject_creator_as_approver). Steps 2/3/4
+    are decided as _FIXED_APPROVER_ID instead, then the acting identity is
+    restored to the original creator before returning, so the rest of each
+    calling test continues acting as the creator exactly as before."""
     _dev_configure_all_approvers(client, did)
 
     r = client.post(f"/qms/deviations/{did}/workflow/start")
     assert r.status_code == 201, r.get_json()
-    for step_order in (2, 3, 4):
-        r = client.post(f"/qms/deviations/{did}/workflow/steps/{step_order}/decide", json={"decision": "approve"})
-        assert r.status_code == 200, r.get_json()
+
+    import tests.conftest as conftest_module
+    original_tenant = conftest_module._TEST_TENANT
+    _as_deviation_approver(monkeypatch)
+    try:
+        for step_order in (2, 3, 4):
+            r = client.post(f"/qms/deviations/{did}/workflow/steps/{step_order}/decide", json={"decision": "approve"})
+            assert r.status_code == 200, r.get_json()
+    finally:
+        monkeypatch.setattr(conftest_module, "_TEST_TENANT", original_tenant)
 
 
 def test_deviation_crud_lifecycle(client):
@@ -334,7 +365,7 @@ def test_deviation_investigation_ai_assistant_and_report(client, mock_gemini, mo
     monkeypatch.setattr(inv_engine, "call_gemini", lambda prompt, temperature=0.3: canned)
 
     dev = client.post("/qms/deviations", json={"title": "Dev"}).get_json()
-    _dev_reach_qa_approval(client, dev["id"])
+    _dev_reach_qa_approval(client, dev["id"], monkeypatch)
     assert client.get(f"/qms/deviations/{dev['id']}").get_json()["investigation_unlocked"] is True
     # QA Approval just cleared -> the record now sits at the next step, Investigation.
     assert client.get(f"/qms/deviations/{dev['id']}").get_json()["status"] == "Investigation"
@@ -357,7 +388,7 @@ def test_deviation_investigation_ai_assistant_and_report(client, mock_gemini, mo
     assert len(assistant_only) == 1
 
 
-def test_deviation_investigation_tasks_lock_and_crud(client, mock_gemini):
+def test_deviation_investigation_tasks_lock_and_crud(client, mock_gemini, monkeypatch):
     dev = client.post("/qms/deviations", json={"title": "Dev"}).get_json()
     did = dev["id"]
 
@@ -365,7 +396,7 @@ def test_deviation_investigation_tasks_lock_and_crud(client, mock_gemini):
     r = client.post(f"/qms/deviations/{did}/investigation/tasks", json={"title": "Pull batch record"})
     assert r.status_code == 423
 
-    _dev_reach_qa_approval(client, did)
+    _dev_reach_qa_approval(client, did, monkeypatch)
 
     r = client.post(f"/qms/deviations/{did}/investigation/tasks", json={
         "title": "Pull batch record", "assigned_user": "J. Doe", "department": "QA", "priority": "High",
@@ -390,11 +421,11 @@ def test_deviation_investigation_tasks_lock_and_crud(client, mock_gemini):
     assert "Investigation task updated" in actions
 
 
-def test_deviation_investigation_tasks_tenant_and_record_scoping(client, mock_gemini):
+def test_deviation_investigation_tasks_tenant_and_record_scoping(client, mock_gemini, monkeypatch):
     dev1 = client.post("/qms/deviations", json={"title": "Dev1"}).get_json()
     dev2 = client.post("/qms/deviations", json={"title": "Dev2"}).get_json()
-    _dev_reach_qa_approval(client, dev1["id"])
-    _dev_reach_qa_approval(client, dev2["id"])
+    _dev_reach_qa_approval(client, dev1["id"], monkeypatch)
+    _dev_reach_qa_approval(client, dev2["id"], monkeypatch)
 
     task = client.post(f"/qms/deviations/{dev1['id']}/investigation/tasks", json={"title": "x"}).get_json()
 
@@ -420,7 +451,7 @@ def test_deviation_investigation_knowledge_base(client, mock_gemini, monkeypatch
 
     dev = client.post("/qms/deviations", json={"title": "Dev", "product": "Amoxicillin"}).get_json()
     did = dev["id"]
-    _dev_reach_qa_approval(client, did)
+    _dev_reach_qa_approval(client, did, monkeypatch)
 
     r = client.get(f"/qms/deviations/{did}/investigation/knowledge-base")
     assert r.status_code == 200
@@ -448,7 +479,7 @@ def test_deviation_investigation_knowledge_base_finds_related_deviations(client,
 
     dev1 = client.post("/qms/deviations", json={"title": "Dev1", "product": "Amoxicillin"}).get_json()
     dev2 = client.post("/qms/deviations", json={"title": "Dev2", "product": "Amoxicillin"}).get_json()
-    _dev_reach_qa_approval(client, dev2["id"])
+    _dev_reach_qa_approval(client, dev2["id"], monkeypatch)
 
     kb = client.get(f"/qms/deviations/{dev2['id']}/investigation/knowledge-base").get_json()
     assert [d["id"] for d in kb["previous_deviations"]] == [dev1["id"]]
@@ -471,7 +502,7 @@ def test_deviation_impact_and_capa_link(client, mock_gemini):
     assert reverse[0]["id"] == dev["id"]
 
 
-def test_deviation_workflow_named_approver_gate_end_to_end(client):
+def test_deviation_workflow_named_approver_gate_end_to_end(client, monkeypatch):
     dev = client.post("/qms/deviations", json={"title": "Dev"}).get_json()
     did = dev["id"]
 
@@ -480,7 +511,7 @@ def test_deviation_workflow_named_approver_gate_end_to_end(client):
     assert wf["instance"] is None
     assert wf["current_phase"] == "Draft"
 
-    _dev_reach_qa_approval(client, did)
+    _dev_reach_qa_approval(client, did, monkeypatch)
     assert client.get(f"/qms/deviations/{did}").get_json()["status"] == "Investigation"
     wf = client.get(f"/qms/deviations/{did}/workflow").get_json()
     assert wf["current_phase"] == "Investigation"
@@ -488,6 +519,8 @@ def test_deviation_workflow_named_approver_gate_end_to_end(client):
 
     # Step 5 ("Investigation") is a single activity step under DEVIATION_LIFECYCLE_V2 —
     # the investigator declares the investigation complete and moves to CAPA.
+    # _dev_reach_qa_approval already restored the creator identity, and
+    # step 5's eligible_roles includes company_admin, so no switch needed.
     r = client.post(f"/qms/deviations/{did}/workflow/steps/5/decide", json={"decision": "advance"})
     assert r.status_code == 200, r.get_json()
     assert client.get(f"/qms/deviations/{did}").get_json()["status"] == "CAPA"
@@ -495,7 +528,9 @@ def test_deviation_workflow_named_approver_gate_end_to_end(client):
     # QA Review (6) and Final Approval (7) are named-approval gates grouped
     # under "CAPA" — already assigned at /workflow/start via the Workflow
     # Builder's capa_phase configuration (_dev_reach_qa_approval above), no
-    # runtime assignment needed here.
+    # runtime assignment needed here. CRIT-02: decided as _FIXED_APPROVER_ID
+    # (the identity actually named), not the creator.
+    _as_deviation_approver(monkeypatch)
     for step_order in (6, 7):
         r = client.post(f"/qms/deviations/{did}/workflow/steps/{step_order}/decide", json={"decision": "approve"})
         assert r.status_code == 200, r.get_json()
@@ -504,6 +539,15 @@ def test_deviation_workflow_named_approver_gate_end_to_end(client):
     assert r.status_code == 200
     assert client.get(f"/qms/deviations/{did}").get_json()["status"] == "Effectiveness Check"
 
+    # Step 9 ("Closure") eligible_roles is company_admin only — switch back
+    # to the creator identity (role=company_admin); _FIXED_APPROVER_ID's
+    # role=reviewer_qa is not eligible to advance it.
+    import tests.conftest as conftest_module
+    from pharmagpt.auth.context import TenantContext
+    monkeypatch.setattr(conftest_module, "_TEST_TENANT", TenantContext(
+        user_id=_FIXED_USER_ID, email="test@example.com", display_name="Test User",
+        role="company_admin", company_id=conftest_module._TEST_TENANT.company_id,
+    ))
     r = client.post(f"/qms/deviations/{did}/workflow/steps/9/decide", json={"decision": "advance"})
     assert r.status_code == 200
     final = client.get(f"/qms/deviations/{did}").get_json()
@@ -559,13 +603,21 @@ def test_capa_effectiveness_route(client):
     assert len(client.get(f"/qms/capa/{capa['id']}/effectiveness").get_json()) == 1
 
 
-def test_capa_approval_status_map(client):
+def test_capa_approval_status_map(client, monkeypatch):
     # The /approval endpoint is now a compatibility wrapper over
     # services/workflow_engine.py (CAPA_WORKFLOW_V1): one call decides
     # exactly one real workflow step — see
     # routes/qms_capa.py::submit_approval docstring. The first call both
     # starts the instance (auto-completing "CAPA Opened") and decides the
     # now-current "Root Cause Analysis" step, landing on "CA Planned".
+    #
+    # Steps 1-5 are role-eligible 'activity' steps (eligible_roles includes
+    # "user" — qms_database.py's CAPA_WORKFLOW_V1) with no named-approver
+    # concept, so the creator (default client) decides them unchanged.
+    # Steps 6-8 ("Effectiveness Check"/"QA Review"/"CAPA Closure") are
+    # 'approval' steps — CRIT-02 (Security Audit remediation) means the
+    # creator can no longer self-assign as their own approver, so those are
+    # decided as a second identity instead (_as_deviation_approver).
     capa = client.post("/qms/capa", json={"title": "CAPA"}).get_json()
     cid = capa["id"]
 
@@ -575,6 +627,8 @@ def test_capa_approval_status_map(client):
     for action in ["Preventive Actions Planned", "Implementation Started", "Effectiveness Check Started"]:
         client.post(f"/qms/capa/{cid}/approval", json={"action": action, "performed_by": "B"})
     assert client.get(f"/qms/capa/{cid}").get_json()["status"] == "Effectiveness Check"
+
+    _as_deviation_approver(monkeypatch)
 
     # Effectiveness Verification (step 6) is now a mandatory, dedicated,
     # e-signed gate — the legacy /approval endpoint refuses to decide it
@@ -699,7 +753,7 @@ def test_change_control_deviation_capa_linking(client):
     assert client.get(f"/qms/change-control/{cc['id']}/capas").get_json()[0]["id"] == capa["id"]
 
 
-def test_change_control_approval_status_map(client):
+def test_change_control_approval_status_map(client, monkeypatch):
     # The /approval endpoint is now a compatibility wrapper over
     # services/workflow_engine.py (CHANGE_CONTROL_WORKFLOW_V1): one call
     # decides exactly one real workflow step — see
@@ -707,15 +761,29 @@ def test_change_control_approval_status_map(client):
     # call both starts the instance (auto-completing "Submitted") and
     # decides the now-current "Initial Review" step, landing on
     # "Impact Assessment".
+    #
+    # Steps 1-5 are role-eligible 'activity' steps (eligible_roles includes
+    # company_admin — qms_database.py's CHANGE_CONTROL_WORKFLOW_V1) with no
+    # named-approver concept, so the creator (default client) decides them
+    # unchanged. Steps 6+ ("QA Review" onward) are 'approval' steps —
+    # CRIT-02 (Security Audit remediation) means the creator can no longer
+    # self-assign as their own approver, so those are decided as a second
+    # identity instead (_as_deviation_approver); its role=reviewer_qa
+    # satisfies every remaining activity step's eligible_roles too, so no
+    # further identity switch is needed for the rest of this test.
     cc = client.post("/qms/change-control", json={"title": "Change"}).get_json()
     cc_id = cc["id"]
 
     client.post(f"/qms/change-control/{cc_id}/approval", json={"action": "Submitted", "performed_by": "A"})
     assert client.get(f"/qms/change-control/{cc_id}").get_json()["status"] == "Impact Assessment"
 
-    for action in ["Risk Assessment Started", "Sent for Department Review", "Submitted for QA Review",
-                   "Sent for Approval", "Approved"]:
+    for action in ["Risk Assessment Started", "Sent for Department Review", "Submitted for QA Review"]:
         client.post(f"/qms/change-control/{cc_id}/approval", json={"action": action, "performed_by": "B"})
+
+    _as_deviation_approver(monkeypatch)
+
+    client.post(f"/qms/change-control/{cc_id}/approval", json={"action": "Sent for Approval", "performed_by": "B"})
+    client.post(f"/qms/change-control/{cc_id}/approval", json={"action": "Approved", "performed_by": "B"})
     assert client.get(f"/qms/change-control/{cc_id}").get_json()["status"] == "Implementation"
 
     for action in ["Implementation Complete", "Verified", "Verified"]:
@@ -726,14 +794,20 @@ def test_change_control_approval_status_map(client):
     assert client.get(f"/qms/change-control/{cc_id}").get_json()["status"] == "Closed"
 
 
-def test_change_control_rejection_returns_to_draft(client):
+def test_change_control_rejection_returns_to_draft(client, monkeypatch):
     # Reject is only legal from an approval-type step (the same
     # decide_step() rule Deviations already follow), so this drives the
     # change control forward to its "QA Review" approval gate first, then
-    # rejects from there.
+    # rejects from there. CRIT-02: whichever action first reaches an
+    # 'approval'-type step must be decided by a non-creator identity — see
+    # test_change_control_approval_status_map's comment for the exact step
+    # boundary; switching before this loop is safe either way since
+    # _as_deviation_approver's role=reviewer_qa satisfies every activity
+    # step's eligible_roles too.
     cc = client.post("/qms/change-control", json={"title": "Change"}).get_json()
     cc_id = cc["id"]
     client.post(f"/qms/change-control/{cc_id}/approval", json={"action": "Submitted", "performed_by": "A"})
+    _as_deviation_approver(monkeypatch)
     for action in ["Risk Assessment Started", "Sent for Department Review", "Submitted for QA Review"]:
         client.post(f"/qms/change-control/{cc_id}/approval", json={"action": action, "performed_by": "B"})
     assert client.get(f"/qms/change-control/{cc_id}").get_json()["status"] == "QA Review"

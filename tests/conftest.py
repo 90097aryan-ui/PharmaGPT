@@ -60,6 +60,42 @@ def fixtures_dir(tmp_path_factory) -> dict:
     return build_all(str(out_dir))
 
 
+class _NullSupabaseQuery:
+    """Chainable stand-in whose .execute() returns no rows."""
+    data: list = []
+    count = 0
+
+    def __getattr__(self, _name):
+        return lambda *a, **k: self
+
+    def execute(self):
+        return self
+
+
+class _NullSupabaseClient:
+    def table(self, _name):
+        return _NullSupabaseQuery()
+
+    def __getattr__(self, _name):
+        return lambda *a, **k: _NullSupabaseQuery()
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_supabase(monkeypatch):
+    """No test may reach a real Supabase project (it made the suite depend on
+    live data and fail offline/in CI). Every module-level service-role /
+    authenticated client getter returns an empty-table client; tests that need
+    data patch the getter themselves, which overrides this per test."""
+    null = _NullSupabaseClient()
+    for mod in list(sys.modules.values()):
+        name = getattr(mod, "__name__", "")
+        if not name.startswith("pharmagpt"):
+            continue
+        for attr in ("get_service_role_client", "get_authenticated_client"):
+            if attr in getattr(mod, "__dict__", {}):
+                monkeypatch.setattr(mod, attr, lambda *a, **k: null)
+
+
 @pytest.fixture()
 def db_path(tmp_path, monkeypatch):
     """Point pharmagpt.database at a throwaway SQLite file for this test and
@@ -125,4 +161,97 @@ def client(db_path, monkeypatch):
     import pharmagpt.services.esignature_service as esignature_service
     monkeypatch.setattr(esignature_service, "require_esignature", lambda *a, **k: None)
 
+    # Wave 3A-C (Security Audit remediation, Finding A): routes/
+    # qms_documents.py::set_review_chain_route now validates every submitted
+    # reviewer/department_head/quality_head/plant_head id against
+    # tenancy.missing_or_inactive_users() before persisting the chain. The
+    # 300+ existing Document Control tests using this fixture predate that
+    # control and use small, fixed placeholder ids (not real Supabase-backed
+    # users) for those roles — same rationale as the two bypasses above.
+    # Scoped to routes/qms_documents.py's own get_service_role_client
+    # reference only, so CAPA/Change Control/Deviations' own (already
+    # correctly tenant-validated) assign endpoints are completely
+    # unaffected. Real validation against a restrictive, multi-company
+    # directory is covered separately by
+    # tests/test_wave3a_finding_a_assign_chain_validation.py, which builds
+    # its own fake client rather than using this fixture.
+    monkeypatch.setattr(
+        "pharmagpt.routes.qms_documents.get_service_role_client",
+        lambda: _PermissiveDocumentChainUsersClient(),
+    )
+
+    # Yuktav org/RBAC/workflow authorization task, enforcement-closure phase:
+    # pharmagpt.auth.module_access.has_business_permission() no longer gives
+    # company_admin/reviewer_qa an unconditional bypass — it resolves through
+    # the same rbac_user_roles -> rbac_roles -> rbac_role_permissions tables
+    # everyone else uses (see that module's docstring for why). Same
+    # rationale as the three bypasses above: the 1000+ existing business-
+    # logic tests using this fixture predate real RBAC role assignments
+    # entirely and don't mock get_effective_permissions, so this fixture
+    # grants a broad, permissive effective-permission set for the duration
+    # of each such test — real fail-closed enforcement behavior (including
+    # the FALSE-cell denial matrix and the removal of the frozen-role
+    # bypass) is covered separately, with real RBAC-role fixtures, in
+    # tests/test_module_access.py and
+    # tests/test_workflow_engine_org_authorization.py.
+    import pharmagpt.services.rbac_defaults as rbac_defaults
+    monkeypatch.setattr(
+        "pharmagpt.auth.module_access.get_effective_permissions",
+        lambda tenant: {(m, a) for m in rbac_defaults.MODULES for a in rbac_defaults.ACTIONS},
+    )
+
+    # SOP branding integration: routes/qms_documents.py's export_docx() and
+    # download_template_docx() now call services/company_branding.py's
+    # get_company_name_for_docx(), which reaches Supabase (companies table)
+    # over the network using the request's real bearer token. The 300+
+    # existing Document Control tests using this fixture predate that call
+    # and don't carry a real Supabase session — same rationale as the four
+    # bypasses above — so it's patched here to a fast, deterministic no-op
+    # (empty string, matching "no branding available") for the duration of
+    # each such test. Tests that exercise the real branding lookup patch
+    # this same reference to a fake per-test — see
+    # tests/test_sop_master_template.py.
+    monkeypatch.setattr(
+        "pharmagpt.routes.qms_documents.get_company_name_for_docx", lambda company_id: ""
+    )
+
     return appmod.app.test_client()
+
+
+class _PermissiveDocumentChainUsersClient:
+    """See the Wave 3A-C note in the `client` fixture above. Every id ever
+    used as a placeholder Reviewer/Department Head/Quality Head/Plant Head
+    across the Document Control test suite is treated as an active user —
+    this fixture doesn't test directory validation itself, so it stays
+    permissive rather than trying to track "which test uses which id"."""
+
+    _KNOWN_TEST_USER_IDS = (
+        "00000000-0000-0000-0000-000000000001",
+        "00000000-0000-0000-0000-000000000002",
+        "00000000-0000-0000-0000-000000000003",
+        "00000000-0000-0000-0000-000000000004",
+        "00000000-0000-0000-0000-000000000005",
+        "22222222-2222-2222-2222-222222222222",
+        "33333333-3333-3333-3333-333333333333",
+        "44444444-4444-4444-4444-444444444444",
+        "rev-1", "rev-assigned", "dh-1", "qh-1",
+    )
+
+    class _Query:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def select(self, *_a, **_k):
+            return self
+
+        def eq(self, *_a, **_k):
+            return self
+
+        def execute(self):
+            from types import SimpleNamespace
+            return SimpleNamespace(data=self._rows)
+
+    def table(self, name):
+        if name != "users":
+            return self._Query([])
+        return self._Query([{"id": uid} for uid in self._KNOWN_TEST_USER_IDS])

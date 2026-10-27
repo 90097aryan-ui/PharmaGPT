@@ -235,6 +235,21 @@ Before every response, confirm:
 
 If any check fails, fix it and run the checklist again. Never send a response that fails the Final Quality Gate.
 
+## Master Project Documentation
+
+The following documents are authoritative project references:
+
+- `docs/01_PRODUCT_REQUIREMENTS.md` — WHAT the product must do
+- `docs/02_TECHNICAL_ARCHITECTURE.md` — HOW the system is built (current vs. target state)
+- `docs/03_SECURITY_ACCESS.md` — WHO can access what, and how it's enforced
+- `docs/04_FRONTEND_SPECIFICATION.md` — HOW the UX should behave
+- `docs/05_FEATURE_TICKETS.md` — WHAT work exists or remains
+- `docs/LESSONS_LEARNED.md` — WHAT must not be repeated
+
+Before significant work, identify which of these documents apply and use them as the project reference. Do not contradict an approved requirement without explicitly identifying the conflict. Do not silently update requirements through implementation.
+
+If implementation and documentation disagree: identify the discrepancy, determine whether code or documentation is authoritative for that specific question, report the discrepancy — do not silently rewrite either side.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.

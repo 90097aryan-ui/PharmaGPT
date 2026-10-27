@@ -12,10 +12,10 @@ const docUploadStatus = document.getElementById("doc-upload-status");
 // ── File type display config ──────────────────────────────────────────────────
 const FILE_ICONS = { pdf: "<span class=\'icon\' data-lucide=\'file-text\'></span>", docx: "<span class=\'icon\' data-lucide=\'pencil-line\'></span>", xlsx: "<span class=\'icon\' data-lucide=\'bar-chart-3\'></span>", txt: "<span class=\'icon\' data-lucide=\'file-text\'></span>" };
 const FILE_COLORS = {
-  pdf:  "#C35F5B",   // red
-  docx: "#8A6B52",   // blue
-  xlsx: "#5F8A61",   // green
-  txt:  "#9A948C",   // grey
+  pdf:  "#DC2626",   // red
+  docx: "#2563EB",   // blue
+  xlsx: "#16A34A",   // green
+  txt:  "#94A3B8",   // grey
 };
 
 // Statuses considered "still working" — the row keeps polling while in one
@@ -57,7 +57,7 @@ function renderDocuments(documents) {
   documents.forEach(doc => {
     const ext  = doc.file_type;
     const icon = FILE_ICONS[ext]  || "<span class=\'icon\' data-lucide=\'paperclip\'></span>";
-    const color = FILE_COLORS[ext] || "#9A948C";
+    const color = FILE_COLORS[ext] || "#94A3B8";
     const size = formatSize(doc.file_size);
     const date = formatDate(doc.upload_date);
 
@@ -286,7 +286,7 @@ function formatDate(isoString) {
 function escapeHtml(str) {
   return String(str)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 // ── Expose loadDocuments so projects.js can call it on project switch ─────────

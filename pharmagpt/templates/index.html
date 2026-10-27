@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/yuktav-mark.png') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/risk.css') }}" />
@@ -22,6 +23,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/error_pages.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile_nav.css') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/login.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/neumorphic.css') }}" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <!-- Wave 1 (AI-02, PharmaGPT Production Readiness Audit): sanitizes
        marked.parse() output before it's ever assigned to innerHTML
@@ -60,7 +62,7 @@
 
       <div class="login-card" id="login-card">
         <div class="login-brand">
-          <div class="logo-icon">Rx</div>
+          <div class="logo-icon logo-icon-img"><img src="{{ url_for('static', filename='img/yuktav-mark.png') }}" alt="" /></div>
           <div class="header-titles">
             <h1>Yuktav</h1>
             <p>Manufacturing & Quality Intelligence Platform</p>
@@ -106,11 +108,7 @@
       <button class="mobile-menu-btn" id="mobile-menu-btn" title="Menu" aria-label="Open navigation menu" aria-haspopup="true" aria-expanded="false">
         <span class="icon" data-lucide="menu"></span>
       </button>
-      <div class="logo-icon">Rx</div>
-      <div class="header-titles">
-        <h1>Yuktav</h1>
-        <p>Manufacturing & Quality Intelligence Platform</p>
-      </div>
+      <img class="brand-logo" src="{{ url_for('static', filename='img/yuktav-logo.png') }}" alt="Yuktav — Manufacturing &amp; Quality Intelligence" />
       <div class="header-divider"></div>
       <span class="header-context" id="header-breadcrumb">Overview</span>
       <div class="hdr-chips" id="hdr-chips">
@@ -160,7 +158,7 @@
   <!-- ── Assume Company Context banner (Phase 3.5) — persistent across every
        view while a Super Admin has an active break_glass_access grant.
        static/js/admin_assume_context.js owns all of its behavior. ──────────── -->
-  <div id="assume-context-banner" style="display:none;background:#B45309;color:#fff;padding:8px 20px;
+  <div id="assume-context-banner" style="display:none;background:var(--warning);color:#fff;padding:8px 20px;
        font-size:13px;align-items:center;justify-content:space-between">
     <span id="assume-context-banner-text"></span>
     <button class="btn-secondary" id="btn-end-assume-context" style="background:transparent;border-color:#fff;color:#fff">End Session</button>
@@ -330,6 +328,9 @@
         </div>
         <div class="sidebar-item module-tab" id="nav-qms-change-control" data-view="view-qms-change-control" data-workspace="quality">
           <span class='icon' data-lucide='git-pull-request'></span> Change Control
+        </div>
+        <div class="sidebar-item module-tab" id="nav-qms-market-complaint" data-view="view-qms-market-complaint" data-workspace="quality">
+          <span class='icon' data-lucide='megaphone'></span> Market Complaints
         </div>
         <div class="sidebar-item module-tab" id="risk-nav-dashboard" data-workspace="validation" onclick="window.initRisk && window.initRisk()">
           <span class='icon' data-lucide='shield-alert'></span> Risk Management
@@ -2533,6 +2534,10 @@
     <div id="qms-cc-body"></div>
   </main>
 
+  <main class="qms-view" id="view-qms-market-complaint">
+    <div id="qms-mc-body"></div>
+  </main>
+
   <!-- ══ End Quality Management Suite ══════════════════════════════════════ -->
 
   <main class="qms-view" id="view-feature-requests">
@@ -2593,6 +2598,7 @@
   <script src="{{ url_for('static', filename='js/qual.js') }}"></script>
   <script src="{{ url_for('static', filename='js/report.js') }}"></script>
   <script src="{{ url_for('static', filename='js/esignature_dialog.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/validation_approval_ui.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_common.js') }}"></script>
   <script src="{{ url_for('static', filename='js/investigation_case.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_documents.js') }}"></script>
@@ -2600,6 +2606,7 @@
   <script src="{{ url_for('static', filename='js/workflow_panel.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_capa.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_change_control.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/qms_market_complaint.js') }}"></script>
   <script src="{{ url_for('static', filename='js/qms_feature_requests.js') }}"></script>
   <script src="{{ url_for('static', filename='js/workflow_inbox.js') }}"></script>
   <script src="{{ url_for('static', filename='js/validation_dashboard.js') }}"></script>
@@ -2722,6 +2729,10 @@
 
         if (targetId === "view-qms-change-control") {
           if (window.initQMSChangeControl) window.initQMSChangeControl();
+        }
+
+        if (targetId === "view-qms-market-complaint") {
+          if (window.initQMSMarketComplaint) window.initQMSMarketComplaint();
         }
 
         if (targetId === "view-feature-requests") {
@@ -2936,6 +2947,7 @@
       "view-qms-deviations":       { module: "qms", tab: "nav-qms-deviations" },
       "view-qms-capa":             { module: "qms", tab: "nav-qms-capa" },
       "view-qms-change-control":   { module: "qms", tab: "nav-qms-change-control" },
+      "view-qms-market-complaint": { module: "qms", tab: "nav-qms-market-complaint" },
       "view-risk-dashboard":       { module: "qms", tab: "risk-nav-dashboard", risk: true },
       "view-risk-new":             { module: "qms", tab: "risk-nav-dashboard", risk: true },
       "view-risk-library":         { module: "qms", tab: "risk-nav-dashboard", risk: true },

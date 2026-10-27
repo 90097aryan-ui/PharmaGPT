@@ -75,14 +75,15 @@ def list_templates(doc_type: str = "", company_id: str = "") -> list[dict]:
 
 # ── Documents ──────────────────────────────────────────────────────────────────
 
-def create_document(data: dict, *, company_id: str, created_by_user_id: str = "") -> dict:
+def create_document(data: dict, *, company_id: str, created_by_user_id: str = "",
+                    created_by_display_name: str = "") -> dict:
     """`company_id` must be the caller's authenticated tenant
     (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py.
-    `created_by_user_id` (Document Control redesign) is used only to
-    populate the document's initial version row's own `created_by_user_id`
-    (see create_initial_version() below) — it is deliberately NOT stored on
-    qms_documents itself here, since a document-level creator column is
-    outside this redesign's scope."""
+    `created_by_user_id` populates the initial version row's own
+    `created_by_user_id` (see create_initial_version() below) AND, via
+    creator_identity.stamp(), the document-level creator columns that the
+    Validation approval engine and workflow_engine.reject_creator_as_approver
+    read. Both are authenticated-only, never taken from `data`."""
     conn = get_connection()
     doc_number = data.get("doc_number") or generate_document_number(
         data.get("doc_type", "SOP"), data.get("department", "")
@@ -123,7 +124,25 @@ def create_document(data: dict, *, company_id: str, created_by_user_id: str = ""
     new_id = cur.lastrowid
     conn.close()
     create_initial_version(new_id, data.get("content", ""), created_by_user_id)
+    from pharmagpt import creator_identity
+    creator_identity.stamp("qms_documents", new_id, created_by_user_id, created_by_display_name)
     return get_document(new_id)
+
+
+def get_creator_identity(document: dict) -> dict:
+    """Document-level creator columns, falling back to the FIRST version row's
+    created_by_user_id (always captured since the Document Control redesign)
+    for documents created before the document-level columns existed."""
+    cid = (document or {}).get("created_by_user_id") or ""
+    if not cid and document:
+        conn = get_connection()
+        row = conn.execute("SELECT created_by_user_id FROM qms_document_versions WHERE document_id = ? "
+                           "ORDER BY id ASC LIMIT 1", (document["id"],)).fetchone()
+        conn.close()
+        cid = (row["created_by_user_id"] if row else "") or ""
+    return {"created_by_user_id": cid,
+            "created_by_display_name": (document or {}).get("created_by_display_name", ""),
+            "prepared_by": (document or {}).get("prepared_by", "")}
 
 
 def get_document(document_id: int) -> dict | None:
@@ -168,7 +187,29 @@ def get_all_documents(company_id: str | None = None, filters: dict | None = None
     return [dict(r) for r in rows]
 
 
-def update_document(document_id: int, data: dict) -> dict | None:
+# CRIT-01 (Security Audit remediation): these fields must only change via
+# this document's workflow/approval lifecycle (services/workflow_engine.py's
+# STATUS_APPLIERS, routes/qms_documents.py::submit_approval's e-signed
+# writes, and the company_admin-only create_version() escape hatch) — never
+# via a raw client-supplied update. Distinct from, and in addition to, the
+# route-level _AUTHOR_READONLY_FIELDS silent-strip already in
+# routes/qms_documents.py::update_document (effective_date/review_date/
+# prepared_by/reviewed_by/approved_by) — that mechanism already neutralizes
+# those fields at the route layer and is left unchanged here to keep this
+# fix minimal; see qms_capa_database.CAPA_CONTROLLED_FIELDS for the general
+# rationale on why this repository-layer guard exists as the primary
+# boundary.
+DOCUMENT_CONTROLLED_FIELDS = frozenset({"status", "approver", "reviewer", "version", "superseded_date"})
+
+
+def update_document(document_id: int, data: dict, *, allow_controlled_fields: bool = False) -> dict | None:
+    if not allow_controlled_fields:
+        blocked = DOCUMENT_CONTROLLED_FIELDS & data.keys()
+        if blocked:
+            raise ValueError(
+                "workflow-controlled field(s) cannot be set via a generic update: "
+                + ", ".join(sorted(blocked))
+            )
     conn = get_connection()
     fields = [
         "doc_type", "title", "department", "category", "version", "status",
@@ -925,6 +966,15 @@ def try_clear_training_gate(document_id: int, effective_date: str | None = None)
     version = get_current_version(document_id)
     if not version or version["status"] != "approved":
         return None
+    document = get_document(document_id)
+    if document and document.get("doc_type") == "DQ":
+        # Shared Validation approval engine: Effective requires every mandatory
+        # sign-off (legacy pre-standard DQs have no ledger rows and pass).
+        from pharmagpt import validation_approval_database as vadb
+        from pharmagpt.services import validation_approval
+        rows = vadb.list_signoffs(document.get("company_id"), "DQ", document_id, include_superseded=True)
+        if not validation_approval.effective_allowed(rows):
+            return None
     gate = training_gate_status(version["id"])
     if not gate["cleared"]:
         return None
@@ -937,5 +987,9 @@ def try_clear_training_gate(document_id: int, effective_date: str | None = None)
     final_number = dv.next_version_number(version["version_number"], "effective")
     transition_version_status(version["id"], "effective", effective_date=effective_date,
                                version=final_number, version_number=final_number)
+    # CRIT-01 (Security Audit remediation): allow_controlled_fields=True —
+    # this is the Quality Release / training-gate-clear path itself (see
+    # trusted callers named in the docstring above), never a raw client
+    # field.
     return update_document(document_id, {"status": "Effective", "effective_date": effective_date,
-                                          "version": final_number})
+                                          "version": final_number}, allow_controlled_fields=True)

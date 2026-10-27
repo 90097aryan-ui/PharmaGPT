@@ -237,7 +237,8 @@ QUAL_SCHEMA = """
 
 # ── Qualifications ────────────────────────────────────────────────────────────
 
-def create_qualification(data: dict, *, company_id: str) -> dict:
+def create_qualification(data: dict, *, company_id: str, created_by_user_id: str = "",
+                         created_by_display_name: str = "") -> dict:
     """`company_id` must be the caller's authenticated tenant
     (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py."""
     conn = get_connection()
@@ -292,6 +293,8 @@ def create_qualification(data: dict, *, company_id: str) -> dict:
     conn.close()
     add_approval_entry(new_id, None, "Qualification Created",
                        data.get("prepared_by", "System"), "Author", "Initial draft created")
+    from pharmagpt import creator_identity
+    creator_identity.stamp("qual_qualifications", new_id, created_by_user_id, created_by_display_name)
     return get_qualification(new_id)
 
 
@@ -399,7 +402,7 @@ def get_dashboard_stats(company_id: str) -> dict:
         (company_id,),
     ).fetchone()[0]
     pending_approvals = conn.execute(
-        "SELECT COUNT(*) FROM qual_qualifications WHERE status IN ('under_review','pending_approval') AND company_id = ?",
+        "SELECT COUNT(*) FROM qual_qualifications WHERE status IN ('under_review','technical_review','qa_review','validation_review','final_approval','pending_approval') AND company_id = ?",
         (company_id,),
     ).fetchone()[0]
 
@@ -422,21 +425,22 @@ def get_dashboard_stats(company_id: str) -> dict:
 
 # ── Protocols ─────────────────────────────────────────────────────────────────
 
-def create_protocol(qual_id: int, protocol_type: str, data: dict) -> dict:
+def create_protocol(qual_id: int, protocol_type: str, data: dict, *, created_by_user_id: str = "",
+                    created_by_display_name: str = "") -> dict:
     conn = get_connection()
     with conn:
         cur = conn.execute(
             """INSERT INTO qual_protocols
                (qual_id, protocol_type, protocol_number, title, revision, status,
                 scope, purpose, references_text, definitions, responsibilities,
-                system_description, summary, conclusion)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                system_description, summary, conclusion, approval_status)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'draft')""",
             (
                 qual_id,
                 protocol_type,
                 data.get("protocol_number", ""),
                 data.get("title", f"{protocol_type} Protocol"),
-                data.get("revision", "A"),
+                "A",  # revision is system-controlled; bumped only by the approval workflow
                 data.get("status", "draft"),
                 data.get("scope", ""),
                 data.get("purpose", ""),
@@ -450,6 +454,8 @@ def create_protocol(qual_id: int, protocol_type: str, data: dict) -> dict:
         )
         new_id = cur.lastrowid
     conn.close()
+    from pharmagpt import creator_identity
+    creator_identity.stamp("qual_protocols", new_id, created_by_user_id, created_by_display_name)
     return get_protocol(new_id)
 
 
@@ -462,6 +468,35 @@ def get_protocol(protocol_id: int) -> dict | None:
     d = dict(row)
     d["ai_review_data"] = json.loads(d.get("ai_review_data") or "{}")
     return d
+
+
+PROTOCOL_APPROVAL_STATUSES = (
+    "draft", "under_review", "technical_review", "qa_review", "validation_review",
+    "final_approval", "pending_approval", "approved", "effective", "obsolete",
+)
+
+
+def get_protocol_approval_status(protocol: dict) -> str:
+    return (protocol or {}).get("approval_status") or "draft"
+
+
+def set_protocol_approval_status(protocol_id: int, status: str, revision: str | None = None) -> dict | None:
+    """The ONLY writer of qual_protocols.approval_status/revision. Called by
+    the standardized approval workflow (routes/qual.py); deliberately absent
+    from update_protocol()'s allow-list so a client PUT can never move a
+    protocol through its lifecycle."""
+    if status not in PROTOCOL_APPROVAL_STATUSES:
+        raise ValueError(f"invalid protocol approval status '{status}'")
+    conn = get_connection()
+    with conn:
+        if revision is None:
+            conn.execute("UPDATE qual_protocols SET approval_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                         (status, protocol_id))
+        else:
+            conn.execute("UPDATE qual_protocols SET approval_status = ?, revision = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                         (status, revision, protocol_id))
+    conn.close()
+    return get_protocol(protocol_id)
 
 
 def get_protocols_for_qual(qual_id: int) -> list[dict]:
@@ -481,7 +516,7 @@ def get_protocols_for_qual(qual_id: int) -> list[dict]:
 
 def update_protocol(protocol_id: int, data: dict) -> dict | None:
     allowed = [
-        "protocol_number", "title", "revision", "status", "scope", "purpose",
+        "protocol_number", "title", "status", "scope", "purpose",
         "references_text", "definitions", "responsibilities", "system_description",
         "summary", "conclusion", "ai_generated", "ai_review_data",
         "compliance_score", "completeness_score", "pass_count", "fail_count",

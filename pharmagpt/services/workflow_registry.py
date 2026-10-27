@@ -38,6 +38,7 @@ def _registry() -> dict[str, ModuleDescriptor]:
     from pharmagpt import qms_capa_database as capadb
     from pharmagpt import qms_change_control_database as ccdb
     from pharmagpt import qms_document_database as qdb
+    from pharmagpt import qms_market_complaint_database as mcdb
 
     return {
         "deviation": ModuleDescriptor(
@@ -55,6 +56,10 @@ def _registry() -> dict[str, ModuleDescriptor]:
         "document": ModuleDescriptor(
             "document", "DOCUMENT_WORKFLOW_V1", qdb.get_document,
             "doc_number", "title", "/qms/documents", "file-text",
+        ),
+        "market_complaint": ModuleDescriptor(
+            "market_complaint", "MARKET_COMPLAINT_WORKFLOW_V1", mcdb.get_complaint,
+            "complaint_number", "title", "/qms/market-complaints", "megaphone",
         ),
     }
 

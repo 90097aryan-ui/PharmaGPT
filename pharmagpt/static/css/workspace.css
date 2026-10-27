@@ -88,7 +88,7 @@ body.ent-ws-active > header { display: none; }
   display: inline-flex; align-items: center; gap: 6px;
 }
 .ent-ws-btn:hover { background: var(--bg); }
-.ent-ws-btn.ent-ws-btn-danger { color: #A8544F; border-color: rgba(168,69,63,0.25); }
+.ent-ws-btn.ent-ws-btn-danger { color: #B91C1C; border-color: rgba(185,28,28,0.25); }
 .ent-ws-btn.ent-ws-btn-danger:hover { background: rgba(168,69,63,0.06); }
 
 /* ── Progress row: reusable step dots (optional per module) ────────────────── */
@@ -291,7 +291,7 @@ body.ent-ws-active > header { display: none; }
 #view-validation-projects .btn-new-project { }
 #view-validation-projects .project-item { border: 1px solid var(--border); margin-bottom: 6px; }
 #view-validation-projects .project-item:hover  { background: var(--bg-secondary); }
-#view-validation-projects .project-item.active { background: #F1ECE6; }
+#view-validation-projects .project-item.active { background: #EEF0F3; }
 #view-validation-projects .proj-item-name { color: var(--text); }
 #view-validation-projects .proj-item-sub  { color: var(--text-muted); }
 #view-validation-projects .proj-icon      { color: var(--text-muted); }

@@ -24,9 +24,13 @@ from pharmagpt.qms_database import generate_change_control_number
 
 # ── Change Controls ───────────────────────────────────────────────────────────
 
-def create_change_control(data: dict, *, company_id: str) -> dict:
+def create_change_control(data: dict, *, company_id: str, created_by_user_id: str = "",
+                          created_by_display_name: str = "") -> dict:
     """`company_id` must be the caller's authenticated tenant
-    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py."""
+    (`g.tenant.company_id`), never client-supplied — see pharmagpt/tenancy.py.
+    `created_by_user_id`/`created_by_display_name` (CRIT-02 remediation) are
+    likewise authenticated-only, never taken from `data` — see
+    database.py::init_db()'s CRIT-02 schema comment."""
     conn = get_connection()
     cc_number = data.get("cc_number") or generate_change_control_number()
     cur = conn.execute(
@@ -34,8 +38,9 @@ def create_change_control(data: dict, *, company_id: str) -> dict:
            (cc_number, title, change_type, change_category, department, area,
             equipment_system, project_id, requested_by, date_requested,
             target_implementation_date, change_description, reason_for_change,
-            current_state, proposed_state, status, risk_level, form_data, company_id)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            current_state, proposed_state, status, risk_level, form_data, company_id,
+            created_by_user_id, created_by_display_name)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             cc_number,
             data.get("title", "Untitled Change").strip() or "Untitled Change",
@@ -56,6 +61,8 @@ def create_change_control(data: dict, *, company_id: str) -> dict:
             data.get("risk_level", ""),
             json.dumps(data.get("form_data", {})),
             company_id,
+            created_by_user_id,
+            created_by_display_name,
         ),
     )
     conn.commit()
@@ -110,7 +117,21 @@ def get_all_change_controls(company_id: str | None = None, filters: dict | None 
     return result
 
 
-def update_change_control(cc_id: int, data: dict) -> dict | None:
+# CRIT-01 (Security Audit remediation): mirrors qms_capa_database's
+# CAPA_CONTROLLED_FIELDS — see that comment for the full rationale.
+CHANGE_CONTROL_CONTROLLED_FIELDS = frozenset({
+    "status", "qa_reviewer", "approver", "implementation_date", "verification_date", "closure_date",
+})
+
+
+def update_change_control(cc_id: int, data: dict, *, allow_controlled_fields: bool = False) -> dict | None:
+    if not allow_controlled_fields:
+        blocked = CHANGE_CONTROL_CONTROLLED_FIELDS & data.keys()
+        if blocked:
+            raise ValueError(
+                "workflow-controlled field(s) cannot be set via a generic update: "
+                + ", ".join(sorted(blocked))
+            )
     conn = get_connection()
     fields = [
         "title", "change_type", "change_category", "department", "area", "equipment_system",

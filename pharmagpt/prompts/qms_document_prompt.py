@@ -39,16 +39,41 @@ def _flatten_required_headings(structure: list[dict]) -> list[str]:
 def _format_template_structure_block(structure: list[dict]) -> str:
     """The '## Heading' / '### Sub-heading' skeleton injected into the AI
     prompt for a controlled template — each with an explicit fill-in-only
-    instruction directly beneath it, not just a general rule stated once."""
+    instruction directly beneath it, not just a general rule stated once.
+
+    Two optional per-section keys (Yuktav Master SOP Template) refine what
+    gets injected beneath a heading instead of the generic fill-in note:
+      table_columns     : list[str] — the section is a table; emit an exact
+                           markdown table skeleton with these column headers
+                           instead of prose instructions.
+      freeform_guidance : str — free-text instruction appended beneath the
+                           heading (e.g. how to structure nested
+                           sub-sections) instead of/alongside the generic note.
+    Both are ignored by validate_template_structure(), which only reads
+    "heading"/"sub_headings" — adding them does not change what counts as a
+    required heading.
+    """
     lines = []
     for section in structure or []:
         heading = (section.get("heading") or "").strip()
         if not heading:
             continue
         lines.append(f"## {heading}")
-        lines.append("[Fill this section's content here — do not remove, rename, reorder, merge, or "
-                      "split this controlled heading]")
+
+        table_columns = section.get("table_columns")
+        freeform_guidance = section.get("freeform_guidance")
+        if table_columns:
+            lines.append("| " + " | ".join(table_columns) + " |")
+            lines.append("|" + "|".join(["---"] * len(table_columns)) + "|")
+            lines.append("| " + " | ".join(["" for _ in table_columns]) + " |")
+            lines.append("[Add as many rows as applicable — do not rename these column headers]")
+        elif freeform_guidance:
+            lines.append(f"[{freeform_guidance}]")
+        else:
+            lines.append("[Fill this section's content here — do not remove, rename, reorder, merge, or "
+                          "split this controlled heading]")
         lines.append("")
+
         for sub in section.get("sub_headings") or []:
             sub = (sub or "").strip()
             if not sub:
@@ -58,6 +83,48 @@ def _format_template_structure_block(structure: list[dict]) -> str:
                           "merge, or split this controlled sub-heading]")
             lines.append("")
     return "\n".join(lines)
+
+
+# ── Yuktav Master SOP Template (Document Control) ────────────────────────────
+#
+# Sections 1 (Content/TOC), 10 (Revision History), and 11 (Approvals) are
+# DOCX-native — built directly by services/docx_generator.py:_build_sop()
+# from DocumentData, never from AI-generated markdown — so they are
+# deliberately absent here. This structure only covers the AI-authored body,
+# numbered 2-9 to match the document's final numbering exactly.
+#
+# Section 8 (Procedure) carries no table_columns: it is the flexible,
+# subject-driven section (spec: "Fixed master structure + flexible Procedure
+# content") — freeform_guidance tells the model how to nest sub-sections
+# (### 8.1, #### 8.1.1) without forcing any specific sub-section onto every
+# SOP.
+DEFAULT_SOP_STRUCTURE: list[dict] = [
+    {"heading": "2. Purpose", "sub_headings": []},
+    {"heading": "3. Scope", "sub_headings": []},
+    {"heading": "4. Responsibility", "sub_headings": [],
+     "table_columns": ["Department/User", "Responsibility"]},
+    {"heading": "5. References", "sub_headings": [],
+     "table_columns": ["SOP No.", "SOP Title"]},
+    {"heading": "6. Abbreviation/Definition", "sub_headings": [],
+     "table_columns": ["Abbreviation/Definition", "Full Form/Meaning"]},
+    {"heading": "7. Safety", "sub_headings": []},
+    {"heading": "8. Procedure", "sub_headings": [],
+     "freeform_guidance": (
+         "This is the main working section. Structure it as numbered markdown "
+         "sub-headings under this section (### 8.1 <Sub-section>, #### 8.1.1 "
+         "<Step>, #### 8.1.2 <Step>, ### 8.2 <Sub-section>, ...), numbered "
+         "sequentially and continuing the '8.' prefix. Only include the "
+         "sub-sections that actually apply to this SOP's subject — for "
+         "example Operation, Cleaning, Preparation, Critical Steps/Critical "
+         "Parameters, Acceptance Criteria, Abnormal Situation/Deviation "
+         "Handling, or Precautions — do not force an irrelevant sub-section "
+         "into every SOP. Do not add sub-sections outside this numbering, "
+         "and do not create additional top-level (##) sections beyond the "
+         "controlled structure of this document."
+     )},
+    {"heading": "9. FORM/ANNEXURE", "sub_headings": [],
+     "table_columns": ["Form No.", "Title"]},
+]
 
 
 def validate_template_structure(content: str, structure: list[dict]) -> dict:
@@ -118,9 +185,19 @@ def build_draft_prompt(info: dict, knowledge_base: str = "", template: dict | No
     9-section default below. Omitted or a template with no structure falls
     back to that fixed default exactly as before this parameter existed —
     fully backward compatible for every document not created from a
-    template."""
+    template.
+
+    doc_type == "SOP" with no explicit template (Yuktav Master SOP Template):
+    falls back to DEFAULT_SOP_STRUCTURE instead of the generic 9-section
+    default, so every SOP gets the master structure without requiring the
+    caller to attach a template_id. A company-authored SOP template (an
+    explicit `template` argument) still takes priority over this default,
+    exactly as for any other doc_type."""
     ctx = _doc_context(info)
     doc_type = info.get("doc_type", "SOP")
+    if not template and doc_type == "SOP":
+        template = {"name": "Standard Operating Procedure (Default)",
+                    "structure": DEFAULT_SOP_STRUCTURE}
     # AI-Assisted SOP Creation (spec §4): equipment-derived Knowledge Base
     # context is retrieved and passed in verbatim — this instruction is what
     # stops the model from inventing equipment-specific technical detail the

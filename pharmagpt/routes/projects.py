@@ -28,6 +28,7 @@ from pharmagpt import equipment_database as equipdb
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
+from pharmagpt.auth.module_access import require_business_permission
 from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.db import projects_repo
 from pharmagpt.state import history_cache
@@ -198,6 +199,7 @@ def update_project(project_id):
 
 @bp.route("/projects/<int:project_id>", methods=["DELETE"])
 @require_role("company_admin")
+@require_business_permission("Validation", "Delete")
 def delete_project(project_id):
     """Delete a project and cascade to its messages, documents, and generated docs."""
     existing = tenancy.scoped_or_none(db.get_project(project_id), g.tenant.company_id)

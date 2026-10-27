@@ -30,38 +30,51 @@
   async function loadRoles() {
     const listEl = el("admin-roles-list");
     if (!listEl) return;
+    if (window.PharmaUI) window.PharmaUI.skeleton(listEl, { variant: "rows" });
     try {
       const res = await window.fetch("/rbac/roles");
       const rows = await res.json();
       if (!res.ok) throw new Error((rows && rows.error) || "Could not load roles");
       _roles = rows || [];
 
-      listEl.innerHTML = _roles.map(r => `
-        <div class="eq-row" data-id="${r.id}" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border)">
-          <div>
-            <strong>${escapeHtml(r.name)}</strong>
-            ${r.is_template ? `<span style="color:var(--text-muted);font-size:11px;margin-left:8px">TEMPLATE</span>` : ""}
-            <div style="color:var(--text-muted);font-size:12px">${escapeHtml(r.description || "")}</div>
+      if (!_roles.length) {
+        if (window.PharmaUI) {
+          window.PharmaUI.emptyState(listEl, { icon: "shield-check", title: "No roles yet" });
+        } else {
+          listEl.innerHTML = `<p style="padding:16px;color:var(--text-muted)">No roles yet.</p>`;
+        }
+      } else {
+        listEl.innerHTML = _roles.map(r => `
+          <div class="eq-row" data-id="${r.id}" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border)">
+            <div>
+              <strong>${escapeHtml(r.name)}</strong>
+              ${r.is_template ? `<span style="color:var(--text-muted);font-size:11px;margin-left:8px">TEMPLATE</span>` : ""}
+              <div style="color:var(--text-muted);font-size:12px">${escapeHtml(r.description || "")}</div>
+            </div>
+            <div style="display:flex;gap:8px">
+              ${r.is_template
+                ? `<button class="btn-secondary role-clone-btn" data-id="${r.id}" data-name="${escapeHtml(r.name)}">Clone</button>`
+                : `<span style="color:var(--text-muted);font-size:12px">${escapeHtml(r.status)}</span>
+                   <button class="btn-secondary role-toggle-status" data-id="${r.id}" data-status="${r.status}">
+                     ${r.status === "active" ? "Disable" : "Enable"}
+                   </button>`}
+            </div>
           </div>
-          <div style="display:flex;gap:8px">
-            ${r.is_template
-              ? `<button class="btn-secondary role-clone-btn" data-id="${r.id}" data-name="${escapeHtml(r.name)}">Clone</button>`
-              : `<span style="color:var(--text-muted);font-size:12px">${escapeHtml(r.status)}</span>
-                 <button class="btn-secondary role-toggle-status" data-id="${r.id}" data-status="${r.status}">
-                   ${r.status === "active" ? "Disable" : "Enable"}
-                 </button>`}
-          </div>
-        </div>
-      `).join("") || `<p style="padding:16px;color:var(--text-muted)">No roles yet.</p>`;
+        `).join("");
 
-      listEl.querySelectorAll(".role-toggle-status").forEach(btn =>
-        btn.addEventListener("click", () => toggleRoleStatus(btn.dataset.id, btn.dataset.status)));
-      listEl.querySelectorAll(".role-clone-btn").forEach(btn =>
-        btn.addEventListener("click", () => cloneRole(btn.dataset.id, btn.dataset.name)));
+        listEl.querySelectorAll(".role-toggle-status").forEach(btn =>
+          btn.addEventListener("click", () => toggleRoleStatus(btn.dataset.id, btn.dataset.status)));
+        listEl.querySelectorAll(".role-clone-btn").forEach(btn =>
+          btn.addEventListener("click", () => cloneRole(btn.dataset.id, btn.dataset.name)));
+      }
 
       populateMatrixRoleSelect();
     } catch (err) {
-      listEl.innerHTML = `<p style="padding:16px;color:var(--error)">Could not load roles: ${escapeHtml(err.message || "unknown error")}</p>`;
+      if (window.PharmaUI) {
+        window.PharmaUI.errorState(listEl, { message: `Could not load roles: ${escapeHtml(err.message || "unknown error")}`, onRetry: loadRoles });
+      } else {
+        listEl.innerHTML = `<p style="padding:16px;color:var(--error)">Could not load roles: ${escapeHtml(err.message || "unknown error")}</p>`;
+      }
     }
   }
 
@@ -108,6 +121,7 @@
   async function loadMatrixForRole(roleId) {
     const gridEl = el("rbac-matrix-grid");
     if (!gridEl || !roleId) return;
+    if (window.PharmaUI) window.PharmaUI.skeleton(gridEl, { variant: "table" });
     try {
       const res = await window.fetch(`/rbac/roles/${roleId}/permissions`);
       const rows = await res.json();
@@ -138,7 +152,14 @@
       gridEl.querySelectorAll(".rbac-matrix-cell").forEach(cb =>
         cb.addEventListener("change", () => toggleMatrixCell(roleId, cb)));
     } catch (err) {
-      gridEl.innerHTML = `<p style="padding:16px;color:var(--error)">Could not load the permission matrix: ${escapeHtml(err.message || "unknown error")}</p>`;
+      if (window.PharmaUI) {
+        window.PharmaUI.errorState(gridEl, {
+          message: `Could not load the permission matrix: ${escapeHtml(err.message || "unknown error")}`,
+          onRetry: () => loadMatrixForRole(roleId),
+        });
+      } else {
+        gridEl.innerHTML = `<p style="padding:16px;color:var(--error)">Could not load the permission matrix: ${escapeHtml(err.message || "unknown error")}</p>`;
+      }
     }
   }
 
@@ -180,6 +201,8 @@
     const effEl = el("rbac-assign-effective");
     if (!listEl || !userId) return;
 
+    if (window.PharmaUI) window.PharmaUI.skeleton(listEl, { variant: "rows", rows: 2 });
+
     let rolesRes, effRes;
     try {
       [rolesRes, effRes] = await Promise.all([
@@ -187,7 +210,14 @@
         window.fetch(`/rbac/users/${userId}/effective-permissions`),
       ]);
     } catch (err) {
-      listEl.innerHTML = `<p style="padding:16px;color:var(--error)">Could not reach the server to load role assignments.</p>`;
+      if (window.PharmaUI) {
+        window.PharmaUI.errorState(listEl, {
+          message: "Could not reach the server to load role assignments.",
+          onRetry: () => loadUserAssignment(userId),
+        });
+      } else {
+        listEl.innerHTML = `<p style="padding:16px;color:var(--error)">Could not reach the server to load role assignments.</p>`;
+      }
       if (effEl) effEl.innerHTML = "";
       return;
     }
@@ -201,7 +231,12 @@
     for (const [res, label] of [[rolesRes, "role assignments"], [effRes, "effective permissions"]]) {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        listEl.innerHTML = `<p style="padding:16px;color:var(--error)">Could not load ${label}: ${escapeHtml(body.error || `server returned ${res.status}`)}</p>`;
+        const message = `Could not load ${label}: ${escapeHtml(body.error || `server returned ${res.status}`)}`;
+        if (window.PharmaUI) {
+          window.PharmaUI.errorState(listEl, { message, onRetry: () => loadUserAssignment(userId) });
+        } else {
+          listEl.innerHTML = `<p style="padding:16px;color:var(--error)">${message}</p>`;
+        }
         if (effEl) effEl.innerHTML = "";
         return;
       }
@@ -212,15 +247,23 @@
     const assignedRoleIds = new Set((assigned || []).map(a => a.role_id));
 
     const assignableRoles = _roles.filter(r => !r.is_template);
-    listEl.innerHTML = assignableRoles.map(r => `
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 0">
-        <input type="checkbox" class="rbac-assign-cb" data-role-id="${r.id}" ${assignedRoleIds.has(r.id) ? "checked" : ""} />
-        ${escapeHtml(r.name)}
-      </label>
-    `).join("") || `<p style="color:var(--text-muted)">No assignable roles yet.</p>`;
+    if (!assignableRoles.length) {
+      if (window.PharmaUI) {
+        window.PharmaUI.emptyState(listEl, { icon: "shield-check", title: "No assignable roles yet" });
+      } else {
+        listEl.innerHTML = `<p style="color:var(--text-muted)">No assignable roles yet.</p>`;
+      }
+    } else {
+      listEl.innerHTML = assignableRoles.map(r => `
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0">
+          <input type="checkbox" class="rbac-assign-cb" data-role-id="${r.id}" ${assignedRoleIds.has(r.id) ? "checked" : ""} />
+          ${escapeHtml(r.name)}
+        </label>
+      `).join("");
 
-    listEl.querySelectorAll(".rbac-assign-cb").forEach(cb =>
-      cb.addEventListener("change", () => toggleUserRole(userId, cb)));
+      listEl.querySelectorAll(".rbac-assign-cb").forEach(cb =>
+        cb.addEventListener("change", () => toggleUserRole(userId, cb)));
+    }
 
     effEl.innerHTML = `<strong>Effective permissions:</strong> ` + (
       (effective || []).length
@@ -259,10 +302,23 @@
   async function loadAuditLog() {
     const listEl = el("rbac-audit-list");
     if (!listEl) return;
+    if (window.PharmaUI) window.PharmaUI.skeleton(listEl, { variant: "table" });
     try {
       const res = await window.fetch("/rbac/audit");
       const rows = await res.json();
       if (!res.ok) throw new Error((rows && rows.error) || "Could not load audit trail");
+
+      if (!(rows || []).length) {
+        // Pre-existing `|| <p>No audit entries yet.</p>` fallback below was
+        // unreachable (the <table> wrapper made the template literal always
+        // truthy) — fixed as part of wiring this screen's empty state.
+        if (window.PharmaUI) {
+          window.PharmaUI.emptyState(listEl, { icon: "history", title: "No audit entries yet" });
+        } else {
+          listEl.innerHTML = `<p style="color:var(--text-muted)">No audit entries yet.</p>`;
+        }
+        return;
+      }
 
       listEl.innerHTML = `<table style="border-collapse:collapse;width:100%;font-size:13px">
         <thead><tr>
@@ -270,15 +326,22 @@
           <th style="text-align:left;padding:6px">Actor</th>
           <th style="text-align:left;padding:6px">Reason</th>
         </tr></thead><tbody>
-          ${(rows || []).map(r => `
+          ${rows.map(r => `
             <tr style="border-top:1px solid var(--border)">
               <td style="padding:6px">${escapeHtml(r.created_at)}</td>
               <td style="padding:6px">${escapeHtml(r.actor_user_id)}</td>
               <td style="padding:6px">${escapeHtml(r.reason)}</td>
             </tr>`).join("")}
-        </tbody></table>` || `<p style="color:var(--text-muted)">No audit entries yet.</p>`;
+        </tbody></table>`;
     } catch (err) {
-      listEl.innerHTML = `<p style="padding:16px;color:var(--error)">Could not load the audit trail: ${escapeHtml(err.message || "unknown error")}</p>`;
+      if (window.PharmaUI) {
+        window.PharmaUI.errorState(listEl, {
+          message: `Could not load the audit trail: ${escapeHtml(err.message || "unknown error")}`,
+          onRetry: loadAuditLog,
+        });
+      } else {
+        listEl.innerHTML = `<p style="padding:16px;color:var(--error)">Could not load the audit trail: ${escapeHtml(err.message || "unknown error")}</p>`;
+      }
     }
   }
 

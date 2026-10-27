@@ -337,6 +337,9 @@ def init_db() -> None:
     # ── URS Management Suite tables ───────────────────────────────────────────
     from pharmagpt.urs_database import URS_SCHEMA
     conn.executescript(URS_SCHEMA)
+    from pharmagpt.validation_approval_database import VALIDATION_APPROVAL_SCHEMA, ensure_unique_indexes
+    conn.executescript(VALIDATION_APPROVAL_SCHEMA)
+    ensure_unique_indexes(conn)
     conn.commit()
 
     # ── URS AI generation — background job tracking (additive columns) ───────
@@ -414,6 +417,25 @@ def init_db() -> None:
     conn.executescript(QUAL_SCHEMA)
     conn.commit()
 
+    # Protocol-level approval (standardized Validation workflow): each IQ/OQ/PQ
+    # protocol carries its own approval_status, independent of its siblings and
+    # of the execution `status`. Additive, nullable column + a one-time,
+    # idempotent backfill (only rows still NULL) that carries a legacy
+    # container-level approval down to its protocols so documents approved
+    # under the old workflow stay approved (no ledger rows -> grandfathered).
+    _add_column_if_missing(conn, "qual_protocols", "approval_status", "TEXT DEFAULT NULL")
+    conn.execute("""
+        UPDATE qual_protocols SET approval_status = COALESCE((
+            SELECT CASE q.status
+                     WHEN 'approved' THEN 'approved'  WHEN 'closed' THEN 'approved'
+                     WHEN 'effective' THEN 'effective' WHEN 'obsolete' THEN 'obsolete'
+                     WHEN 'under_review' THEN 'under_review'
+                     WHEN 'pending_approval' THEN 'pending_approval'
+                     ELSE 'draft' END
+            FROM qual_qualifications q WHERE q.id = qual_protocols.qual_id), 'draft')
+        WHERE approval_status IS NULL""")
+    conn.commit()
+
     # ── Tenant isolation (security fix, docs/SECURITY_REVIEW.md) ──────────────
     _add_column_if_missing(conn, "qual_qualifications", "company_id", "TEXT DEFAULT NULL")
     conn.commit()
@@ -475,6 +497,33 @@ def init_db() -> None:
     _add_column_if_missing(conn, "qms_workflow_instances", "document_version_id", "INTEGER DEFAULT NULL")
     _add_column_if_missing(conn, "qms_workflow_template_steps", "quorum_eligible", "INTEGER NOT NULL DEFAULT 1")
     _add_column_if_missing(conn, "qms_workflow_instance_steps", "quorum_eligible", "INTEGER NOT NULL DEFAULT 1")
+
+    # Yuktav org/RBAC/workflow authorization task — optional, additive
+    # department + functional-role auto-resolution for an approval step, as
+    # an alternative to a hand-picked named user_id. NULL (the default) on
+    # every existing template step reproduces today's behaviour exactly:
+    # services/workflow_engine.py::start_instance() only attempts
+    # auto-resolution when BOTH columns are set on a step, and named-user
+    # assignment via assign_approvers()/the Document Control chain remains
+    # fully supported and untouched either way.
+    _add_column_if_missing(conn, "qms_workflow_template_steps", "department_code", "TEXT DEFAULT NULL")
+    _add_column_if_missing(conn, "qms_workflow_template_steps", "functional_role_name", "TEXT DEFAULT NULL")
+    # CRIT-02 (Security Audit remediation): record creator identity, so
+    # segregation-of-duties enforcement (services/workflow_engine.py::
+    # reject_creator_as_approver) can refuse a record's own creator being
+    # named as one of its approvers. Documents already captures this on
+    # qms_document_versions.created_by_user_id (above) — CAPA/Change
+    # Control/Deviation have no per-version concept, so it lives directly on
+    # the main record instead. Authenticated-only, stamped once at creation
+    # by routes/qms_*.py's create_* handlers from g.tenant, never taken from
+    # client-supplied `data` — same convention as company_id (see
+    # pharmagpt/tenancy.py). Blank for every record created before this fix;
+    # the segregation-of-duties check is a documented no-op wherever no
+    # creator identity was captured, matching qms_documents.py's existing
+    # precedent for legacy records with no author on file.
+    for _crit02_table in ("qms_capas", "qms_change_controls", "qms_deviations"):
+        _add_column_if_missing(conn, _crit02_table, "created_by_user_id", "TEXT DEFAULT ''")
+        _add_column_if_missing(conn, _crit02_table, "created_by_display_name", "TEXT DEFAULT ''")
     # Moved out of QMS_SCHEMA (qms_database.py): that script runs via
     # executescript() above, before the quorum_eligible ALTERs directly
     # above this line — so on a database that already had
@@ -569,6 +618,14 @@ def init_db() -> None:
     # transitions to Obsolete, the same way effective_date is already stamped
     # on the transition to Effective.
     _add_column_if_missing(conn, "qms_documents", "superseded_date", "TEXT DEFAULT ''")
+    conn.commit()
+
+    # Reliable creator identity for the Validation approval workflow
+    # (creator_identity.py): authenticated user id + display name stamped once
+    # at creation. Additive; blank for pre-existing rows.
+    for _creator_table in ("urs_projects", "qual_qualifications", "qual_protocols", "qms_documents"):
+        _add_column_if_missing(conn, _creator_table, "created_by_user_id", "TEXT DEFAULT ''")
+        _add_column_if_missing(conn, _creator_table, "created_by_display_name", "TEXT DEFAULT ''")
     conn.commit()
 
     # ── Equipment entity (PharmaGPT v1.0 Module 2) ─────────────────────────────
@@ -686,6 +743,57 @@ def init_db() -> None:
         _add_column_if_missing(conn, "qms_audit_trail", _col, _ddl)
     conn.commit()
 
+    # ── Yuktav P0-3 (Assume Company Context / break-glass traceability) ──────
+    # Additive, optional column: the active break_glass_access.id when a row
+    # was written while a super_admin was acting under an assumed-company
+    # grant, else '' — lets a reviewer identify (and, by joining on this id,
+    # look up who/why/for-how-long) which QMS audit entries happened under
+    # break-glass without guessing from company_id alone. Blank for every
+    # row written before this fix and for every row written outside an
+    # active grant; existing readers of qms_audit_trail (the shared
+    # attachments/comments/audit-trail viewer, pharmagpt/static/js/
+    # qms_common.js::qmsRenderAuditTrail) only read specific known keys and
+    # are unaffected by the new column. See pharmagpt/audit.py::log and
+    # ::_active_break_glass_id.
+    _add_column_if_missing(conn, "qms_audit_trail", "assumed_context", "TEXT DEFAULT ''")
+    conn.commit()
+
+    # ── Yuktav P1-1 (qms_audit_trail database-level immutability) ────────────
+    # Prior to this, qms_audit_trail was append-only only by *application
+    # convention* — no UPDATE/DELETE function exists in this codebase for it
+    # (pharmagpt/qms_database.py::add_audit_entry only INSERTs) — but nothing
+    # at the database layer itself stopped a direct sqlite3 connection (a
+    # future call site, an ad hoc script, a REPL) from mutating or erasing a
+    # row. These two triggers make that a hard database-level refusal
+    # instead, mirroring the guarantee migrations/0008_qms_rls_up.sql already
+    # gives the Postgres-side `audit_trail` table via RLS (INSERT/SELECT-only
+    # policies, no UPDATE/DELETE policy) — SQLite has no RLS, so a
+    # BEFORE UPDATE/DELETE trigger that unconditionally RAISE(ABORT, ...)s is
+    # the equivalent mechanism for this table.
+    #
+    # `CREATE TRIGGER IF NOT EXISTS` is idempotent — safe to run on every
+    # startup/reinitialization, exactly like every other additive statement
+    # in this function. Triggers fire on UPDATE/DELETE only; INSERT and
+    # SELECT are completely unaffected, so add_audit_entry()/get_audit_trail()
+    # keep working exactly as before. RAISE(ABORT, ...) surfaces to Python
+    # callers as sqlite3.IntegrityError, which the caller (or its own
+    # try/except, e.g. routes/companies.py::_audit_fail_closed) can catch
+    # like any other database error — no new exception type to special-case.
+    conn.executescript("""
+        CREATE TRIGGER IF NOT EXISTS trg_qms_audit_trail_no_update
+        BEFORE UPDATE ON qms_audit_trail
+        BEGIN
+            SELECT RAISE(ABORT, 'qms_audit_trail is append-only: UPDATE is not permitted');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_qms_audit_trail_no_delete
+        BEFORE DELETE ON qms_audit_trail
+        BEGIN
+            SELECT RAISE(ABORT, 'qms_audit_trail is append-only: DELETE is not permitted');
+        END;
+    """)
+    conn.commit()
+
     # ── Document Control redesign (Phase 7 gap closure) ──────────────────────
     # Document Control Information header: Prepared By / Reviewed By /
     # Approved By are system-derived (mirrors urs_projects' identical
@@ -771,26 +879,36 @@ def init_db() -> None:
     # natural unique key to INSERT OR IGNORE against), so this is safe to
     # run on every startup and never creates a duplicate or touches a
     # company's own template of the same name.
+    #
+    # Structure is the Yuktav Master SOP Template (single source of truth:
+    # prompts/qms_document_prompt.py::DEFAULT_SOP_STRUCTURE — the same
+    # structure build_draft_prompt() already applies by default for any
+    # doc_type=='SOP' document with no explicit template_id, so a document
+    # created with or without attaching this row produces an identical
+    # result). Only the system-seeded row (created_by='system') is ever
+    # refreshed here if the code-level structure changes — a company's own
+    # customised copy of this template is never touched.
+    import json as _json
+    from pharmagpt.prompts.qms_document_prompt import DEFAULT_SOP_STRUCTURE as _sop_structure
+    _sop_structure_json = _json.dumps(_sop_structure)
+
     _existing_sop_template = conn.execute(
-        "SELECT 1 FROM qms_document_templates WHERE company_id = '' AND doc_type = 'SOP' "
-        "AND name = 'Standard Operating Procedure (Default)'"
+        "SELECT structure_json FROM qms_document_templates WHERE company_id = '' AND doc_type = 'SOP' "
+        "AND name = 'Standard Operating Procedure (Default)' AND created_by = 'system'"
     ).fetchone()
     if not _existing_sop_template:
-        import json as _json
-        _sop_structure = [
-            {"heading": "1. Purpose", "sub_headings": []},
-            {"heading": "2. Scope", "sub_headings": []},
-            {"heading": "3. Responsibilities", "sub_headings": []},
-            {"heading": "4. Definitions / Abbreviations", "sub_headings": []},
-            {"heading": "5. Procedure", "sub_headings": []},
-            {"heading": "6. References", "sub_headings": []},
-            {"heading": "7. Annexures", "sub_headings": []},
-            {"heading": "8. Revision History", "sub_headings": []},
-        ]
         conn.execute(
             "INSERT INTO qms_document_templates (doc_type, name, structure_json, company_id, created_by) "
             "VALUES (?,?,?,?,?)",
-            ("SOP", "Standard Operating Procedure (Default)", _json.dumps(_sop_structure), "", "system"),
+            ("SOP", "Standard Operating Procedure (Default)", _sop_structure_json, "", "system"),
+        )
+        conn.commit()
+    elif _existing_sop_template["structure_json"] != _sop_structure_json:
+        conn.execute(
+            "UPDATE qms_document_templates SET structure_json = ? "
+            "WHERE company_id = '' AND doc_type = 'SOP' "
+            "AND name = 'Standard Operating Procedure (Default)' AND created_by = 'system'",
+            (_sop_structure_json,),
         )
         conn.commit()
 

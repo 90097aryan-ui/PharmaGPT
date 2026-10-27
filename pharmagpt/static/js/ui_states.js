@@ -112,7 +112,7 @@ window.PharmaUI = (function () {
     }
 
     el.innerHTML = `
-      <div class="ui-error-state">
+      <div class="ui-error-state" role="alert">
         <div class="ui-state-icon ui-state-icon-error">${iconSpan("alert-triangle")}</div>
         <div class="ui-state-title">Unable to load</div>
         <div class="ui-state-message">${message}</div>

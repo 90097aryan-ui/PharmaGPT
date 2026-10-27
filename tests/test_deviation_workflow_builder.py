@@ -19,31 +19,57 @@ CAPA-phase steps (QA Review, Final Approval) that follow Investigation.
 
 import pytest
 
-_FIXED_USER_ID = "00000000-0000-0000-0000-000000000001"  # tests/conftest.py::_TEST_TENANT.user_id
+_FIXED_USER_ID = "00000000-0000-0000-0000-000000000001"  # tests/conftest.py::_TEST_TENANT.user_id — this
+# file's deviations are always created by this identity, so it is the
+# CREATOR for every test below (CRIT-02: never a valid approver).
+_FIXED_APPROVER_ID = "00000000-0000-0000-0000-000000000002"  # a distinct, non-creator identity — the
+# default approver for this file's tests (CRIT-02, Security Audit
+# remediation: a creator can no longer be assigned as their own record's
+# approver — see services/workflow_engine.py::reject_creator_as_approver).
 
 
 @pytest.fixture(autouse=True)
 def _active_approver_directory(monkeypatch):
-    """/workflow/start validates every configured approver against the
-    company's active users (routes/qms_deviations.py::
-    _missing_or_inactive_approvers) — a real Supabase call in production.
-    Autouse-patched here so this file's tests keep passing without per-test
-    boilerplate: every test in this file configures _FIXED_USER_ID (the
-    fixed test tenant's own id) as the approver, so it just needs to be
-    "active" in the fake company roster."""
+    """/workflow-builder (CRIT-02) and /workflow/start both validate every
+    configured approver against the company's active users
+    (routes/qms_deviations.py's shared tenancy.missing_or_inactive_users
+    check, and _missing_or_inactive_approvers respectively) — a real
+    Supabase call in production. Autouse-patched here so this file's tests
+    keep passing without per-test boilerplate: registers both the creator
+    identity (_FIXED_USER_ID, in case a test needs it — e.g. for a
+    deliberately-rejected self-assignment) and the default approver
+    identity (_FIXED_APPROVER_ID) as active in the fake company roster."""
     from tests.test_assume_company_context import FakeSupabaseClient
     from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID
-    store = {"users": [{"id": _FIXED_USER_ID, "company_id": BOOTSTRAP_COMPANY_ID, "status": "active"}]}
+    store = {"users": [
+        {"id": _FIXED_USER_ID, "company_id": BOOTSTRAP_COMPANY_ID, "status": "active"},
+        {"id": _FIXED_APPROVER_ID, "company_id": BOOTSTRAP_COMPANY_ID, "status": "active"},
+    ]}
     monkeypatch.setattr(
         "pharmagpt.routes.qms_deviations.get_service_role_client", lambda: FakeSupabaseClient(store)
     )
 
 
+def _as_approver(monkeypatch):
+    """Switch the acting identity to _FIXED_APPROVER_ID for a decide_step()
+    call — decide_step requires the caller's own user_id to be one of the
+    step's named approvers (services/workflow_engine.py), and CRIT-02 means
+    that can no longer be the creator identity the `client` fixture
+    defaults to. Mirrors tests/test_qms_routes.py::test_document_approval_
+    transitions_status's identical pattern for Documents' own SoD fix."""
+    import tests.conftest as conftest_module
+    from pharmagpt.auth.context import TenantContext
+    monkeypatch.setattr(conftest_module, "_TEST_TENANT", TenantContext(
+        user_id=_FIXED_APPROVER_ID, email="approver@example.com", display_name="Approver User",
+        role="reviewer_qa", company_id=conftest_module._TEST_TENANT.company_id,
+    ))
+
+
 _CAPA_PHASE = {
-    "qa_review_approver_user_id": _FIXED_USER_ID,
-    "qa_review_approver_display_name": "Test User",
-    "final_approval_approver_user_id": _FIXED_USER_ID,
-    "final_approval_approver_display_name": "Test User",
+    "qa_review_approver_user_id": _FIXED_APPROVER_ID,
+    "qa_review_approver_display_name": "Approver User",
+    "final_approval_approver_user_id": _FIXED_APPROVER_ID,
+    "final_approval_approver_display_name": "Approver User",
 }
 
 
@@ -65,7 +91,7 @@ def _put_builder(client, did, steps, capa_phase=None):
     return r
 
 
-def _configure_all_step_approvers(client, did, user_id=_FIXED_USER_ID, display_name="Test User"):
+def _configure_all_step_approvers(client, did, user_id=_FIXED_APPROVER_ID, display_name="Approver User"):
     """Fill in approver_user_id/display_name for every currently-configured
     Review-chain step plus both CAPA-phase steps (the only places approvers
     can be set — there is no runtime "Assign Approver" action) and save.
@@ -177,17 +203,17 @@ def test_start_workflow_builds_dynamic_template_and_auto_assigns_every_configure
     wf = client.get(f"/qms/deviations/{did}/workflow").get_json()
     by_order = {s["step_order"]: s for s in wf["steps"]}
     assert by_order[2]["step_type"] == "approval"
-    assert by_order[2]["approvers"][0]["user_id"] == _FIXED_USER_ID  # the first approval step, auto-assigned
-    assert by_order[3]["approvers"][0]["user_id"] == _FIXED_USER_ID  # a later step, also already assigned
-    assert by_order[4]["approvers"][0]["user_id"] == _FIXED_USER_ID  # QA Approval, also already assigned
+    assert by_order[2]["approvers"][0]["user_id"] == _FIXED_APPROVER_ID  # the first approval step, auto-assigned
+    assert by_order[3]["approvers"][0]["user_id"] == _FIXED_APPROVER_ID  # a later step, also already assigned
+    assert by_order[4]["approvers"][0]["user_id"] == _FIXED_APPROVER_ID  # QA Approval, also already assigned
     assert by_order[4]["step_key"] == "qa_approval"
     # Fixed tail (unchanged from DEVIATION_LIFECYCLE_V2), renumbered after the
     # 3 configured Review steps + the implicit "submitted" step.
     assert by_order[5]["step_key"] == "evidence_collection"
     assert by_order[6]["step_key"] == "qa_review"
-    assert by_order[6]["approvers"][0]["user_id"] == _FIXED_USER_ID  # CAPA-phase, also auto-assigned
+    assert by_order[6]["approvers"][0]["user_id"] == _FIXED_APPROVER_ID  # CAPA-phase, also auto-assigned
     assert by_order[7]["step_key"] == "final_approval"
-    assert by_order[7]["approvers"][0]["user_id"] == _FIXED_USER_ID  # CAPA-phase, also auto-assigned
+    assert by_order[7]["approvers"][0]["user_id"] == _FIXED_APPROVER_ID  # CAPA-phase, also auto-assigned
     assert by_order[8]["step_key"] == "effectiveness_check"
     assert by_order[9]["step_key"] == "closed"
 
@@ -200,10 +226,10 @@ def test_capa_phase_approvers_stay_correctly_assigned_when_review_chain_length_c
     did = dev["id"]
     steps = _get_builder(client, did)["steps"]
     steps.insert(1, {"step_name": "Engineering Review", "department": "Engineering",
-                      "approver_user_id": _FIXED_USER_ID, "approver_display_name": "Test User"})
+                      "approver_user_id": _FIXED_APPROVER_ID, "approver_display_name": "Approver User"})
     for s in steps:
-        s["approver_user_id"] = _FIXED_USER_ID
-        s["approver_display_name"] = "Test User"
+        s["approver_user_id"] = _FIXED_APPROVER_ID
+        s["approver_display_name"] = "Approver User"
     _put_builder(client, did, steps, _CAPA_PHASE)
 
     assert client.post(f"/qms/deviations/{did}/workflow/start").status_code == 201
@@ -211,9 +237,9 @@ def test_capa_phase_approvers_stay_correctly_assigned_when_review_chain_length_c
     wf = client.get(f"/qms/deviations/{did}/workflow").get_json()
     by_key = {s["step_key"]: s for s in wf["steps"]}
     assert by_key["qa_review"]["step_order"] == 7  # shifted by the extra Review step
-    assert by_key["qa_review"]["approvers"][0]["user_id"] == _FIXED_USER_ID
+    assert by_key["qa_review"]["approvers"][0]["user_id"] == _FIXED_APPROVER_ID
     assert by_key["final_approval"]["step_order"] == 8
-    assert by_key["final_approval"]["approvers"][0]["user_id"] == _FIXED_USER_ID
+    assert by_key["final_approval"]["approvers"][0]["user_id"] == _FIXED_APPROVER_ID
 
 
 def test_workflow_start_blocked_when_any_configured_step_has_no_approver(client):
@@ -251,8 +277,8 @@ def test_workflow_start_blocked_when_only_capa_phase_is_unconfigured(client):
     did = dev["id"]
     steps = _get_builder(client, did)["steps"]
     for s in steps:
-        s["approver_user_id"] = _FIXED_USER_ID
-        s["approver_display_name"] = "Test User"
+        s["approver_user_id"] = _FIXED_APPROVER_ID
+        s["approver_display_name"] = "Approver User"
     _put_builder(client, did, steps)  # capa_phase left unset
 
     r = client.post(f"/qms/deviations/{did}/workflow/start")
@@ -273,20 +299,36 @@ def test_workflow_start_blocked_when_a_configured_approver_no_longer_exists_or_i
     mistyped, deleted, or deactivated since it was picked."""
     from tests.test_assume_company_context import FakeSupabaseClient
     from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID
-    # No active users at all in the fake company roster — every configured
-    # approver (including _FIXED_USER_ID) is therefore "missing".
+    # A third identity, distinct from both the creator (_FIXED_USER_ID) and
+    # the file's normal default approver (_FIXED_APPROVER_ID), isolates
+    # "inactive approver" from the unrelated CRIT-02 creator-exclusion check
+    # exercised elsewhere in this file. CRIT-02 also added an equivalent
+    # active-user check at the Workflow Builder PUT step itself (earlier
+    # than this pre-existing /workflow/start check) — so this identity must
+    # still be genuinely active at configuration time, becoming
+    # deactivated/missing only afterward, to reproduce the exact "mistyped,
+    # deleted, or deactivated SINCE it was picked" scenario this test's own
+    # docstring already describes, rather than being rejected one step
+    # earlier than intended.
+    approver_id = "00000000-0000-0000-0000-000000000003"
     monkeypatch.setattr(
         "pharmagpt.routes.qms_deviations.get_service_role_client",
-        lambda: FakeSupabaseClient({"users": [{"id": _FIXED_USER_ID, "company_id": BOOTSTRAP_COMPANY_ID, "status": "deactivated"}]}),
+        lambda: FakeSupabaseClient({"users": [{"id": approver_id, "company_id": BOOTSTRAP_COMPANY_ID, "status": "active"}]}),
     )
 
     dev = _create_deviation(client)
     did = dev["id"]
-    _configure_all_step_approvers(client, did)
+    _configure_all_step_approvers(client, did, user_id=approver_id, display_name="Approver User")
+
+    # Now deactivate them — after configuration, before submission.
+    monkeypatch.setattr(
+        "pharmagpt.routes.qms_deviations.get_service_role_client",
+        lambda: FakeSupabaseClient({"users": [{"id": approver_id, "company_id": BOOTSTRAP_COMPANY_ID, "status": "deactivated"}]}),
+    )
 
     r = client.post(f"/qms/deviations/{did}/workflow/start")
     assert r.status_code == 409
-    assert _FIXED_USER_ID in r.get_json()["error"]
+    assert approver_id in r.get_json()["error"]
 
     assert client.get(f"/qms/deviations/{did}").get_json()["status"] == "Draft"
     assert client.get(f"/qms/deviations/{did}/workflow").get_json()["instance"] is None
@@ -307,16 +349,24 @@ def test_runtime_workflow_step_assign_endpoint_no_longer_exists_for_deviations(c
     assert r.status_code == 404
 
 
-def test_full_lifecycle_reaches_closed_with_no_runtime_assignment_at_any_step(client):
+def test_full_lifecycle_reaches_closed_with_no_runtime_assignment_at_any_step(client, monkeypatch):
     """End-to-end regression: a fully-configured workflow (Review chain +
     both CAPA-phase steps) runs from Submit through Closed using only
     Workflow Builder configuration and decide() calls — no runtime
-    assignment call anywhere in the lifecycle."""
+    assignment call anywhere in the lifecycle.
+
+    CRIT-02: the approval steps (2, 3, 4, 6, 7) are decided as
+    _FIXED_APPROVER_ID (via _as_approver), since decide_step() requires the
+    caller to be a named approver and the creator can no longer be one.
+    Steps 5/8/9 are plain role-eligible 'activity' steps (advance, not
+    approve) with no named-approver concept — the creator (default client)
+    decides those, exactly as before."""
     dev = _create_deviation(client)
     did = dev["id"]
     _configure_all_step_approvers(client, did)
     assert client.post(f"/qms/deviations/{did}/workflow/start").status_code == 201
 
+    _as_approver(monkeypatch)
     for step_order in (2, 3, 4):  # Production Head, QA Manager, QA Approval
         r = client.post(f"/qms/deviations/{did}/workflow/steps/{step_order}/decide", json={"decision": "approve"})
         assert r.status_code == 200, r.get_json()
@@ -331,6 +381,17 @@ def test_full_lifecycle_reaches_closed_with_no_runtime_assignment_at_any_step(cl
 
     r = client.post(f"/qms/deviations/{did}/workflow/steps/8/decide", json={"decision": "advance"})  # Effectiveness Check
     assert r.status_code == 200, r.get_json()
+
+    # Step 9 ("Closure") is an activity step whose eligible_roles is
+    # 'company_admin' only (qms_database.py's DEVIATION_LIFECYCLE_V2) —
+    # switch back to the creator identity (role=company_admin), since
+    # _FIXED_APPROVER_ID's role=reviewer_qa is not eligible to advance it.
+    import tests.conftest as conftest_module
+    from pharmagpt.auth.context import TenantContext
+    monkeypatch.setattr(conftest_module, "_TEST_TENANT", TenantContext(
+        user_id=_FIXED_USER_ID, email="test@example.com", display_name="Test User",
+        role="company_admin", company_id=conftest_module._TEST_TENANT.company_id,
+    ))
     r = client.post(f"/qms/deviations/{did}/workflow/steps/9/decide", json={"decision": "advance"})  # Closure
     assert r.status_code == 200, r.get_json()
 
@@ -371,8 +432,8 @@ def test_submit_compiles_customized_saved_steps_not_the_default_chain(client):
     steps.insert(1, {"step_name": "Engineering Sign-off", "department": "Engineering",
                       "approver_user_id": "", "approver_display_name": ""})
     for s in steps:
-        s["approver_user_id"] = _FIXED_USER_ID
-        s["approver_display_name"] = "Test User"
+        s["approver_user_id"] = _FIXED_APPROVER_ID
+        s["approver_display_name"] = "Approver User"
     r = _put_builder(client, did, steps, _CAPA_PHASE)
     assert r.status_code == 200, r.get_json()
 

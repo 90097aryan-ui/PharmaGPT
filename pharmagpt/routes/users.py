@@ -47,6 +47,7 @@ from postgrest.exceptions import APIError
 
 from flask import Blueprint, g, jsonify, request
 
+from pharmagpt import audit_events as evt
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
 from pharmagpt.db import qms_repo
 from pharmagpt.services.identity_admin import IdentityProvisioningError, provision_user
@@ -63,7 +64,14 @@ def _audit_best_effort(action: str, record_id: str, reason: str = "") -> None:
     raises — a logging failure must not block a Users/Companies action, and
     per docs/PHASE_F_FINDING_TRACEABILITY.md A1, this table's own
     GRANTs are not currently confirmed active in the live database, so a
-    failure here is expected until that operational item is resolved."""
+    failure here is expected until that operational item is resolved.
+
+    Yuktav P0-4 policy (see FINAL REPORT §D): kept best-effort only for
+    "User invited" — creating a new account grants that account zero access
+    until it is separately activated/assigned, so a lost audit row here is a
+    completeness gap, not a silent access change. A user's status/role_id
+    change (activation, deactivation, privilege reassignment) is NOT
+    best-effort — see `_audit_fail_closed` below."""
     try:
         qms_repo.add_audit_entry(
             extract_bearer_token(), g.tenant.company_id, "user", str(record_id),
@@ -71,6 +79,21 @@ def _audit_best_effort(action: str, record_id: str, reason: str = "") -> None:
         )
     except Exception:
         logger.exception("Phase F audit: failed to write user audit entry (%s)", action)
+
+
+def _audit_fail_closed(action: str, record_id: str, reason: str = "") -> None:
+    """Yuktav P0-4: fail-closed counterpart to `_audit_best_effort` above,
+    used only for PATCH /users/<id>'s status/role_id changes — these
+    directly grant or revoke a specific user's access or privilege level,
+    the same class of change RBAC role edits already treat as fail-closed
+    (pharmagpt/db/rbac_repo.py::add_rbac_audit_entry). A status/role change
+    that lands without a corresponding durable audit row is a material
+    compliance gap. Deliberately does NOT catch the exception: the caller
+    must abort the mutation if this raises. See FINAL REPORT §D."""
+    qms_repo.add_audit_entry(
+        extract_bearer_token(), g.tenant.company_id, "user", str(record_id),
+        action, actor_user_id=g.tenant.user_id, reason=reason or None,
+    )
 
 
 def _scoped_client_and_company():
@@ -223,6 +246,40 @@ def update_user(user_id):
         return jsonify({"error": "No valid fields to update"}), 400
 
     client, company_id = _scoped_client_and_company()
+
+    # Yuktav P0-4: confirm the target exists (and, for an assumed-context
+    # Super Admin, is within the company they explicitly assumed — the same
+    # app-level filter the mutation below already applies) BEFORE writing
+    # the fail-closed audit entry: an audit row must never be written for a
+    # user that turns out not to exist or is out of scope.
+    existing_query = client.table("users").select("id").eq("id", user_id)
+    if g.tenant.role == "super_admin":
+        existing_query = existing_query.eq("company_id", company_id)
+    existing = existing_query.maybe_single().execute()
+    if not (existing.data if existing else None):
+        return jsonify({"error": "User not found"}), 404
+
+    # status/role_id changes grant or revoke this user's access/privilege —
+    # fail-closed (see _audit_fail_closed's docstring and FINAL REPORT §D):
+    # the mutation below must not proceed unless every required audit entry
+    # was durably written first.
+    try:
+        _audit_fail_closed("User updated", user_id, reason=str(updates))
+        # Wave 4B: additive — the "User updated" entry above already
+        # captures every field change (including status); this writes a
+        # second, specifically-named entry only when status changed, so
+        # activation/deactivation is directly queryable/filterable without
+        # parsing the generic entry's free-text reason string.
+        if "status" in updates:
+            event = evt.USER_ACTIVATED if updates["status"] == "active" else evt.USER_DEACTIVATED
+            _audit_fail_closed(event, user_id)
+    except Exception:
+        logger.exception("User update BLOCKED: audit write failed for user %s", user_id)
+        return jsonify({
+            "error": "Could not record the required audit entry for this change; the "
+                     "user was NOT updated. Retry once the audit trail is writable.",
+        }), 500
+
     query = client.table("users").update(updates).eq("id", user_id)
     if g.tenant.role == "super_admin":
         # service-role bypasses RLS entirely — this app-level filter is the
@@ -238,5 +295,4 @@ def update_user(user_id):
     row = (result.data or [None])[0]
     if not row:
         return jsonify({"error": "User not found"}), 404
-    _audit_best_effort("User updated", user_id, reason=str(updates))
     return jsonify(row)

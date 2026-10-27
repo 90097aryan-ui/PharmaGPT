@@ -35,7 +35,7 @@ function openValidationWizard(docType) {
   document.getElementById("val-doc-type-title").textContent = cfg.label || docType;
   document.getElementById("val-doc-type-sub").textContent   = cfg.short ? `${cfg.short} — Protocol Generator` : "Protocol Generator";
   document.getElementById("val-doc-type-badge").textContent = cfg.short || docType;
-  document.getElementById("val-doc-type-badge").style.background = cfg.color || "#8A6B52";
+  document.getElementById("val-doc-type-badge").style.background = cfg.color || "#2563EB";
 
   // Hide viewer, show wizard
   document.getElementById("val-wizard").style.display    = "flex";
@@ -276,7 +276,7 @@ function valNext() {
       if (el) valFormData[id] = el.value.trim();
     });
     if (!valFormData.equipment_name) {
-      alert("Equipment Name is required.");
+      qmsToast("Equipment Name is required.");
       return;
     }
   }
@@ -295,7 +295,7 @@ function valNext() {
       }
     });
     if (missingRequired) {
-      alert(`"${missingRequired}" is required.`);
+      qmsToast(`"${missingRequired}" is required.`);
       return;
     }
     valFormData.details = details;
@@ -313,7 +313,7 @@ function valBack() {
 async function startGeneration() {
   if (valIsGenerating) return;
   if (!window.activeProject) {
-    alert("Please select a project first.");
+    qmsToast("Please select a project first.");
     return;
   }
 
@@ -509,7 +509,7 @@ async function _runReviewAndShowBadge() {
         .catch(() => {});
     }
   } catch (err) {
-    banner.innerHTML = `<div class="val-review-loading" style="color:#9A948C">QA review unavailable</div>`;
+    banner.innerHTML = `<div class="val-review-loading" style="color:#94A3B8">QA review unavailable</div>`;
   }
 }
 
@@ -553,7 +553,7 @@ async function exportDocx() {
     URL.revokeObjectURL(url);
 
   } catch (err) {
-    alert(`DOCX export failed: ${err.message}`);
+    qmsToast(`DOCX export failed: ${err.message}`);
   }
 }
 
@@ -568,19 +568,19 @@ function printDocument() {
 <title>Print Document</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Calibri, 'Segoe UI', sans-serif; font-size: 11pt; color: #5B4C43; background: #FFF; padding: 20mm 25mm; }
-  h1 { font-size: 18pt; color: #5B4C43; text-align: center; margin: 0 0 8pt; }
-  h2 { font-size: 13pt; color: #5B4C43; border-bottom: 1.5pt solid #8A6B52; padding-bottom: 3pt; margin: 14pt 0 6pt; }
-  h3 { font-size: 11.5pt; color: #8A6B52; margin: 10pt 0 4pt; }
+  body { font-family: Calibri, 'Segoe UI', sans-serif; font-size: 11pt; color: var(--sidebar-bg); background: #FFF; padding: 20mm 25mm; }
+  h1 { font-size: 18pt; color: var(--sidebar-bg); text-align: center; margin: 0 0 8pt; }
+  h2 { font-size: 13pt; color: var(--sidebar-bg); border-bottom: 1.5pt solid #2563EB; padding-bottom: 3pt; margin: 14pt 0 6pt; }
+  h3 { font-size: 11.5pt; color: #2563EB; margin: 10pt 0 4pt; }
   h4 { font-size: 10.5pt; margin: 8pt 0 3pt; }
   p, li { line-height: 1.55; margin: 4pt 0; }
   ul, ol { padding-left: 18pt; }
   table { border-collapse: collapse; width: 100%; margin: 8pt 0; font-size: 9.5pt; }
-  th { background: #5B4C43; color: #FFF; padding: 6pt 8pt; text-align: left; font-weight: 600; }
-  td { padding: 5pt 8pt; border-bottom: 0.5pt solid #EEE7E1; }
-  tr:nth-child(even) td { background: #F1ECE6; }
-  hr { border: none; border-top: 1pt solid #EEE7E1; margin: 10pt 0; }
-  strong { color: #5B4C43; }
+  th { background: var(--sidebar-bg); color: #FFF; padding: 6pt 8pt; text-align: left; font-weight: 600; }
+  td { padding: 5pt 8pt; border-bottom: 0.5pt solid #EAEDF1; }
+  tr:nth-child(even) td { background: #EEF0F3; }
+  hr { border: none; border-top: 1pt solid #EAEDF1; margin: 10pt 0; }
+  strong { color: var(--sidebar-bg); }
   @media print { body { padding: 15mm 20mm; } }
 </style>
 </head>
@@ -618,10 +618,10 @@ async function saveToProject() {
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
- if (btn) { btn.textContent = "Saved"; btn.style.background = "#5F8A61"; }
+ if (btn) { btn.textContent = "Saved"; btn.style.background = "#16A34A"; }
   } catch (err) {
  if (btn) { btn.disabled = false; btn.textContent = "Save to Project"; }
-    alert(`Save failed: ${err.message}`);
+    qmsToast(`Save failed: ${err.message}`);
   }
 }
 
@@ -638,11 +638,11 @@ function escapeHtmlVal(str) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 function escapeAttr(str) {
-  return String(str || "").replace(/"/g, "&quot;");
+  return String(str || "").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/'/g,"&#39;").replace(/</g,"&lt;");
 }
 
 // Expose for index.html inline navigation script

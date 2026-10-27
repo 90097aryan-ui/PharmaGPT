@@ -88,7 +88,7 @@ Every route response is JSON with a `user_message` field safe to render as-is; n
 **Modified (minimal, additive only):**
 - `pharmagpt/config.py` — new `BACKUP_*`/`SUPABASE_DB_URL`/`POSTGRES_BACKUP_TABLES` settings appended at end of file
 - `pharmagpt/app.py` — two lines: import + `register_blueprint` for the new admin blueprint, in the same style as every other blueprint
-- `render.yaml` — documented (not deployed) Cron Job service definition + new env var entries
+- `render.yaml` — backup env var entries (the Cron Job definition was removed: Render cron jobs cannot mount the web service disk; scheduling is in-process, see `services/backup_scheduler.py`)
 - `.env.example` — new env var documentation
 
 **Not modified:** `pharmagpt/auth/`, `pharmagpt/services/esignature_service.py`, `pharmagpt/audit.py`, any `qms_*` module, any existing route file, any migration.
@@ -107,7 +107,7 @@ A follow-up pass hardened the module for real-world operation without changing i
 ## 10. Remaining risks (not closed by this implementation)
 
 1. **Same-disk backup by default.** `BACKUP_DIR` defaults to the same persistent disk as the live database. A disk-level failure (not a software bug — the actual failure mode this framework exists to protect against) would take out both the primary data and the on-disk backup together. `BACKUP_OFFSITE_DIR` (a second mounted disk/network share) or an external object-storage sync (documented in `docs/BACKUP_SOP.md`, not built as in-app code to avoid an unjustified new SDK dependency — see that SOP for why) closes this gap but requires operator setup; it is not configured by default.
-2. **Nothing is scheduled yet.** `render.yaml` now documents a Cron Job service, but per this task's explicit "do not deploy" instruction, it has not been pushed or activated. Until it is, `scripts/run_backup.py` must be run manually or via some other scheduler.
+2. **Scheduling is in-process and off by default.** `services/backup_scheduler.py` runs in the web service (the only service that can read the disk) when `BACKUP_SCHEDULER_ENABLED=true`; health requires a fresh heartbeat. Off-site copies go to independent object storage (`BACKUP_OFFSITE_STORAGE_*`); a failed upload fails the run. See `docs/BACKUP_SOP.md` sections 4, 5 and 12.
 3. **`BACKUP_ENCRYPTION_KEY` is not yet set anywhere.** No backup can run until an operator generates one and configures it — by design (see §3), but it means this framework is inert in its current, undeployed state.
 4. **Supabase's own managed PITR status is unconfirmed.** Whether Point-in-Time-Recovery is actually enabled on the production Supabase project's plan is a dashboard/billing setting outside this codebase's visibility.
 5. **Restore-to-a-genuinely-separate-environment has not been drilled.** The verification drill (§6) proves the archive is internally consistent and decryptable; it does not prove a full cutover of a live gunicorn process to restored data would succeed without incident. See `docs/BACKUP_VALIDATION_PROTOCOL.md` for the periodic full-drill this should be paired with.

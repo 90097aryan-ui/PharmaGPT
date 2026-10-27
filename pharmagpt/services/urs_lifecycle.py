@@ -28,21 +28,33 @@ from __future__ import annotations
 
 DRAFT = "draft"
 UNDER_REVIEW = "under_review"
-PENDING_APPROVAL = "pending_approval"
+TECHNICAL_REVIEW = "technical_review"
+QA_REVIEW = "qa_review"
+VALIDATION_REVIEW = "validation_review"
+FINAL_APPROVAL = "final_approval"
+PENDING_APPROVAL = "pending_approval"  # pre-standard status; reject-only now
 APPROVED = "approved"
 EFFECTIVE = "effective"
 OBSOLETE = "obsolete"
 
-ALL_STATUSES = {DRAFT, UNDER_REVIEW, PENDING_APPROVAL, APPROVED, EFFECTIVE, OBSOLETE}
+ALL_STATUSES = {DRAFT, UNDER_REVIEW, TECHNICAL_REVIEW, QA_REVIEW, VALIDATION_REVIEW,
+                FINAL_APPROVAL, PENDING_APPROVAL, APPROVED, EFFECTIVE, OBSOLETE}
 
-# The mandated backbone is Draft -> Under Review -> Approved -> Effective.
-# pending_approval sits inside the Under Review phase; obsolete is reachable
-# once a document has actually been approved or made effective (you cannot
-# retire a document that was never approved).
+# Standardized Validation lifecycle (shared with Qualification via
+# services/validation_approval.py — this dict is the single source of truth):
+#   Draft -> Under Review -> Technical/Functional Review -> QA Review ->
+#   Validation Review -> Final Approval -> Approved -> Effective
+# Every review status can be rejected back to Draft (resubmission starts a new
+# sign-off cycle). Skipping a stage is not possible. pending_approval is the
+# pre-standard status: existing rows keep it, but it can only be rejected.
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     DRAFT:             {UNDER_REVIEW},
-    UNDER_REVIEW:      {PENDING_APPROVAL, APPROVED, DRAFT},
-    PENDING_APPROVAL:  {APPROVED, DRAFT},
+    UNDER_REVIEW:      {TECHNICAL_REVIEW, DRAFT},
+    TECHNICAL_REVIEW:  {QA_REVIEW, DRAFT},
+    QA_REVIEW:         {VALIDATION_REVIEW, DRAFT},
+    VALIDATION_REVIEW: {FINAL_APPROVAL, DRAFT},
+    FINAL_APPROVAL:    {APPROVED, DRAFT},
+    PENDING_APPROVAL:  {DRAFT},
     APPROVED:          {EFFECTIVE, DRAFT},
     EFFECTIVE:         {OBSOLETE},
     OBSOLETE:          set(),

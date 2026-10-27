@@ -128,69 +128,86 @@ def test_approval_rejects_skip_ahead_transition(client):
     assert udb.get_urs(urs["id"])["status"] == "draft"
 
 
-def test_approval_valid_transition_sequence_reaches_approved(client):
+def test_approval_valid_transition_sequence_reaches_approved(client, monkeypatch):
+    """Standardized workflow (services/validation_approval.py): every review
+    stage is signed by its own designation; see
+    tests/test_validation_approval_workflow.py for the exhaustive coverage."""
+    from tests._va_helpers import CHAIN, EXPECTED_AFTER, as_signer, post
+    as_signer(monkeypatch, "prepared_by")
     urs = _make_urs(client)
     uid = urs["id"]
 
-    r1 = client.post(f"/urs/{uid}/approval", json={
-        "action": "Submitted for Review", "performed_by": "Author A", "role": "Author",
-    })
+    r1 = post(client, "/urs", uid, "Submitted for Review")
     assert r1.status_code == 201
     mid = udb.get_urs(uid)
     assert mid["status"] == "under_review"
     assert mid["reviewed_by"] == ""  # submitting for review is not the reviewer signing off
 
-    r2 = client.post(f"/urs/{uid}/approval", json={
-        "action": "Review Complete", "performed_by": "QA Reviewer", "role": "QA",
-    })
-    assert r2.status_code == 201
-    # reviewed_by is derived from the authenticated tenant (tests/conftest.py's
-    # fake tenant, display_name="Test User"), never the client-supplied
-    # performed_by — see routes/urs.py's e-signature-safe design.
-    assert udb.get_urs(uid)["reviewed_by"] == "Test User"
+    for key in CHAIN:
+        as_signer(monkeypatch, key)
+        extra = {"signatory": key} if key in ("engineering_manager", "production_manager") else {}
+        r = post(client, "/urs", uid, "Sign Off", **extra)
+        assert r.status_code == 201, (key, r.get_json())
+        assert udb.get_urs(uid)["status"] == EXPECTED_AFTER[key]
+        if key == "reviewed_by":
+            # reviewed_by is derived from the authenticated tenant, never the
+            # client-supplied performed_by.
+            assert udb.get_urs(uid)["reviewed_by"] == "User 02"
 
-    r3 = client.post(f"/urs/{uid}/approval", json={
-        "action": "Approved", "performed_by": "QA Manager", "role": "QA Manager",
-    })
-    assert r3.status_code == 201
     final = udb.get_urs(uid)
     assert final["status"] == "approved"
-    assert final["approved_by"] == "Test User"
+    assert final["approved_by"] == "User 07"
 
 
-def test_rejecting_a_previously_approved_document_bumps_revision(client):
-    urs = _make_urs(client)
-    uid = urs["id"]
-    client.post(f"/urs/{uid}/approval", json={"action": "Submitted for Review", "performed_by": "A"})
-    client.post(f"/urs/{uid}/approval", json={"action": "Approved", "performed_by": "B"})
+def _drive_to_status(client, monkeypatch, uid, last_key):
+    from tests._va_helpers import CHAIN, as_signer, post
+    as_signer(monkeypatch, "prepared_by")
+    post(client, "/urs", uid, "Submitted for Review")
+    for key in CHAIN:
+        as_signer(monkeypatch, key)
+        extra = {"signatory": key} if key in ("engineering_manager", "production_manager") else {}
+        post(client, "/urs", uid, "Sign Off", **extra)
+        if key == last_key:
+            return
+
+
+def test_rejecting_a_previously_approved_document_bumps_revision(client, monkeypatch):
+    from tests._va_helpers import as_signer, post
+    as_signer(monkeypatch, "prepared_by")
+    uid = _make_urs(client)["id"]
+    _drive_to_status(client, monkeypatch, uid, "final_approval")
     assert udb.get_urs(uid)["revision"] == "A"
 
-    resp = client.post(f"/urs/{uid}/approval", json={"action": "Rejected", "performed_by": "C"})
+    as_signer(monkeypatch, "final_approval")
+    resp = post(client, "/urs", uid, "Rejected", comments="rework")
     assert resp.status_code == 201
     updated = udb.get_urs(uid)
     assert updated["status"] == "draft"
     assert updated["revision"] == "B"
 
 
-def test_rejecting_a_draft_never_approved_does_not_bump_revision(client):
-    urs = _make_urs(client)
-    uid = urs["id"]
-    client.post(f"/urs/{uid}/approval", json={"action": "Submitted for Review", "performed_by": "A"})
-    resp = client.post(f"/urs/{uid}/approval", json={"action": "Rejected", "performed_by": "B"})
+def test_rejecting_a_draft_never_approved_does_not_bump_revision(client, monkeypatch):
+    from tests._va_helpers import as_signer, post
+    as_signer(monkeypatch, "prepared_by")
+    uid = _make_urs(client)["id"]
+    post(client, "/urs", uid, "Submitted for Review")
+    as_signer(monkeypatch, "reviewed_by")
+    resp = post(client, "/urs", uid, "Rejected", comments="not ready")
     assert resp.status_code == 201
     updated = udb.get_urs(uid)
     assert updated["status"] == "draft"
     assert updated["revision"] == "A"
 
 
-def test_make_effective_sets_effective_date(client):
-    urs = _make_urs(client)
-    uid = urs["id"]
-    client.post(f"/urs/{uid}/approval", json={"action": "Submitted for Review", "performed_by": "A"})
-    client.post(f"/urs/{uid}/approval", json={"action": "Approved", "performed_by": "B"})
+def test_make_effective_sets_effective_date(client, monkeypatch):
+    from tests._va_helpers import as_signer, post
+    as_signer(monkeypatch, "prepared_by")
+    uid = _make_urs(client)["id"]
+    _drive_to_status(client, monkeypatch, uid, "final_approval")
     assert udb.get_urs(uid)["effective_date"] == ""
 
-    resp = client.post(f"/urs/{uid}/approval", json={"action": "Make Effective", "performed_by": "C"})
+    as_signer(monkeypatch, "final_approval")
+    resp = post(client, "/urs", uid, "Make Effective")
     assert resp.status_code == 201
     updated = udb.get_urs(uid)
     assert updated["status"] == "effective"
@@ -204,11 +221,13 @@ def test_obsolete_only_reachable_from_effective(client):
     assert resp.status_code == 409
 
 
-def test_approval_requires_performed_by(client):
+def test_approval_requires_performed_by(client, monkeypatch):
     """performed_by is derived from the authenticated tenant, so an
     authenticated request always has one — the 400 branch exists only for
     the (now-unreachable-in-production) case where no tenant is present at
     all, which the global auth gate prevents from ever reaching a route."""
+    from tests._va_helpers import as_signer
+    as_signer(monkeypatch, "prepared_by")
     urs = _make_urs(client)
     resp = client.post(f"/urs/{urs['id']}/approval", json={"action": "Submitted for Review"})
     assert resp.status_code == 201
@@ -242,11 +261,17 @@ def authed_client(db_path):
     return appmod.app.test_client()
 
 
-def test_approval_performed_by_derived_from_authenticated_user(authed_client):
+def test_approval_performed_by_derived_from_authenticated_user(authed_client, monkeypatch):
     """When a real tenant is present, performed_by/role come from the
     authenticated identity, not whatever the client sends — the free-text
     "Your name" field a spoofable client could set is only a fallback."""
-    with patch("pharmagpt.auth.middleware.resolve_tenant_context", return_value=SAMPLE_TENANT):
+    # Submission now needs the granular Validation:Submit grant, a fresh
+    # e-signature, and Validation/Initiator department membership (this client
+    # does not use the permissive `client` fixture).
+    from tests._va_helpers import membership, set_memberships
+    set_memberships(monkeypatch, [membership("VALIDATION", "Initiator")])
+    with patch("pharmagpt.auth.middleware.resolve_tenant_context", return_value=SAMPLE_TENANT),          patch("pharmagpt.auth.module_access.get_effective_permissions",
+               return_value={("Validation", "Submit")}),          patch("pharmagpt.services.esignature_service.require_esignature", lambda *a, **k: None):
         create_resp = authed_client.post(
             "/urs/", json={"title": "Authed Approval Test", "equipment_name": "X"},
             headers={"Authorization": "Bearer good-token"},

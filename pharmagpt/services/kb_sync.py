@@ -95,6 +95,10 @@ def publish_to_kb(*, source_type: str, source_id: int, company_id: str,
 
     Returns the resulting kb_documents row.
     """
+    # Governed Validation records (URS, IQ/OQ/PQ protocols, DQ) may only be
+    # published once every mandatory approval is complete.
+    from pharmagpt.services import validation_approval
+    validation_approval.require_publishable(company_id, source_type, source_id, doc_type)
     docx_bytes = markdown_to_docx(content_markdown, doc_type, form_data or {"title": title})
 
     existing = db.get_kb_document_by_source(source_type, source_id, company_id)

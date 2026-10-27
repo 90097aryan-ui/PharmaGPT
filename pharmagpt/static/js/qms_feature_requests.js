@@ -101,7 +101,7 @@ async function frLoadList(filters = {}) {
               <td>${fr.assigned_to || "—"}</td>
               <td>${fr.created_by || "—"}</td>
               <td>${(fr.created_at || "").slice(0, 10)}</td>
-              <td><a href="#" style="font-size:11px;color:#C35F5B" onclick="event.stopPropagation();frDelete(${fr.id},'${(fr.title || "").replace(/'/g, "\\'")}')">Delete</a></td>
+              <td><a href="#" style="font-size:11px;color:#DC2626" onclick="event.stopPropagation();frDelete(${fr.id},'${(fr.title || "").replace(/'/g, "\\'")}')">Delete</a></td>
             </tr>`).join("")}
         </tbody>
       </table>
@@ -126,7 +126,7 @@ function frModalHTML(fr) {
       <div class="form-grid">
         <div class="form-field span-2">
           <label>Title *</label>
-          <input type="text" id="fr-title" value="${isEdit ? (fr.title || "").replace(/"/g, "&quot;") : ""}" placeholder="e.g. Add bulk export for CAPA reports" />
+          <input type="text" id="fr-title" value="${isEdit ? (fr.title || "").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/'/g,"&#39;").replace(/</g,"&lt;") : ""}" placeholder="e.g. Add bulk export for CAPA reports" />
         </div>
         <div class="form-field span-2">
           <label>Description *</label>
@@ -147,7 +147,7 @@ function frModalHTML(fr) {
         </div>` : ""}
         <div class="form-field">
           <label>Assigned To</label>
-          <input type="text" id="fr-assigned-to" value="${isEdit ? (fr.assigned_to || "").replace(/"/g, "&quot;") : ""}" placeholder="Name" />
+          <input type="text" id="fr-assigned-to" value="${isEdit ? (fr.assigned_to || "").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/'/g,"&#39;").replace(/</g,"&lt;") : ""}" placeholder="Name" />
         </div>
         ${!isEdit ? `
         <div class="form-field span-2">

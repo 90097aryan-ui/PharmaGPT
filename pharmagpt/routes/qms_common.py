@@ -38,12 +38,14 @@ from werkzeug.utils import secure_filename
 from flask import Blueprint, g, jsonify, request, send_file
 
 from pharmagpt import audit
+from pharmagpt import audit_events as evt
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import qms_document_database as qdocdb
 from pharmagpt import qms_deviation_database as qdevdb
 from pharmagpt import qms_capa_database as qcapadb
 from pharmagpt import qms_change_control_database as qccdb
 from pharmagpt import qms_feature_request_database as qfrdb
+from pharmagpt import qms_market_complaint_database as qmcdb
 from pharmagpt import qual_database as qualdb
 from pharmagpt import report_database as reportdb
 from pharmagpt import risk_database as riskdb
@@ -87,6 +89,10 @@ VALID_RECORD_TYPES = {
     # Feature Requests (v1: CRUD only) — reuses the shared attachments/
     # comments/audit-trail endpoints instead of a module-specific upload route.
     "feature_request",
+    # Market Complaint Management (P0) — same additive registration as every
+    # module above; unlocks attachments/comments/audit-trail/esignatures-read
+    # for record_type='market_complaint' with no other qms_common.py change.
+    "market_complaint",
 }
 
 _GETTERS = {
@@ -101,6 +107,7 @@ _GETTERS = {
     "urs": ursdb.get_urs,
     "kb_document": db.get_kb_document,
     "feature_request": qfrdb.get_feature_request,
+    "market_complaint": qmcdb.get_complaint,
 }
 
 # "equipment" is scoped by joining through its owning Project
@@ -242,6 +249,11 @@ def download_attachment(attachment_id):
     path = os.path.join(_qms_upload_dir(attachment["record_type"], attachment["record_id"]), attachment["filename"])
     if not os.path.exists(path):
         return jsonify({"error": "File missing on disk"}), 404
+    # Wave 4B: log the download itself (not the file's contents/path) —
+    # closes a Wave 4A gap where attachment upload/delete were audited but
+    # download never was.
+    audit.log(attachment["record_type"], attachment["record_id"], evt.FILE_DOWNLOADED,
+              detail=f"Attachment downloaded: {attachment['original_name']}")
     return send_file(
         path,
         mimetype=get_mime_type(attachment.get("file_type", "")),

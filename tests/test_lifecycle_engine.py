@@ -106,15 +106,13 @@ def test_qms_document_version_illegal_transitions_rejected(current, requested):
 # ── Route-level: 409 on an illegal transition ────────────────────────────────
 
 def test_qualification_route_rejects_invalid_transition(client):
+    """Parent-level terminal actions still validate against the QUALIFICATION
+    lifecycle (standard approval actions are per protocol and refused here)."""
     qual = client.post("/qual/", json={"title": "Q1", "equipment_name": "HPLC"}).get_json()
-    client.post(f"/qual/{qual['id']}/approval", json={"action": "Submitted for Review"})
-    client.post(f"/qual/{qual['id']}/approval", json={"action": "Approved"})
-    client.post(f"/qual/{qual['id']}/approval", json={"action": "Closed"})
-
-    # obsolete is only reachable from closed via a mapped action, but there is
-    # none in qual.py's status_map back to under_review from obsolete/closed.
-    resp = client.post(f"/qual/{qual['id']}/approval", json={"action": "Submitted for Review"})
-    assert resp.status_code == 409
+    # A Draft qualification cannot jump straight to Closed.
+    assert client.post(f"/qual/{qual['id']}/approval", json={"action": "Closed"}).status_code == 409
+    # Standard approval actions at the parent are refused outright.
+    assert client.post(f"/qual/{qual['id']}/approval", json={"action": "Submitted for Review"}).status_code == 400
 
 
 def test_validation_report_route_rejects_invalid_transition(client):

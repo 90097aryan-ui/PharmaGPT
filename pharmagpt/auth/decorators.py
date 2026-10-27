@@ -16,6 +16,57 @@ from pharmagpt.auth.context import AuthenticationError, resolve_tenant_context
 BEARER_PREFIX = "Bearer "
 
 
+def _log_authorization_denied(allowed_roles: tuple[str, ...]) -> None:
+    """Yuktav P0-2 / Wave 4B: audit entry for a role-check rejection.
+    Imported lazily (not at module top) to avoid pharmagpt.audit's own
+    import chain running for every request that merely imports this
+    decorators module — matches this codebase's established
+    lazy-import-for-optional-side-effect convention (e.g. routes/*.py's own
+    per-function `from pharmagpt...` imports).
+
+    Records the attempted protected resource (method + path) alongside the
+    role check, so a denied-access pattern is queryable/investigable, not
+    just "someone, somewhere, got a 403". Never logs the request body/query
+    string — only the path, which carries no secrets in this codebase's
+    routing scheme (ids, not credentials, appear in URLs).
+
+    Deliberately best-effort, NOT fail-closed (unlike the fail-closed policy
+    used for Companies/Users critical mutations — see routes/companies.py
+    and routes/users.py's own `_audit_fail_closed`): by the time this runs,
+    the 403 has already been decided and is about to be returned regardless
+    — the audit write is a secondary compliance record of an access attempt
+    that was already correctly blocked, not a gate on the block itself. A
+    logging failure here must not turn an already-legitimate 403 into a 500;
+    this is a deliberate, documented choice, not an oversight."""
+    try:
+        from pharmagpt import audit
+        from pharmagpt import audit_events as evt
+
+        tenant = getattr(g, "tenant", None)
+        attempted = f"{request.method} {request.path}"
+        if tenant is None:
+            # Defensive: require_role must run after the global auth gate
+            # has already set g.tenant (see require_role's own docstring),
+            # so this should be unreachable in production — but if it is
+            # ever reached (e.g. a future route exempted from that gate),
+            # never fabricate a role/identity for the audit row. Use the
+            # same unauthenticated-denial mechanism auth.py's login-failure
+            # paths use, rather than crashing on `g.tenant.role`.
+            audit.log_unauthenticated(
+                "auth", 0, evt.AUTHORIZATION_DENIED,
+                reason=f"required role in {{{', '.join(allowed_roles)}}}; no tenant resolved",
+                detail=attempted,
+            )
+            return
+        audit.log_failure(
+            "auth", 0, evt.AUTHORIZATION_DENIED,
+            reason=f"role '{tenant.role}' not in required set: {', '.join(allowed_roles)}",
+            detail=attempted,
+        )
+    except Exception:
+        pass
+
+
 def extract_bearer_token() -> str:
     """Return the bearer token from the current request's Authorization
     header, or "" if it is missing or not a Bearer token."""
@@ -74,7 +125,13 @@ def require_role(*allowed_roles: str):
     def decorator(view_func):
         @wraps(view_func)
         def wrapped(*args, **kwargs):
-            if g.tenant.role not in allowed_roles:
+            # Defensive: see _log_authorization_denied's docstring — g.tenant
+            # is always set by the global auth gate before this decorator
+            # runs in production, but never assume that here (no
+            # `g.tenant.role` access before this check) so a future
+            # gate-exempt route degrades to a clean 403 instead of a 500.
+            if not hasattr(g, "tenant") or g.tenant.role not in allowed_roles:
+                _log_authorization_denied(allowed_roles)
                 return jsonify({
                     "error": f"This action requires one of these roles: {', '.join(allowed_roles)}",
                 }), 403

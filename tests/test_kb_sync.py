@@ -6,7 +6,8 @@ requirement (PHASE_2_IMPLEMENTATION_REPORT.md; services/kb_sync.py).
 Covers all four integration points:
   - Document Control  -> Effective  (routes/qms_documents.py)
   - URS               -> Effective  (routes/urs.py)
-  - Qualification      -> approved   (routes/qual.py, one KB entry per protocol)
+  - Qualification      -> each protocol's own Effective (routes/qual.py, one KB entry per protocol)
+  - DQ                  -> Effective on the shared Validation engine
   - Validation Report  -> released   (routes/report.py)
 
 And the idempotent-upsert behaviour: re-approving the same record updates
@@ -18,6 +19,8 @@ import io
 import pytest
 
 from pharmagpt import database as db
+from pharmagpt import qms_document_database as qdb_docs
+from pharmagpt import qual_database as qdb
 from pharmagpt.tenancy import BOOTSTRAP_COMPANY_ID
 
 
@@ -187,11 +190,14 @@ def test_document_without_content_cannot_reach_review_at_all(client):
 
 # ── URS ───────────────────────────────────────────────────────────────────────
 
-def test_effective_urs_is_published_to_kb(client):
+def test_effective_urs_is_published_to_kb(client, monkeypatch):
+    from tests._va_helpers import as_signer, drive_to_approved
+    as_signer(monkeypatch, "prepared_by")
     urs = client.post("/urs/", json={"title": "HPLC URS", "equipment_name": "HPLC System"}).get_json()
 
-    client.post(f"/urs/{urs['id']}/approval", json={"action": "Submitted for Review"})
-    client.post(f"/urs/{urs['id']}/approval", json={"action": "Approved"})
+    drive_to_approved(client, monkeypatch, "/urs", urs["id"])
+    assert _kb_rows_for("urs", urs["id"]) == []  # Approved is not yet Effective
+    as_signer(monkeypatch, "final_approval")
     resp = client.post(f"/urs/{urs['id']}/approval", json={"action": "Make Effective"})
     assert resp.status_code == 201
 
@@ -201,7 +207,9 @@ def test_effective_urs_is_published_to_kb(client):
     assert rows[0]["folder"] == "Validation"
 
 
-def test_urs_not_yet_effective_is_not_published_to_kb(client):
+def test_urs_not_yet_effective_is_not_published_to_kb(client, monkeypatch):
+    from tests._va_helpers import as_signer
+    as_signer(monkeypatch, "prepared_by")
     urs = client.post("/urs/", json={"title": "Draft-only URS", "equipment_name": "GC System"}).get_json()
     client.post(f"/urs/{urs['id']}/approval", json={"action": "Submitted for Review"})
 
@@ -210,33 +218,49 @@ def test_urs_not_yet_effective_is_not_published_to_kb(client):
 
 # ── Qualification (one KB entry per protocol) ────────────────────────────────
 
-def test_approved_qualification_publishes_each_protocol_to_kb(client):
+def test_protocol_is_published_only_at_its_own_effective_transition(client, monkeypatch):
+    from tests._va_helpers import as_signer, drive_to_approved
+    as_signer(monkeypatch, "prepared_by")   # the author creates the records
     qual = client.post("/qual/", json={"title": "HPLC Qualification", "equipment_name": "HPLC System"}).get_json()
     iq = client.post(f"/qual/{qual['id']}/protocols", json={"protocol_type": "IQ"}).get_json()
     oq = client.post(f"/qual/{qual['id']}/protocols", json={"protocol_type": "OQ"}).get_json()
+    base = f"/qual/{qual['id']}/protocols"
 
-    client.post(f"/qual/{qual['id']}/approval", json={"action": "Submitted for Review"})
-    resp = client.post(f"/qual/{qual['id']}/approval", json={"action": "Approved"})
+    drive_to_approved(client, monkeypatch, base, iq["id"])
+    assert _kb_rows_for("qualification_protocol", iq["id"]) == []   # Approved is not Effective
+
+    as_signer(monkeypatch, "final_approval")
+    resp = client.post(f"{base}/{iq['id']}/approval", json={"action": "Make Effective"})
     assert resp.status_code == 201
 
     iq_rows = _kb_rows_for("qualification_protocol", iq["id"])
-    oq_rows = _kb_rows_for("qualification_protocol", oq["id"])
     assert len(iq_rows) == 1 and iq_rows[0]["folder"] == "Qualification"
-    assert len(oq_rows) == 1 and oq_rows[0]["folder"] == "Qualification"
+    assert _kb_rows_for("qualification_protocol", oq["id"]) == []   # a sibling is never published by IQ
 
 
-def test_qualification_republish_updates_the_same_protocol_kb_rows(client):
+def test_protocol_republish_updates_the_same_kb_row(client, monkeypatch):
+    from tests._va_helpers import as_signer, drive_to_approved
+    as_signer(monkeypatch, "prepared_by")
     qual = client.post("/qual/", json={"title": "GC Qualification", "equipment_name": "GC System"}).get_json()
     iq = client.post(f"/qual/{qual['id']}/protocols", json={"protocol_type": "IQ"}).get_json()
+    base = f"/qual/{qual['id']}/protocols"
 
-    client.post(f"/qual/{qual['id']}/approval", json={"action": "Submitted for Review"})
-    client.post(f"/qual/{qual['id']}/approval", json={"action": "Approved"})
+    drive_to_approved(client, monkeypatch, base, iq["id"])
+    as_signer(monkeypatch, "final_approval")
+    client.post(f"{base}/{iq['id']}/approval", json={"action": "Make Effective"})
     kb_id = _kb_rows_for("qualification_protocol", iq["id"])[0]["id"]
 
-    client.post(f"/qual/{qual['id']}/approval", json={"action": "Approved"})
+    # Re-publish the same protocol (e.g. refreshed content): same row, not a duplicate.
+    protocol = qdb.get_protocol(iq["id"])
+    from pharmagpt.routes import qual as qual_routes
+    from pharmagpt.app import app as flask_app
+    with flask_app.test_request_context():
+        from flask import g
+        from tests import conftest as c
+        g.tenant = c._TEST_TENANT
+        qual_routes._publish_effective_protocol_to_kb(qdb.get_qualification(qual["id"]), protocol)
     rows = _kb_rows_for("qualification_protocol", iq["id"])
-    assert len(rows) == 1
-    assert rows[0]["id"] == kb_id
+    assert len(rows) == 1 and rows[0]["id"] == kb_id
 
 
 # ── Validation Report ─────────────────────────────────────────────────────────
@@ -269,7 +293,7 @@ def test_approved_but_not_released_report_is_not_published_to_kb(client):
 # kb_sync.py itself needed changing.
 
 @pytest.mark.parametrize("doc_type,expected_folder", [
-    ("DQ", "Qualification"), ("FAT", "Protocols"), ("SAT", "Protocols"),
+    ("FAT", "Protocols"), ("SAT", "Protocols"),   # DQ now runs on the shared Validation engine (test below)
 ])
 def test_consolidated_dq_fat_sat_are_published_to_kb(client, monkeypatch, doc_type, expected_folder):
     doc = client.post("/qms/documents", json={"title": f"{doc_type} Protocol", "doc_type": doc_type}).get_json()
@@ -283,6 +307,23 @@ def test_consolidated_dq_fat_sat_are_published_to_kb(client, monkeypatch, doc_ty
     rows = _kb_rows_for("document", doc["id"])
     assert len(rows) == 1
     assert rows[0]["folder"] == expected_folder
+
+
+def test_dq_is_published_to_kb_only_when_effective_on_the_shared_engine(client, monkeypatch):
+    from tests._va_helpers import as_signer, drive_to_approved
+    as_signer(monkeypatch, "prepared_by")
+    doc = client.post("/qms/documents", json={"title": "DQ Protocol", "doc_type": "DQ",
+                                              "content": "# DQ Protocol\n\nTest content."}).get_json()
+    _self_check(client, doc["id"])
+    drive_to_approved(client, monkeypatch, "/qms/documents", doc["id"])
+    assert _kb_rows_for("document", doc["id"]) == []                  # Approved, not yet Effective
+    # (the training gate is a Document Control precondition of Effective)
+    t = qdb_docs.add_training(doc["id"], {"trainee_name": "Op", "role": "Operator"})
+    qdb_docs.update_training_status(t["id"], "Completed", "2026-10-10")
+    as_signer(monkeypatch, "final_approval")
+    assert client.post(f"/qms/documents/{doc['id']}/approval", json={"action": "Make Effective"}).status_code == 201
+    rows = _kb_rows_for("document", doc["id"])
+    assert len(rows) == 1 and rows[0]["folder"] == "Qualification"
 
 
 # ── Phase 3: version snapshot on re-publish (kb_document_versions) ──────────

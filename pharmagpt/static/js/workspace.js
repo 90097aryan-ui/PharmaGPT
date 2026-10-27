@@ -99,7 +99,7 @@ const Workspace = (function () {
   function _esc(str) {
     return String(str || "")
       .replace(/&/g, "&amp;").replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
   return { enter, exit, renderBreadcrumb, renderProgress, confirmDialog };

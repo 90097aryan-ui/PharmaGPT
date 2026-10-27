@@ -127,6 +127,19 @@ else:
 # Port the Flask app will run on
 FLASK_PORT = int(os.getenv("FLASK_PORT", 5000))
 
+# Yuktav P1-2: number of reverse proxies this deployment sits behind that are
+# TRUSTED to set/append to the X-Forwarded-For header (nginx in front of
+# gunicorn on the current Oracle deployment; Render's own edge on the Render
+# path — see docs/DEPLOYMENT.md). 0 by default: an arbitrary client-supplied
+# X-Forwarded-For value is NEVER trusted unless this is explicitly set, so a
+# deployment with no verified proxy boundary safely falls back to
+# request.remote_addr (pharmagpt/audit.py::_current_ip). Deliberately not
+# hardcoded to any specific count/IP here — this is an operational fact about
+# a given deployment's network topology, not something this codebase can
+# assume; set it in that environment's own .env once its proxy chain has
+# actually been verified (e.g. TRUSTED_PROXY_COUNT=1 for a single nginx hop).
+TRUSTED_PROXY_COUNT = int(os.getenv("TRUSTED_PROXY_COUNT", 0))
+
 # ── Database backend (Phase 3 migration seam) ─────────────────────────────────
 # "sqlite" (default) — every domain still reads/writes pharmagpt.db, unchanged.
 # "postgres" — reserved for later Phase 3 sub-phases (3.2+) to flip per domain
@@ -269,6 +282,18 @@ BACKUP_DIR = os.getenv("BACKUP_DIR") or os.path.join(os.path.dirname(__file__), 
 # CRITICAL warning on every run while it is unset (see docs/BACKUP_SOP.md).
 BACKUP_OFFSITE_DIR = os.getenv("BACKUP_OFFSITE_DIR")
 
+# Independent object storage for encrypted backup archives (Supabase Storage,
+# via the supabase/storage3 libraries already in requirements.txt). Dedicated
+# variables — deliberately NOT the app's SUPABASE_* keys — so the destination
+# can be a separate Supabase project that survives loss of the production one.
+# All of URL/KEY/BUCKET must be set together; a partial set fails the run
+# (services/backup_service.py::_object_store_settings). The key needs write
+# access to the (private) bucket only. Archives are already Fernet-encrypted.
+BACKUP_OFFSITE_STORAGE_URL = os.getenv("BACKUP_OFFSITE_STORAGE_URL")
+BACKUP_OFFSITE_STORAGE_KEY = os.getenv("BACKUP_OFFSITE_STORAGE_KEY")
+BACKUP_OFFSITE_STORAGE_BUCKET = os.getenv("BACKUP_OFFSITE_STORAGE_BUCKET")
+BACKUP_OFFSITE_STORAGE_PREFIX = os.getenv("BACKUP_OFFSITE_STORAGE_PREFIX", "pharmagpt/")
+
 # Symmetric encryption key (Fernet — cryptography package, already a pinned
 # dependency) protecting backup archives at rest. Deliberately has NO default
 # value — same principle FLASK_SECRET_KEY above now also follows (its dev
@@ -289,13 +314,12 @@ BACKUP_ENCRYPTION_KEY = os.getenv("BACKUP_ENCRYPTION_KEY")
 # interval) independently of whether the scheduler is actually still firing.
 BACKUP_FREQUENCY_HOURS = int(os.getenv("BACKUP_FREQUENCY_HOURS", 6))
 
-# Explicit operator acknowledgement that an external scheduler (Render Cron
-# Job, OS cron, etc.) has actually been wired up to run scripts/run_backup.py
-# — the running Flask process has no way to independently observe an
-# external cron process, so this is a statement of configured intent, not a
-# live health check. Defaults to "false" (fail-safe: the dashboard should
-# never claim scheduling is healthy unless an operator has said so) — see
-# get_configuration_status() in services/backup_service.py.
+# Turns on the in-process backup scheduler (services/backup_scheduler.py),
+# which runs inside the web service because only that service can read the
+# persistent disk (a Render cron job cannot mount it). Defaults to "false".
+# The flag alone never makes the dashboard report scheduling healthy: that
+# also requires a fresh scheduler heartbeat — see _check_scheduler() in
+# services/backup_service.py.
 BACKUP_SCHEDULER_ENABLED = os.getenv("BACKUP_SCHEDULER_ENABLED", "false").lower() == "true"
 
 # Rolling short-term retention (BACKUP_DIR/snapshots/) — every run.
@@ -353,3 +377,12 @@ POSTGRES_BACKUP_TABLES = [
     "departments", "modules", "workflow_roles", "user_departments",
     "user_module_permissions", "audit_trail",
 ]
+
+# ── Validation approval workflow (services/validation_approval.py) ───────────
+# Department + functional-role enforcement for signatories is ON by default
+# (a signer must hold the designation's department and functional role in
+# user_departments). The switch exists only for a controlled rollout window and
+# for tests; turning it off is a policy change that needs QA authorization.
+VALIDATION_SIGNATORY_DEPARTMENT_ENFORCEMENT = os.getenv(
+    "VALIDATION_SIGNATORY_DEPARTMENT_ENFORCEMENT", "true").strip().lower() != "false"
+# Seven-distinct-signers is NOT configurable: see validation_approval._authorize_signatory.

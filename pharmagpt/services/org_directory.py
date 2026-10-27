@@ -58,6 +58,52 @@ def find_or_create_department(client, company_id: str, name: str, department_cod
     return inserted.data[0]
 
 
+def add_department_membership(client, user_id: str, company_id: str, department_id: str,
+                                workflow_role_id: int | None = None, is_primary: bool = False) -> dict:
+    """Add/update `user_id`'s membership in `department_id`, optionally with
+    a department-scoped functional role (migrations/0016_department_
+    functional_roles_up.sql's user_departments.workflow_role_id) — the fix
+    for "QA Reviewer must not be equivalent to Production Reviewer": a
+    user's functional role is a property of THIS membership row, not a
+    single global users.workflow_role_id (migration 0014, left untouched
+    for backward compatibility).
+
+    A user may belong to multiple departments (multiple rows, one per
+    department) — this does not touch is_primary unless `is_primary=True`,
+    in which case it delegates to set_primary_department() below for the
+    single-primary invariant, then re-applies workflow_role_id (upsert
+    order: primary-flag first, since set_primary_department's own upsert
+    does not know about workflow_role_id and would otherwise clobber it).
+    """
+    if is_primary:
+        set_primary_department(client, user_id, company_id, department_id)
+
+    payload = {"user_id": user_id, "department_id": department_id, "company_id": company_id}
+    if workflow_role_id is not None:
+        payload["workflow_role_id"] = workflow_role_id
+    if is_primary:
+        payload["is_primary"] = True
+
+    result = client.table("user_departments").upsert(
+        payload, on_conflict="user_id,department_id",
+    ).execute()
+    return result.data[0]
+
+
+def list_user_departments(client, user_id: str, company_id: str) -> list[dict]:
+    """Every department `user_id` belongs to, each with its own
+    (possibly-null) department-scoped functional role — the source of
+    truth for "does this user hold Production Reviewer" style questions,
+    used by services/org_assignment.py::resolve_department_approver()."""
+    return (
+        client.table("user_departments")
+        .select("id, department_id, workflow_role_id, is_primary, departments(name, department_code), "
+                "workflow_roles(name)")
+        .eq("user_id", user_id).eq("company_id", company_id)
+        .execute()
+    ).data or []
+
+
 def set_primary_department(client, user_id: str, company_id: str, department_id: str) -> None:
     """Idempotently make `department_id` this user's one primary department.
 

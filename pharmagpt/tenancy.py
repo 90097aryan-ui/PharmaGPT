@@ -46,6 +46,35 @@ def signing_identity(tenant) -> dict:
     return {"performed_by": name, "role": tenant.role, "electronic_sig": name}
 
 
+def missing_or_inactive_users(client, company_id: str, user_ids: set) -> set:
+    """CRIT-02 (Security Audit remediation): which of `user_ids` do NOT
+    correspond to a real, active user of `company_id` right now — so a
+    workflow-step-assign endpoint (routes/qms_capa.py, qms_change_control.py,
+    qms_deviations.py) can reject naming a user from a different company (or
+    a deactivated/nonexistent one) as an approver for a record it doesn't
+    belong to. `client` is caller-supplied (each route already imports
+    `get_service_role_client` at module level for this exact purpose — see
+    routes/qms_deviations.py::_missing_or_inactive_approvers, whose query
+    shape this mirrors exactly) rather than obtained here, so each route's
+    existing test-mocking convention (`monkeypatch.setattr("pharmagpt.
+    routes.<module>.get_service_role_client", ...)`) keeps working
+    unchanged — this function only centralizes the shared query logic, not
+    which client instance answers it.
+
+    Uses the service-role client with an explicit company_id filter, same
+    reasoning as routes/users.py::list_users_directory(): RLS on `users`
+    doesn't grant a non-admin caller read access to their company-mates'
+    rows at all, so a plain per-caller client can't answer this query."""
+    if not user_ids:
+        return set()
+    active = (
+        client.table("users").select("id")
+        .eq("company_id", company_id).eq("status", "active").execute()
+    ).data or []
+    active_ids = {row["id"] for row in active}
+    return {uid for uid in user_ids if uid not in active_ids}
+
+
 def scoped_or_none(record: dict | None, company_id: str | None) -> dict | None:
     """Return `record` only if it exists and its company_id matches the
     caller's. Otherwise return None — callers should treat that identically

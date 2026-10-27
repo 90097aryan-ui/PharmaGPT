@@ -35,6 +35,7 @@ import logging
 from flask import Blueprint, g, jsonify, request, Response, stream_with_context, send_file
 
 from pharmagpt import audit
+from pharmagpt import audit_events as evt
 from pharmagpt import report_database as rdb
 from pharmagpt import qual_database as qdb
 from pharmagpt import urs_database as udb
@@ -42,6 +43,7 @@ from pharmagpt import risk_database as risdb
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import require_role
+from pharmagpt.auth.module_access import require_business_permission
 from pharmagpt.services import esignature_service
 from pharmagpt.services import kb_sync
 from pharmagpt.services import lifecycle_engine
@@ -182,6 +184,7 @@ def update_report(rid):
 
 @bp.route("/<int:rid>", methods=["DELETE"])
 @require_role("company_admin")
+@require_business_permission("Validation", "Delete")
 def delete_report(rid):
     existing = tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id)
     if not existing:
@@ -445,6 +448,7 @@ def get_approval(rid):
 
 @bp.route("/<int:rid>/approval", methods=["POST"])
 @require_role("company_admin", "reviewer_qa")
+@require_business_permission("Validation", "Approve")
 def add_approval(rid):
     report = tenancy.scoped_or_none(rdb.get_report(rid), g.tenant.company_id)
     if not report:
@@ -468,6 +472,7 @@ def add_approval(rid):
         audit.log_failure("val_report", rid, f"Approval action blocked ({action}) — e-signature failed", reason=str(exc))
         return jsonify({"error": str(exc)}), 401
     except esignature_service.ESignatureError as exc:
+        audit.log_failure("val_report", rid, evt.ESIGNATURE_FAILURE, reason=str(exc))
         return jsonify({"error": str(exc)}), 400
 
     # Update report status based on action

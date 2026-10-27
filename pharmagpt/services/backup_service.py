@@ -84,6 +84,12 @@ class BackupConfigError(RuntimeError):
     BACKUP_ENCRYPTION_KEY's docstring in config.py."""
 
 
+class BackupUploadError(RuntimeError):
+    """Raised when an encrypted archive could not be uploaded to (or could not
+    be confirmed in) the independent object store. The run is then reported
+    as failed - a local archive alone is never reported as an off-site backup."""
+
+
 class BackupIntegrityError(RuntimeError):
     """Raised when a backup fails its own post-write verification, or a
     restore-drill / restore finds the archive unreadable or inconsistent."""
@@ -488,6 +494,63 @@ def _promote_to_daily_if_first_of_day(snapshot_path: Path) -> None:
         shutil.copy2(snapshot_path, daily_dir / snapshot_path.name)
 
 
+def _object_store_settings() -> dict[str, str] | None:
+    """None when no object storage is configured; the settings when all of
+    URL/KEY/BUCKET are set; BackupConfigError when only some are (a partial
+    configuration must never silently degrade to "no off-site copy")."""
+    values = {
+        "BACKUP_OFFSITE_STORAGE_URL": config.BACKUP_OFFSITE_STORAGE_URL,
+        "BACKUP_OFFSITE_STORAGE_KEY": config.BACKUP_OFFSITE_STORAGE_KEY,
+        "BACKUP_OFFSITE_STORAGE_BUCKET": config.BACKUP_OFFSITE_STORAGE_BUCKET,
+    }
+    if not any(values.values()):
+        return None
+    missing = [k for k, v in values.items() if not v]
+    if missing:
+        raise BackupConfigError(
+            "Off-site object storage is partially configured; also set: " + ", ".join(missing)
+        )
+    prefix = (config.BACKUP_OFFSITE_STORAGE_PREFIX or "").strip("/")
+    return {
+        "url": values["BACKUP_OFFSITE_STORAGE_URL"],
+        "key": values["BACKUP_OFFSITE_STORAGE_KEY"],
+        "bucket": values["BACKUP_OFFSITE_STORAGE_BUCKET"],
+        "prefix": f"{prefix}/" if prefix else "",
+    }
+
+
+def _get_object_store_bucket(settings: dict[str, str]):
+    from supabase import create_client
+    return create_client(settings["url"], settings["key"]).storage.from_(settings["bucket"])
+
+
+def _upload_object_store(snapshot_path: Path) -> dict[str, Any]:
+    """Upload the already-encrypted archive and confirm it is really there
+    (listed with the same byte size). Raises BackupUploadError on any failure;
+    the error text never includes the storage key."""
+    settings = _object_store_settings()
+    if settings is None:
+        return {"status": "not configured"}
+    remote = f"{settings['prefix']}{snapshot_path.name}"
+    local_size = snapshot_path.stat().st_size
+    try:
+        bucket = _get_object_store_bucket(settings)
+        with open(snapshot_path, "rb") as fh:
+            bucket.upload(remote, fh, {"content-type": "application/octet-stream", "upsert": "false"})
+        listing = bucket.list(settings["prefix"].rstrip("/"), {"search": snapshot_path.name, "limit": 10}) or []
+    except Exception as exc:  # noqa: BLE001 - any SDK/network error is an upload failure
+        detail = str(exc).replace(settings["key"], "***")
+        raise BackupUploadError(f"{type(exc).__name__}: {detail}") from exc
+    match = next((o for o in listing if o.get("name") == snapshot_path.name), None)
+    remote_size = ((match or {}).get("metadata") or {}).get("size")
+    if match is None or remote_size != local_size:
+        raise BackupUploadError(
+            f"Upload could not be confirmed: object {'missing' if match is None else 'size mismatch'} "
+            f"after upload ({snapshot_path.name})"
+        )
+    return {"status": "ok", "object": remote, "bytes": local_size}
+
+
 def _offsite_copy(snapshot_path: Path) -> str:
     if not config.BACKUP_OFFSITE_DIR:
         return "not configured — same-disk backup only (see docs/BACKUP_SOP.md 'Remaining risk')"
@@ -511,6 +574,7 @@ def run_full_backup() -> BackupRunResult:
     # Fail fast on missing encryption key, before doing any work.
     try:
         _fernet()
+        _object_store_settings()
     except BackupConfigError as exc:
         result.status, result.error = "failed", str(exc)
         result.finished_at = datetime.now(timezone.utc).isoformat()
@@ -589,11 +653,24 @@ def _run_full_backup_locked(result: BackupRunResult, started: datetime, run_id: 
             _promote_to_daily_if_first_of_day(snapshot_path)
             result.targets["offsite"] = _offsite_copy(snapshot_path)
 
+            upload_error = None
+            try:
+                result.targets["object_storage"] = _upload_object_store(snapshot_path)
+            except BackupUploadError as exc:
+                upload_error = str(exc)
+                result.targets["object_storage"] = {"status": "failed", "error": upload_error}
+
             removed_snapshots = _prune("snapshots", config.BACKUP_SNAPSHOT_RETENTION_DAYS)
             removed_daily = _prune("daily", config.BACKUP_DAILY_RETENTION_DAYS)
             result.targets["retention"] = {"snapshots_pruned": removed_snapshots, "daily_pruned": removed_daily}
 
-            result.status = "success"
+            if upload_error:
+                # The local archive is kept (and verified) but this run must not
+                # count as a successful off-site backup.
+                result.status = "failed"
+                result.error = f"Off-site upload failed (local archive retained): {upload_error}"
+            else:
+                result.status = "success"
 
         except Exception as exc:  # noqa: BLE001 — must always reach _save_run + alert
             logger.exception("Backup run %s failed", run_id)
@@ -608,8 +685,8 @@ def _run_full_backup_locked(result: BackupRunResult, started: datetime, run_id: 
 
     if result.status != "success":
         _alert(f"Backup run {run_id} failed", result.error or "unknown error")
-    if config.BACKUP_OFFSITE_DIR is None:
-        logger.warning("BACKUP_OFFSITE_DIR is not configured — this backup exists only on the primary disk.")
+    if result.targets.get("object_storage", {}).get("status") == "not configured" and config.BACKUP_OFFSITE_DIR is None:
+        logger.warning("No off-site storage is configured — this backup exists only on the primary disk.")
 
 
 # ── restore / verification drill ────────────────────────────────────────────
@@ -832,15 +909,27 @@ def _check_scheduler() -> dict[str, str]:
             "status": "missing",
             "message": "Automatic scheduling is not enabled — backups must be started manually.",
         }
-    return {
-        "status": "configured",
-        "message": "Automatic scheduling is enabled. (PharmaGPT records that this was configured, but "
-                    "cannot independently confirm an external scheduler is calling in — the Backup "
-                    "Freshness check below is the real signal that runs are actually happening.)",
-    }
+    from pharmagpt.services import backup_scheduler
+    if not backup_scheduler.heartbeat_status()["alive"]:
+        return {
+            "status": "failed",
+            "message": "Scheduling is enabled but the scheduler is not running (no recent heartbeat). "
+                        "Backups are NOT being taken automatically.",
+        }
+    return {"status": "configured", "message": "The backup scheduler is running (recent heartbeat)."}
 
 
 def _check_offsite_storage() -> dict[str, str]:
+    try:
+        settings = _object_store_settings()
+    except BackupConfigError as exc:
+        return {"status": "failed", "message": str(exc)}
+    if settings:
+        return {
+            "status": "configured",
+            "message": "Independent object storage is configured (reachability is confirmed by each "
+                        "backup run's upload check, shown in the last run).",
+        }
     if not config.BACKUP_OFFSITE_DIR:
         return {
             "status": "missing",
@@ -854,7 +943,8 @@ def _check_offsite_storage() -> dict[str, str]:
         probe.unlink()
     except OSError:
         return {"status": "failed", "message": "The configured offsite storage location is not writable."}
-    return {"status": "configured", "message": "Offsite storage is reachable and writable."}
+    return {"status": "configured", "message": "A secondary directory is writable. It is a local path, "
+                                                  "not independent object storage."}
 
 
 def _check_database_backup() -> dict[str, str]:
@@ -927,8 +1017,8 @@ def is_archive_available_for_verification_or_restore() -> tuple[bool, str | None
 # ── dashboard aggregation ────────────────────────────────────────────────────
 
 def get_next_scheduled_backup() -> dict[str, Any]:
-    if not config.BACKUP_SCHEDULER_ENABLED:
-        return {"scheduled": False, "message": "Scheduling is not configured — backups must be run manually."}
+    if _check_scheduler()["status"] != "configured":
+        return {"scheduled": False, "message": "Scheduling is not running — backups must be run manually."}
     last_success = get_latest_successful()
     if not last_success:
         return {"scheduled": True, "estimated_at": None, "message": "Waiting for the first successful backup."}
@@ -979,10 +1069,12 @@ def compute_health() -> dict[str, Any]:
     if cfg["offsite_storage"]["status"] == "missing":
         _bump("warning", "Offsite storage is not configured — backups exist on one disk only.")
     elif cfg["offsite_storage"]["status"] == "failed":
-        _bump("critical", "Offsite storage is configured but not writable.")
+        _bump("critical", "Offsite storage is misconfigured or not writable.")
 
     if cfg["scheduler"]["status"] == "missing":
         _bump("warning", "Automatic scheduling is not enabled.")
+    elif cfg["scheduler"]["status"] == "failed":
+        _bump("critical", "Scheduling is enabled but the scheduler is not running.")
 
     if latest_verification is None:
         _bump("warning", "No verification drill has been run yet.")

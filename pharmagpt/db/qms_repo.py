@@ -24,10 +24,15 @@ status, timestamps — nothing else. Deliberately excludes:
 
 record_type values match the strings the current SQLite build already uses
 in qms_audit_trail (pharmagpt/qms_database.py:add_audit_entry callers) —
-'deviation', 'capa', 'change_control'. 'risk_assessment' is included for
-completeness (the record table itself is dual-written) even though no
-SQLite call site produces an audit entry for it today (risk uses its own
-separate risk_approval table, not qms_audit_trail).
+'deviation', 'capa', 'change_control', 'risk_assessment'. Corrected (Yuktav
+P1-4): risk_assessment DOES produce qms_audit_trail entries today —
+routes/risk.py calls audit.log("risk_assessment", ...) on create/update/
+delete/approval-transition/AI-assist/publish-to-library, the same shared
+SQLite path every other record_type here uses. Risk ALSO has its own
+separate risk_approval table for approval-signature entries specifically
+(distinct from, and in addition to, its qms_audit_trail coverage) — the two
+are not mutually exclusive, and this module's own record_type mapping above
+already includes 'risk_assessment' for its Postgres dual-write.
 """
 
 from pharmagpt.services.supabase_client import get_authenticated_client

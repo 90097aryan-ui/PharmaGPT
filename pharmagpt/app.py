@@ -39,6 +39,7 @@ from pharmagpt.routes.qms_documents  import bp as qms_documents_bp
 from pharmagpt.routes.qms_deviations import bp as qms_deviations_bp
 from pharmagpt.routes.qms_capa       import bp as qms_capa_bp
 from pharmagpt.routes.qms_change_control import bp as qms_change_control_bp
+from pharmagpt.routes.qms_market_complaint import bp as qms_market_complaint_bp
 from pharmagpt.routes.qms_feature_requests import bp as qms_feature_requests_bp
 from pharmagpt.routes.workflow_inbox  import bp as workflow_inbox_bp
 from pharmagpt.routes.equipment       import bp as equipment_bp
@@ -71,6 +72,11 @@ app.config["SESSION_COOKIE_SECURE"]   = not FLASK_DEBUG
 
 db.init_db()
 
+# In-process backup scheduler (no-op unless BACKUP_SCHEDULER_ENABLED=true and a
+# valid backup key/storage config exist) — see services/backup_scheduler.py.
+from pharmagpt.services import backup_scheduler  # noqa: E402
+backup_scheduler.start()
+
 register_auth_middleware(app)
 
 
@@ -92,6 +98,7 @@ app.register_blueprint(qms_documents_bp)
 app.register_blueprint(qms_deviations_bp)
 app.register_blueprint(qms_capa_bp)
 app.register_blueprint(qms_change_control_bp)
+app.register_blueprint(qms_market_complaint_bp)
 app.register_blueprint(qms_feature_requests_bp)
 app.register_blueprint(workflow_inbox_bp)
 app.register_blueprint(equipment_bp)
@@ -119,7 +126,16 @@ def index():
 
 @app.route("/health")
 def health():
-    """Unauthenticated liveness endpoint for deployment/uptime checks."""
+    """Unauthenticated liveness endpoint for deployment/uptime checks. Still HTTP 200 when a
+    compliance control is unavailable, but the body says so: {"status": "degraded", "degraded": [...]}
+    (e.g. the sign-off unique indexes were skipped because historical duplicates exist)."""
+    try:
+        from pharmagpt import validation_approval_database as vadb
+        missing = vadb.control_status()
+    except Exception:  # noqa: BLE001 - liveness must never fail because of this check
+        missing = []
+    if missing:
+        return jsonify({"status": "degraded", "degraded": missing})
     return jsonify({"status": "ok"})
 
 

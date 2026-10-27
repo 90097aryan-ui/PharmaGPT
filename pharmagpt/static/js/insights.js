@@ -40,11 +40,11 @@ function renderInsights(panel, data) {
 
   // File type breakdown badges
   const typeLabels = { pdf: "PDF", docx: "DOCX", xlsx: "XLSX", txt: "TXT" };
-  const typeColors = { pdf: "#C35F5B", docx: "#8A6B52", xlsx: "#5F8A61", txt: "#66615B" };
+  const typeColors = { pdf: "#DC2626", docx: "#2563EB", xlsx: "#16A34A", txt: "#64748B" };
 
   const typeBadges = Object.entries(data.file_types || {})
     .map(([ext, cnt]) => `
-      <span class="type-badge" style="background:${typeColors[ext] || "#66615B"}">
+      <span class="type-badge" style="background:${typeColors[ext] || "#64748B"}">
         ${typeLabels[ext] || ext.toUpperCase()} × ${cnt}
       </span>`)
     .join("");

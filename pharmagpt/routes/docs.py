@@ -14,6 +14,7 @@ GET    /projects/<id>/insights       aggregated document statistics
 """
 
 from pharmagpt import audit
+from pharmagpt import audit_events as evt
 from pharmagpt import database as db
 from pharmagpt import documents as doc_utils
 from pharmagpt import tenancy
@@ -169,6 +170,8 @@ def download_document(doc_id):
         return jsonify({"error": "File not found on disk"}), 404
 
     file_path = doc_utils.get_file_path(doc["project_id"], doc["stored_filename"])
+    # Wave 4B: log the download itself (not the file's contents).
+    audit.log("project_document", doc_id, evt.FILE_DOWNLOADED, detail=doc.get("original_name", ""))
     return send_file(
         file_path,
         mimetype=doc_utils.get_mime_type(doc["file_type"]),

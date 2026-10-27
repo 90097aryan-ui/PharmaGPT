@@ -32,7 +32,11 @@ def test_document_update_and_form_data_roundtrip(db_path):
     doc = qdb.create_document({"title": "Doc", "form_data": {"a": 1}}, company_id="test-company-1")
     assert doc["form_data"] == {"a": 1}
 
-    updated = qdb.update_document(doc["id"], {"status": "Effective", "form_data": {"a": 2}})
+    # CRIT-01: allow_controlled_fields=True — this test targets the
+    # repository layer directly (form_data roundtrip), not the generic-PUT
+    # security boundary itself; see test_crit01_generic_put_workflow_bypass.py.
+    updated = qdb.update_document(doc["id"], {"status": "Effective", "form_data": {"a": 2}},
+                                   allow_controlled_fields=True)
     assert updated["status"] == "Effective"
     assert updated["form_data"] == {"a": 2}
 
@@ -152,7 +156,9 @@ def test_deviation_dashboard_stats(db_path):
 
     ddb.create_deviation({"title": "A", "deviation_type": "Minor"}, company_id="test-company-1")
     d2 = ddb.create_deviation({"title": "B", "deviation_type": "Major"}, company_id="test-company-1")
-    ddb.update_deviation(d2["id"], {"status": "Closed"})
+    # CRIT-01: allow_controlled_fields=True — repository-layer setup for a
+    # dashboard-stats test, not the generic-PUT security boundary.
+    ddb.update_deviation(d2["id"], {"status": "Closed"}, allow_controlled_fields=True)
     stats = ddb.get_dashboard_stats("test-company-1")
     assert stats["total"] == 2
     assert stats["open"] == 1
@@ -237,7 +243,10 @@ def test_change_control_update_and_form_data_roundtrip(db_path):
     cc = ccdb.create_change_control({"title": "Change", "form_data": {"a": 1}}, company_id="test-company-1")
     assert cc["form_data"] == {"a": 1}
 
-    updated = ccdb.update_change_control(cc["id"], {"status": "Submitted", "form_data": {"a": 2}})
+    # CRIT-01: allow_controlled_fields=True — repository-layer test
+    # (form_data roundtrip), not the generic-PUT security boundary.
+    updated = ccdb.update_change_control(cc["id"], {"status": "Submitted", "form_data": {"a": 2}},
+                                          allow_controlled_fields=True)
     assert updated["status"] == "Submitted"
     assert updated["form_data"] == {"a": 2}
 
@@ -304,7 +313,9 @@ def test_change_control_dashboard_stats(db_path):
 
     ccdb.create_change_control({"title": "A", "change_type": "Minor"}, company_id="test-company-1")
     c2 = ccdb.create_change_control({"title": "B", "change_type": "Emergency"}, company_id="test-company-1")
-    ccdb.update_change_control(c2["id"], {"status": "Closed"})
+    # CRIT-01: allow_controlled_fields=True — repository-layer setup for a
+    # dashboard-stats test, not the generic-PUT security boundary.
+    ccdb.update_change_control(c2["id"], {"status": "Closed"}, allow_controlled_fields=True)
     stats = ccdb.get_dashboard_stats("test-company-1")
     assert stats["total"] == 2
     assert stats["open"] == 1

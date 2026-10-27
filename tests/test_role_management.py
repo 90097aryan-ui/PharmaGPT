@@ -30,6 +30,13 @@ from tests.test_security_tenant_rbac_esig import ADMIN_A, COMPANY_A, COMPANY_B, 
 
 USERS_CLIENT_PATH = "pharmagpt.routes.users.get_authenticated_client"
 USERS_SERVICE_CLIENT_PATH = "pharmagpt.routes.users.get_service_role_client"
+# Yuktav P0-4: PATCH /users/<id> now writes its audit entry fail-closed
+# (routes/users.py::_audit_fail_closed) BEFORE the mutation — every test
+# that expects the mutation to succeed must mock this client too, exactly
+# like tests/test_companies.py's AUDIT_CLIENT_PATH already does, or the
+# unmocked real Supabase call would make the fail-closed write raise and the
+# route would correctly (but, for these tests, unintentionally) 500.
+AUDIT_CLIENT_PATH = "pharmagpt.db.qms_repo.get_authenticated_client"
 
 
 def _as(tenant):
@@ -55,20 +62,26 @@ def store():
 
 def test_company_admin_reassigns_role_within_own_company(client, store):
     fake = FakeSupabaseClient(store)
-    with _as(ADMIN_A), patch(USERS_CLIENT_PATH, return_value=fake):
+    with _as(ADMIN_A), patch(USERS_CLIENT_PATH, return_value=fake), \
+         patch(AUDIT_CLIENT_PATH, return_value=fake):
         resp = client.patch("/users/user-in-a", json={"role_id": 3}, headers=AUTH_HEADERS)
 
     assert resp.status_code == 200
     assert store["users"][0]["role_id"] == 3
+    # P0-4: role_id is a privilege change — fail-closed audit entry landed.
+    assert any(e["action"] == "User updated" for e in store["audit_trail"])
 
 
 def test_cannot_set_role_to_super_admin(client, store):
     fake = FakeSupabaseClient(store)
-    with _as(ADMIN_A), patch(USERS_CLIENT_PATH, return_value=fake):
+    with _as(ADMIN_A), patch(USERS_CLIENT_PATH, return_value=fake), \
+         patch(AUDIT_CLIENT_PATH, return_value=fake):
         resp = client.patch("/users/user-in-a", json={"role_id": 1}, headers=AUTH_HEADERS)
 
     assert resp.status_code == 400
     assert store["users"][0]["role_id"] == 4  # unchanged
+    # Rejected before the fail-closed audit write is even attempted.
+    assert store.get("audit_trail", []) == []
 
 
 def test_assumed_context_super_admin_cannot_touch_another_companys_user(client, store):
@@ -81,11 +94,15 @@ def test_assumed_context_super_admin_cannot_touch_another_companys_user(client, 
         user_id=SUPER_ADMIN.user_id, email=SUPER_ADMIN.email,
         display_name=SUPER_ADMIN.display_name, role="super_admin", company_id=COMPANY_A,
     )
-    with _as(assumed_super_admin), patch(USERS_SERVICE_CLIENT_PATH, return_value=fake):
+    with _as(assumed_super_admin), patch(USERS_SERVICE_CLIENT_PATH, return_value=fake), \
+         patch(AUDIT_CLIENT_PATH, return_value=fake):
         resp = client.patch("/users/user-in-b", json={"role_id": 3}, headers=AUTH_HEADERS)
 
     assert resp.status_code == 404
     assert store["users"][1]["role_id"] == 4  # unchanged — company_id filter excluded this row
+    # P0-4: the pre-mutation existence check excluded this out-of-scope user
+    # before the fail-closed audit write was ever attempted.
+    assert store.get("audit_trail", []) == []
 
 
 def test_assumed_context_super_admin_can_touch_own_assumed_companys_user(client, store):
@@ -94,8 +111,34 @@ def test_assumed_context_super_admin_can_touch_own_assumed_companys_user(client,
         user_id=SUPER_ADMIN.user_id, email=SUPER_ADMIN.email,
         display_name=SUPER_ADMIN.display_name, role="super_admin", company_id=COMPANY_A,
     )
-    with _as(assumed_super_admin), patch(USERS_SERVICE_CLIENT_PATH, return_value=fake):
+    with _as(assumed_super_admin), patch(USERS_SERVICE_CLIENT_PATH, return_value=fake), \
+         patch(AUDIT_CLIENT_PATH, return_value=fake):
         resp = client.patch("/users/user-in-a", json={"role_id": 3}, headers=AUTH_HEADERS)
 
     assert resp.status_code == 200
     assert store["users"][0]["role_id"] == 3
+
+
+# ── P0-4: fail-closed audit policy for status/role_id changes ───────────────
+# A user's status/role_id change grants or revokes access/privilege — see
+# routes/users.py::_audit_fail_closed and FINAL REPORT §D. If the required
+# audit entry cannot be written, the mutation must NOT happen.
+
+def test_update_user_audit_failure_blocks_role_change(client, store):
+    fake = FakeSupabaseClient(store)
+    with _as(ADMIN_A), patch(USERS_CLIENT_PATH, return_value=fake), \
+         patch(AUDIT_CLIENT_PATH, side_effect=RuntimeError("audit db unreachable")):
+        resp = client.patch("/users/user-in-a", json={"role_id": 3}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 500
+    assert store["users"][0]["role_id"] == 4  # unchanged — mutation was blocked
+
+
+def test_update_user_audit_failure_blocks_deactivation(client, store):
+    fake = FakeSupabaseClient(store)
+    with _as(ADMIN_A), patch(USERS_CLIENT_PATH, return_value=fake), \
+         patch(AUDIT_CLIENT_PATH, side_effect=RuntimeError("audit db unreachable")):
+        resp = client.patch("/users/user-in-a", json={"status": "deactivated"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 500
+    assert store["users"][0]["status"] == "active"  # unchanged — mutation was blocked

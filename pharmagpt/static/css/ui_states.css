@@ -96,3 +96,17 @@
   border: 1px solid var(--border);
 }
 .ui-state-action-retry:hover { background: var(--bg-secondary); }
+
+/* ── Motion accessibility ─────────────────────────────────────────────────
+   The shimmer sweep is decorative; under reduced motion it degrades to a
+   static placeholder block, which still reads as "loading" without the
+   moving gradient. ───────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .ui-skeleton-line,
+  .ui-skeleton-avatar,
+  .ui-skeleton-cell,
+  .ui-skeleton-block {
+    animation: none;
+    background: var(--divider);
+  }
+}

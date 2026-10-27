@@ -403,8 +403,8 @@
     const card = el.closest(".dash-stat-card");
     if (card) {
       card.style.borderTop = avg >= 85
-        ? "3px solid #5F8A61"
-        : avg >= 70 ? "3px solid #C59A41" : "3px solid #A8544F";
+        ? "3px solid #16A34A"
+        : avg >= 70 ? "3px solid #D97706" : "3px solid #B91C1C";
     }
   }
 

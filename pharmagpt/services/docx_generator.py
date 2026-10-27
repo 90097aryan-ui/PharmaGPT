@@ -45,7 +45,7 @@ from typing import Optional
 
 from docx import Document
 from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING, WD_TAB_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Inches, Pt, RGBColor
@@ -226,6 +226,9 @@ class DocxGenerator:
 
     def build(self) -> bytes:
         """Assemble all sections and return DOCX as bytes."""
+        if self.data.doc_type == "SOP":
+            return self._build_sop()
+
         self._configure_page_layout()
         self._configure_styles()
         self._set_document_properties()
@@ -252,6 +255,52 @@ class DocxGenerator:
         self.doc.save(buf)
         return buf.getvalue()
 
+    def _build_sop(self) -> bytes:
+        """Yuktav Master SOP Template assembly (Document Control redesign).
+
+        Fixed master structure, single continuous document (no separate
+        cover page — the header/company/doc-number strip appears on every
+        page including page 1, per the product-owner reference layout):
+
+          1. Content            — native Word TOC field
+          2-9. Purpose … FORM/ANNEXURE — AI-authored markdown body
+               (doc_type=='SOP' prompt structure — see qms_document_prompt.py)
+          10. Revision History   — DOCX-native table (Revision No./Author/Change History)
+          11. Approvals          — DOCX-native table (Name/Department)
+
+        Revision History and Approvals are rendered from DocumentData
+        (revision_history / signatories), not from the AI markdown, so they
+        stay consistent regardless of what the model produced — same
+        separation of concerns as the generic build() path.
+        """
+        self._configure_page_layout(cover_page=False)
+        self._configure_styles()
+        self._set_document_properties()
+
+        self._add_toc_section(label="1. CONTENT")
+        self._add_page_break()
+
+        self._parse_and_add_content()
+
+        self._add_page_break()
+        self._add_revision_history_sop()
+
+        self._add_page_break()
+        self._add_approvals_sop()
+
+        if self._review_result is not None:
+            self._add_page_break()
+            self._add_review_report(self._review_result)
+
+        self._setup_header_footer_sop()
+        watermark_text = _watermark_text_for_status(self.data.document_status)
+        if watermark_text:
+            self._add_watermark(watermark_text)
+
+        buf = BytesIO()
+        self.doc.save(buf)
+        return buf.getvalue()
+
     def save(self, filename: str | None = None) -> Path:
         """Save to /generated_documents/ and return the file path."""
         if not filename:
@@ -264,7 +313,7 @@ class DocxGenerator:
 
     # ── Page layout & styles ──────────────────────────────────────────────────
 
-    def _configure_page_layout(self) -> None:
+    def _configure_page_layout(self, cover_page: bool = True) -> None:
         T = self.T
         for section in self.doc.sections:
             section.page_width    = T.PAGE_W
@@ -273,8 +322,10 @@ class DocxGenerator:
             section.bottom_margin = T.MARGIN_BOTTOM
             section.left_margin   = T.MARGIN_LEFT
             section.right_margin  = T.MARGIN_RIGHT
-            # Suppress header/footer on the cover page (first page)
-            section.different_first_page_header_footer = True
+            # Suppress header/footer on the cover page (first page). SOPs
+            # (cover_page=False) have no separate cover page — the header
+            # strip must appear from page 1.
+            section.different_first_page_header_footer = cover_page
 
     def _configure_styles(self) -> None:
         T  = self.T
@@ -510,14 +561,14 @@ class DocxGenerator:
 
     # ── Table of Contents ─────────────────────────────────────────────────────
 
-    def _add_toc_section(self) -> None:
+    def _add_toc_section(self, label: str = "TABLE OF CONTENTS") -> None:
         T   = self.T
         doc = self.doc
 
         # Section heading (not a Word Heading style — excluded from TOC itself)
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = p.add_run("TABLE OF CONTENTS")
+        run = p.add_run(label)
         run.font.name  = T.FONT_BODY
         run.font.size  = T.SIZE_H2
         run.font.bold  = True
@@ -608,6 +659,67 @@ class DocxGenerator:
 
         doc.add_paragraph()
 
+    # ── Revision History (SOP variant — Revision No. / Author / Change History) ─
+
+    def _add_revision_history_sop(self) -> None:
+        T   = self.T
+        doc = self.doc
+        d   = self.data
+
+        self._add_section_heading("10. REVISION HISTORY")
+
+        headers = ["Revision No.", "Author", "Change History"]
+        history = d.revision_history or [
+            RevisionEntry(
+                revision    = d.revision_number or "1.0",
+                date        = d.generated_date,
+                description = "Initial Release",
+                prepared_by = d.prepared_by or "",
+            )
+        ]
+
+        entries: list[RevisionEntry] = []
+        for h in history:
+            if isinstance(h, dict):
+                entries.append(RevisionEntry(**{k: v for k, v in h.items()
+                                                if k in RevisionEntry.__dataclass_fields__}))
+            elif isinstance(h, RevisionEntry):
+                entries.append(h)
+
+        tbl = doc.add_table(rows=len(entries) + 1, cols=3)
+        tbl.alignment = WD_TABLE_ALIGNMENT.LEFT
+        tbl.style     = "Table Grid"
+        _set_table_width(tbl, Inches(6.5))
+
+        hr = tbl.rows[0]
+        _set_repeat_header(hr)
+        for ci, hdr in enumerate(headers):
+            c = hr.cells[ci]
+            c.text = ""
+            rn = c.paragraphs[0].add_run(hdr)
+            rn.font.name      = T.FONT_BODY
+            rn.font.size      = T.SIZE_TABLE
+            rn.font.bold      = True
+            rn.font.color.rgb = T.WHITE
+            _set_cell_bg(c, T.HEX_NAVY)
+            c.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+        for ri, entry in enumerate(entries):
+            row    = tbl.rows[ri + 1]
+            values = [entry.revision, entry.prepared_by, entry.description]
+            bg = T.HEX_LIGHT_GRAY if ri % 2 == 0 else "FFFFFF"
+            for ci, val in enumerate(values):
+                c = row.cells[ci]
+                c.text = ""
+                rn = c.paragraphs[0].add_run(str(val))
+                rn.font.name      = T.FONT_BODY
+                rn.font.size      = T.SIZE_TABLE
+                rn.font.color.rgb = T.BLACK
+                _set_cell_bg(c, bg)
+                c.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+        doc.add_paragraph()
+
     # ── Approval Page ─────────────────────────────────────────────────────────
 
     def _add_approval_page(self) -> None:
@@ -680,6 +792,65 @@ class DocxGenerator:
                     c.paragraphs[0].paragraph_format.space_before = Pt(14)
                     c.paragraphs[0].paragraph_format.space_after  = Pt(14)
                 _set_cell_bg(c, bg)
+
+        doc.add_paragraph()
+
+    # ── Approvals (SOP variant — Name / Department) ──────────────────────────
+
+    def _add_approvals_sop(self) -> None:
+        """Static print rendering of who approved this SOP (Name / Department).
+
+        This is a presentation table only — the actual approval decision,
+        identity verification, and audit record are enforced by the existing
+        Document Control approval workflow and e-signature gate
+        (services/approval_engine.py, services/esignature_service.py); this
+        method never records or checks an approval, it only prints the
+        already-recorded signatories for the exported document.
+        """
+        T   = self.T
+        doc = self.doc
+        d   = self.data
+
+        self._add_section_heading("11. APPROVALS")
+
+        rows: list[tuple[str, str]] = []
+        for s in (d.signatories or [{"name": "", "department": ""}]):
+            if isinstance(s, dict):
+                rows.append((s.get("name", ""), s.get("department", "")))
+            elif isinstance(s, Signatory):
+                rows.append((s.name, s.designation or s.role))
+
+        headers = ["Name", "Department"]
+        tbl = doc.add_table(rows=len(rows) + 1, cols=2)
+        tbl.alignment = WD_TABLE_ALIGNMENT.LEFT
+        tbl.style     = "Table Grid"
+        _set_table_width(tbl, Inches(6.5))
+
+        hr = tbl.rows[0]
+        _set_repeat_header(hr)
+        for ci, hdr in enumerate(headers):
+            c = hr.cells[ci]
+            c.text = ""
+            rn = c.paragraphs[0].add_run(hdr)
+            rn.font.name      = T.FONT_BODY
+            rn.font.size      = T.SIZE_TABLE
+            rn.font.bold      = True
+            rn.font.color.rgb = T.WHITE
+            _set_cell_bg(c, T.HEX_NAVY)
+            c.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+        for ri, (name, department) in enumerate(rows):
+            row = tbl.rows[ri + 1]
+            bg  = T.HEX_LIGHT_GRAY if ri % 2 == 0 else "FFFFFF"
+            for ci, val in enumerate([name, department]):
+                c = row.cells[ci]
+                c.text = ""
+                rn = c.paragraphs[0].add_run(val)
+                rn.font.name      = T.FONT_BODY
+                rn.font.size      = T.SIZE_TABLE
+                rn.font.color.rgb = T.BLACK
+                _set_cell_bg(c, bg)
+                c.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
         doc.add_paragraph()
 
@@ -1195,6 +1366,109 @@ class DocxGenerator:
 
         # ── First-page header/footer: leave empty (clean cover page) ──────────
         # (already set by different_first_page_header_footer = True in _configure_page_layout)
+
+    def _setup_header_footer_sop(self) -> None:
+        """Yuktav Master SOP Template header/footer — reference layout:
+
+            [Logo] | [SOP TITLE .......................... ]
+            [Co.]  | SOP NO: <doc_number>  | Version No: <version>
+            [Co.]  | Effective Date: <date> | Page <n> of <m>
+
+            Footer: <SOP No.>                          Version No: <version>
+
+        Every field below reads from DocumentData — nothing here is
+        hard-coded per client; company_name/logo_path are populated by the
+        caller (see routes/qms_documents.py export_docx()) from the
+        document's own record and, where available, company branding.
+        """
+        T = self.T
+        d = self.data
+        section = self.doc.sections[0]
+
+        def _fill(cell, text, *, size=T.SIZE_CAPTION, bold=False, color=None,
+                   align=WD_ALIGN_PARAGRAPH.LEFT) -> None:
+            cell.text = ""
+            p = cell.paragraphs[0]
+            p.alignment = align
+            r = p.add_run(text)
+            r.font.name      = T.FONT_BODY
+            r.font.size      = size
+            r.font.bold      = bold
+            r.font.color.rgb = color or T.BLACK
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+        # ── Header ────────────────────────────────────────────────────────────
+        header = section.header
+        for p in header.paragraphs:
+            p._element.getparent().remove(p._element)
+
+        htbl = header.add_table(rows=3, cols=3, width=Inches(6.5))
+        htbl.style = "Table Grid"
+        _set_table_width(htbl, Inches(6.5))
+        htbl.alignment = WD_TABLE_ALIGNMENT.LEFT
+
+        # Row 0: Logo | SOP Title (spans cols 1-2)
+        logo_cell = htbl.cell(0, 0)
+        logo_cell.text = ""
+        if d.logo_path and os.path.isfile(d.logo_path):
+            try:
+                lp = logo_cell.paragraphs[0]
+                lp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                lr = lp.add_run()
+                lr.add_picture(d.logo_path, height=Inches(0.45))
+            except Exception:
+                _fill(logo_cell, "[Logo]", color=T.GRAY, align=WD_ALIGN_PARAGRAPH.CENTER)
+        else:
+            _fill(logo_cell, "[Company Logo]", color=T.GRAY, align=WD_ALIGN_PARAGRAPH.CENTER)
+
+        title_cell = htbl.cell(0, 1)
+        title_cell.merge(htbl.cell(0, 2))
+        _fill(title_cell, d.doc_title or "SOP TITLE", size=T.SIZE_H3, bold=True,
+              color=T.NAVY, align=WD_ALIGN_PARAGRAPH.CENTER)
+
+        # Rows 1-2, col 0: Company Name (vertically merged)
+        company_cell = htbl.cell(1, 0)
+        company_cell.merge(htbl.cell(2, 0))
+        _fill(company_cell, d.company_name or "Company Name", bold=True,
+              color=T.NAVY, align=WD_ALIGN_PARAGRAPH.CENTER)
+
+        _fill(htbl.cell(1, 1), f"SOP NO: {d.protocol_number or '—'}")
+        _fill(htbl.cell(1, 2), f"Version No: {d.revision_number or '—'}")
+        _fill(htbl.cell(2, 1), f"Effective Date: {d.effective_date or d.generated_date}")
+
+        page_cell = htbl.cell(2, 2)
+        page_cell.text = ""
+        pp = page_cell.paragraphs[0]
+        pre = pp.add_run("Page ")
+        pre.font.name = T.FONT_BODY
+        pre.font.size = T.SIZE_CAPTION
+        pre.font.color.rgb = T.BLACK
+        _add_page_field(pp, "PAGE")
+        mid = pp.add_run(" of ")
+        mid.font.name = T.FONT_BODY
+        mid.font.size = T.SIZE_CAPTION
+        mid.font.color.rgb = T.BLACK
+        _add_page_field(pp, "NUMPAGES")
+
+        _add_paragraph_border_bottom(header.add_paragraph(), T.HEX_MID_GRAY)
+
+        # ── Footer: SOP No. (left)  ...  Version No: X (right) ─────────────────
+        footer = section.footer
+        for p in footer.paragraphs:
+            p._element.getparent().remove(p._element)
+
+        fp = footer.add_paragraph()
+        fp.paragraph_format.tab_stops.add_tab_stop(Inches(6.5), WD_TAB_ALIGNMENT.RIGHT)
+        fr1 = fp.add_run(d.protocol_number or "")
+        fr1.font.name      = T.FONT_BODY
+        fr1.font.size      = T.SIZE_CAPTION
+        fr1.font.color.rgb = T.GRAY
+        fr2 = fp.add_run(f"\tVersion No: {d.revision_number or ''}")
+        fr2.font.name      = T.FONT_BODY
+        fr2.font.size      = T.SIZE_CAPTION
+        fr2.font.color.rgb = T.GRAY
+
+        _add_paragraph_border_top(fp, T.HEX_MID_GRAY)
 
     # ── Status watermark ──────────────────────────────────────────────────────
 

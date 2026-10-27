@@ -38,11 +38,13 @@ import logging
 from flask import Blueprint, g, jsonify, request, Response, stream_with_context
 
 from pharmagpt import audit
+from pharmagpt import audit_events as evt
 from pharmagpt import config
 from pharmagpt import risk_database as rdb
 from pharmagpt import qms_database as qmsdb
 from pharmagpt import tenancy
 from pharmagpt.auth.decorators import extract_bearer_token, require_role
+from pharmagpt.auth.module_access import require_business_permission
 from pharmagpt.auth.workspace_access import require_workspace_access
 from pharmagpt.db import qms_repo
 from pharmagpt.services import esignature_service
@@ -181,6 +183,18 @@ def update_assessment(aid):
                            reason="Closed risk assessments are immutable")
         return jsonify({"error": "This risk assessment is Closed and cannot be edited"}), 409
     data = request.get_json() or {}
+    # CRIT-01 (Security Audit remediation): status/approver-adjacent fields
+    # must only change through the governed workflow (POST /<id>/approval),
+    # never a raw field PUT. Repository-layer enforcement (risk_database.
+    # RISK_ASSESSMENT_CONTROLLED_FIELDS) is the actual security boundary —
+    # this check exists for a clear 400 instead of a raised-exception 500 if
+    # it's ever reached.
+    blocked = rdb.RISK_ASSESSMENT_CONTROLLED_FIELDS & data.keys()
+    if blocked:
+        return jsonify({
+            "error": f"{', '.join(sorted(blocked))} cannot be changed via PUT — use "
+                     "POST /risk/assessments/<id>/approval to move the assessment through its lifecycle",
+        }), 400
     updated = rdb.update_assessment(aid, data)
     _dual_write_update(updated)
     audit.log("risk_assessment", aid, "Updated", old=existing, new=updated)
@@ -189,6 +203,7 @@ def update_assessment(aid):
 
 @bp.route("/assessments/<int:aid>", methods=["DELETE"])
 @require_role("company_admin")
+@require_business_permission("Validation", "Delete")
 def delete_assessment(aid):
     existing = tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id)
     if not existing:
@@ -219,7 +234,9 @@ def save_items(aid):
     # Auto-update status to In Review if was Draft and has items
     a = rdb.get_assessment(aid)
     if a and a.get("status") == "Draft" and saved:
-        rdb.update_assessment(aid, {"status": "In Progress"})
+        # CRIT-01: allow_controlled_fields=True — an existing, legitimate
+        # system-triggered auto-transition (not a raw client field).
+        rdb.update_assessment(aid, {"status": "In Progress"}, allow_controlled_fields=True)
     return jsonify(saved)
 
 
@@ -290,7 +307,12 @@ def review_assessment(aid):
     """Run AI review on an assessment. Returns review data."""
     if not tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id):
         return jsonify({"error": "Not found"}), 404
-    review = svc.ai_review_assessment(aid)
+    try:
+        review = svc.ai_review_assessment(aid)
+    except Exception as exc:
+        audit.log_failure("risk_assessment", aid, evt.RISK_AI_ASSIST, reason=f"AI review failed: {exc}")
+        raise
+    audit.log("risk_assessment", aid, evt.RISK_AI_ASSIST, detail="AI review generated")
     return jsonify(review)
 
 
@@ -302,7 +324,12 @@ def suggest_mitigations(aid):
     if not a:
         return jsonify({"error": "Not found"}), 404
     item_data = request.get_json() or {}
-    suggestions = svc.suggest_mitigations(item_data, a.get("methodology", "FMEA"), a)
+    try:
+        suggestions = svc.suggest_mitigations(item_data, a.get("methodology", "FMEA"), a)
+    except Exception as exc:
+        audit.log_failure("risk_assessment", aid, evt.RISK_AI_ASSIST, reason=f"Mitigation suggestion failed: {exc}")
+        raise
+    audit.log("risk_assessment", aid, evt.RISK_AI_ASSIST, detail="Mitigation suggestions generated")
     return jsonify(suggestions)
 
 
@@ -335,6 +362,7 @@ def get_approval(aid):
 
 @bp.route("/assessments/<int:aid>/approval", methods=["POST"])
 @require_role("company_admin", "reviewer_qa")
+@require_business_permission("Validation", "Approve")
 def add_approval(aid):
     a = tenancy.scoped_or_none(rdb.get_assessment(aid), g.tenant.company_id)
     if not a:
@@ -353,6 +381,7 @@ def add_approval(aid):
         audit.log_failure("risk_assessment", aid, f"Approval action blocked ({action_name}) — e-signature failed", reason=str(exc))
         return jsonify({"error": str(exc)}), 401
     except esignature_service.ESignatureError as exc:
+        audit.log_failure("risk_assessment", aid, evt.ESIGNATURE_FAILURE, reason=str(exc))
         return jsonify({"error": str(exc)}), 400
 
     # Update assessment status based on approval action
@@ -369,7 +398,10 @@ def add_approval(aid):
             lifecycle_engine.validate_transition("RISK_ASSESSMENT", a["status"], new_status)
         except lifecycle_engine.InvalidTransitionError as exc:
             return jsonify({"error": str(exc)}), 409
-        rdb.update_assessment(aid, {"status": new_status})
+        # CRIT-01: allow_controlled_fields=True — this is the e-signed
+        # (require_esignature above), lifecycle_engine-validated outcome of
+        # a real approval action, not a raw client field.
+        rdb.update_assessment(aid, {"status": new_status}, allow_controlled_fields=True)
 
     # If approved, publish to library
     if action_name == "Approved":
@@ -398,6 +430,7 @@ def add_approval(aid):
 
 @bp.route("/assessments/<int:aid>/publish", methods=["POST"])
 @require_role("company_admin", "reviewer_qa")
+@require_business_permission("Validation", "Approve")
 def publish_to_library(aid):
     """Phase F fix (C7): this endpoint previously had no role guard and no
     status check at all, letting any authenticated `user` publish an
@@ -466,6 +499,8 @@ def export_docx(aid):
     filename = f"Risk_Assessment_{aid}_{a.get('title','').replace(' ','_')[:30]}.docx"
     from flask import send_file
     import io
+    # Wave 4B: log the export itself (not the file's contents).
+    audit.log("risk_assessment", aid, evt.RISK_EXPORTED, detail=filename)
     return send_file(
         io.BytesIO(docx_bytes),
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
